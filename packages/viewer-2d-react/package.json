@@ -51,7 +51,6 @@
   },
   "homepage": "https://github.com/hyperdrive-technology/starfleet/tree/main/packages/viewer-2d-react#readme",
   "dependencies": {
-    "@starfleet/sdk": "workspace:*",
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
     "reactflow": "^11.0.0",

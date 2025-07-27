@@ -1,22 +1,28 @@
 /**
- * Hook for accessing Starfleet context and state
+ * Hook for accessing Starfleet scene state
  */
 
-import { useContext } from 'react';
-import type { StarfleetStore } from '../types';
+import React, { useContext, createContext, type ReactNode } from 'react';
+import type { SceneFile } from '../types';
 
-// Create a placeholder context for now - will be implemented with the provider
-export const StarfleetContext = {} as React.Context<StarfleetStore>;
+interface StarfleetContextValue {
+  scene: SceneFile | null;
+}
 
-/**
- * Hook to access the Starfleet store and actions
- */
-export function useStarfleet(): StarfleetStore {
-  const store = useContext(StarfleetContext);
+const StarfleetContext = createContext<StarfleetContextValue | null>(null);
 
-  if (!store) {
+export function StarfleetProvider({ children, scene }: { children: ReactNode; scene: SceneFile }) {
+  return React.createElement(
+    StarfleetContext.Provider,
+    { value: { scene } },
+    children
+  );
+}
+
+export function useStarfleet() {
+  const context = useContext(StarfleetContext);
+  if (!context) {
     throw new Error('useStarfleet must be used within a StarfleetProvider');
   }
-
-  return store;
+  return context;
 }

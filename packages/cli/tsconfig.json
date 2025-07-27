@@ -27,7 +27,6 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": false,
-    "incremental": true,
     "preserveWatchOutput": true,
     "pretty": true
   },

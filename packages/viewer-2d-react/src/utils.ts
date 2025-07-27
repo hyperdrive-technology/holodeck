@@ -2,17 +2,18 @@
  * Utility functions for the 2D React viewer
  */
 
-import type { SceneEdge, SceneFile, SceneNode } from '@starfleet/sdk';
 import dagre from 'dagre';
-import type { Position } from 'reactflow';
-import { DEFAULT_LAYOUT_CONFIG, NODE_COLORS, NODE_SIZES } from './constants';
-import type {
+import type { Edge, Node } from 'reactflow';
+import type { 
+  SceneFile, 
+  SceneNode, 
+  SceneEdge, 
+  ReactFlowNode, 
+  ReactFlowEdge, 
   LayoutConfig,
-  ReactFlowEdge,
-  ReactFlowNode,
-  ViewportBounds,
-  ViewportState,
+  ViewportBounds 
 } from './types';
+import { NODE_TYPES, NODE_COLORS, NODE_SIZES } from './constants';
 
 /**
  * Convert a SceneFile to ReactFlow nodes and edges
@@ -21,47 +22,32 @@ export function sceneFileToReactFlow(scene: SceneFile): {
   nodes: ReactFlowNode[];
   edges: ReactFlowEdge[];
 } {
-  const nodes = scene.scene.nodes.map((sceneNode) => {
-    const reactFlowNode: ReactFlowNode = {
-      id: sceneNode.id,
-      type: sceneNode.type,
-      position: {
-        x: sceneNode.transform.position.x,
-        y: sceneNode.transform.position.y,
-      },
-      data: {
-        sceneNode,
-        type: sceneNode.type,
-        label: sceneNode.name,
-        status: sceneNode.status,
-        metrics: sceneNode.metrics,
-      },
-      draggable: true,
-      selectable: true,
-    };
+  const nodes: ReactFlowNode[] = scene.scene.nodes.map((node) => ({
+    id: node.id,
+    type: getNodeType(node.type),
+    position: { x: node.position.x, y: node.position.y },
+    data: {
+      sceneNode: node,
+      type: node.type,
+      label: getNodeLabel(node),
+      status: node.properties?.status || 'active',
+      metrics: node.properties?.metrics
+    }
+  }));
 
-    return reactFlowNode;
-  });
-
-  const edges = scene.scene.edges.map((sceneEdge) => {
-    const reactFlowEdge: ReactFlowEdge = {
-      id: sceneEdge.id,
-      source: sceneEdge.source,
-      target: sceneEdge.target,
-      type: sceneEdge.type || 'default',
-      data: {
-        sceneEdge,
-        type: sceneEdge.type || 'default',
-        label: sceneEdge.id,
-        status: undefined,
-        metrics: sceneEdge.metrics,
-      },
-      animated: false,
-      selectable: true,
-    };
-
-    return reactFlowEdge;
-  });
+  const edges: ReactFlowEdge[] = scene.scene.edges.map((edge) => ({
+    id: edge.id,
+    source: edge.from,
+    target: edge.to,
+    type: getEdgeType(edge.type),
+    data: {
+      sceneEdge: edge,
+      type: edge.type || 'connection',
+      label: getEdgeLabel(edge),
+      status: edge.properties?.status || 'active',
+      metrics: edge.properties?.metrics
+    }
+  }));
 
   return { nodes, edges };
 }
@@ -74,176 +60,196 @@ export function reactFlowToSceneFile(
   edges: ReactFlowEdge[],
   metadata: SceneFile['metadata']
 ): SceneFile {
-  const sceneNodes: SceneNode[] = nodes.map((node) => {
-    const sceneNode = node.data.sceneNode;
-    return {
-      ...sceneNode,
-      transform: {
-        ...sceneNode.transform,
-        position: {
-          x: node.position.x,
-          y: node.position.y,
-          z: sceneNode.transform.position.z,
-        },
-      },
-    };
-  });
+  const sceneNodes: SceneNode[] = nodes.map((node) => ({
+    ...node.data.sceneNode,
+    position: {
+      x: node.position.x,
+      y: node.position.y,
+      ...(node.data.sceneNode.position.z !== undefined && { z: node.data.sceneNode.position.z })
+    }
+  }));
 
   const sceneEdges: SceneEdge[] = edges.map((edge) => edge.data.sceneEdge);
 
   return {
-    version: '1.0.0',
     metadata,
     scene: {
       nodes: sceneNodes,
-      edges: sceneEdges,
-    },
+      edges: sceneEdges
+    }
   };
 }
 
 /**
- * Apply auto-layout to nodes using dagre
+ * Apply automatic layout to a scene
  */
 export function autoLayoutScene(
+  scene: SceneFile,
+  layoutType: string = 'dagre',
+  config: LayoutConfig = {}
+): SceneFile {
+  const { nodes, edges } = sceneFileToReactFlow(scene);
+  
+  let layoutedNodes: ReactFlowNode[];
+  
+  if (layoutType === 'dagre') {
+    layoutedNodes = applyDagreLayout(nodes, edges, config);
+  } else if (layoutType === 'force') {
+    layoutedNodes = applyForceLayout(nodes, edges, config);
+  } else {
+    // Manual layout - keep existing positions
+    layoutedNodes = nodes;
+  }
+
+  return reactFlowToSceneFile(layoutedNodes, edges, scene.metadata);
+}
+
+/**
+ * Apply Dagre hierarchical layout
+ */
+function applyDagreLayout(
   nodes: ReactFlowNode[],
   edges: ReactFlowEdge[],
-  config: LayoutConfig = DEFAULT_LAYOUT_CONFIG
+  config: LayoutConfig
 ): ReactFlowNode[] {
-  const dagreGraph = new dagre.graphlib.Graph();
-  dagreGraph.setDefaultEdgeLabel(() => ({}));
-
-  const { nodeSpacing = 100, rankSpacing = 150, direction = 'TB' } = config;
-
-  dagreGraph.setGraph({
-    rankdir: direction,
-    nodesep: nodeSpacing,
-    ranksep: rankSpacing,
-    align: config.align,
+  const g = new dagre.graphlib.Graph();
+  
+  g.setDefaultEdgeLabel(() => ({}));
+  g.setGraph({
+    rankdir: config.direction || 'TB',
+    ranksep: config.rankSpacing || 100,
+    nodesep: config.nodeSpacing || 80,
+    align: config.align || 'UL'
   });
 
-  // Add nodes to dagre graph
+  // Add nodes to graph
   nodes.forEach((node) => {
-    const nodeSize = getNodeSize(node.data.sceneNode);
-    dagreGraph.setNode(node.id, {
-      width: nodeSize.width,
-      height: nodeSize.height,
-    });
+    const size = getNodeSize(node.data.type);
+    g.setNode(node.id, { width: size.width, height: size.height });
   });
 
-  // Add edges to dagre graph
+  // Add edges to graph
   edges.forEach((edge) => {
-    dagreGraph.setEdge(edge.source, edge.target);
+    g.setEdge(edge.source, edge.target);
   });
 
   // Run layout
-  dagre.layout(dagreGraph);
+  dagre.layout(g);
 
-  // Apply layout positions
+  // Apply positions
   return nodes.map((node) => {
-    const nodeWithPosition = dagreGraph.node(node.id);
-    const nodeSize = getNodeSize(node.data.sceneNode);
-
+    const graphNode = g.node(node.id);
     return {
       ...node,
       position: {
-        x: nodeWithPosition.x - nodeSize.width / 2,
-        y: nodeWithPosition.y - nodeSize.height / 2,
-      },
+        x: graphNode.x - graphNode.width / 2,
+        y: graphNode.y - graphNode.height / 2
+      }
     };
   });
 }
 
 /**
- * Get node size based on type and content
+ * Apply force-directed layout (simplified implementation)
  */
-export function getNodeSize(node: SceneNode): {
-  width: number;
-  height: number;
-} {
-  // Default size based on node type
-  switch (node.type) {
-    case 'server':
-    case 'database':
-    case 'storage':
-      return NODE_SIZES.LARGE;
-    case 'function':
-    case 'queue':
-    case 'cache':
-      return NODE_SIZES.MEDIUM;
-    case 'network':
-    case 'load-balancer':
-      return NODE_SIZES.EXTRA_LARGE;
-    default:
-      return NODE_SIZES.MEDIUM;
-  }
-}
+function applyForceLayout(
+  nodes: ReactFlowNode[],
+  edges: ReactFlowEdge[],
+  config: LayoutConfig
+): ReactFlowNode[] {
+  const forceConfig = config.forceConfig || {};
+  const iterations = forceConfig.iterations || 100;
+  const strength = forceConfig.strength || -1000;
+  const distance = forceConfig.distance || 150;
 
-/**
- * Get node color based on type and status
- */
-export function getNodeColor(node: SceneNode): string {
-  // Status color takes precedence
-  if (node.status) {
-    switch (node.status) {
-      case 'healthy':
-        return NODE_COLORS.HEALTHY;
-      case 'warning':
-        return NODE_COLORS.WARNING;
-      case 'critical':
-        return NODE_COLORS.CRITICAL;
-      default:
-        return NODE_COLORS.UNKNOWN;
+  // Simple force-directed layout simulation
+  let layoutNodes = nodes.map(node => ({
+    ...node,
+    position: {
+      x: node.position.x || Math.random() * 800,
+      y: node.position.y || Math.random() * 600
+    },
+    vx: 0,
+    vy: 0
+  }));
+
+  for (let i = 0; i < iterations; i++) {
+    // Repulsion between all nodes
+    for (let j = 0; j < layoutNodes.length; j++) {
+      for (let k = j + 1; k < layoutNodes.length; k++) {
+        const nodeA = layoutNodes[j];
+        const nodeB = layoutNodes[k];
+        
+        const dx = nodeB.position.x - nodeA.position.x;
+        const dy = nodeB.position.y - nodeA.position.y;
+        const distance = Math.sqrt(dx * dx + dy * dy) || 1;
+        
+        const force = strength / (distance * distance);
+        const fx = (dx / distance) * force;
+        const fy = (dy / distance) * force;
+        
+        nodeA.vx -= fx;
+        nodeA.vy -= fy;
+        nodeB.vx += fx;
+        nodeB.vy += fy;
+      }
     }
+
+    // Attraction along edges
+    edges.forEach((edge) => {
+      const sourceNode = layoutNodes.find(n => n.id === edge.source);
+      const targetNode = layoutNodes.find(n => n.id === edge.target);
+      
+      if (sourceNode && targetNode) {
+        const dx = targetNode.position.x - sourceNode.position.x;
+        const dy = targetNode.position.y - sourceNode.position.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        
+        const force = (dist - distance) * 0.1;
+        const fx = (dx / dist) * force;
+        const fy = (dy / dist) * force;
+        
+        sourceNode.vx += fx;
+        sourceNode.vy += fy;
+        targetNode.vx -= fx;
+        targetNode.vy -= fy;
+      }
+    });
+
+    // Apply velocities with damping
+    layoutNodes.forEach((node) => {
+      node.position.x += node.vx * 0.1;
+      node.position.y += node.vy * 0.1;
+      node.vx *= 0.8;
+      node.vy *= 0.8;
+    });
   }
 
-  // Type-based color
-  switch (node.type) {
-    case 'server':
-    case 'aws-ec2':
-      return NODE_COLORS.SERVER;
-    case 'database':
-    case 'aws-rds':
-      return NODE_COLORS.DATABASE;
-    case 'network':
-    case 'aws-vpc':
-      return NODE_COLORS.NETWORK;
-    case 'storage':
-    case 'aws-s3':
-      return NODE_COLORS.STORAGE;
-    case 'function':
-    case 'aws-lambda':
-      return NODE_COLORS.FUNCTION;
-    case 'queue':
-    case 'aws-sqs':
-      return NODE_COLORS.QUEUE;
-    default:
-      return NODE_COLORS.DEFAULT;
-  }
+  return layoutNodes.map(({ vx, vy, ...node }) => node);
 }
 
 /**
- * Calculate viewport bounds that fit all nodes
+ * Calculate viewport bounds for a set of nodes
  */
-export function calculateViewportBounds(
-  nodes: ReactFlowNode[]
-): ViewportBounds {
+export function calculateViewportBounds(nodes: ReactFlowNode[]): ViewportBounds {
   if (nodes.length === 0) {
     return { x: 0, y: 0, width: 800, height: 600 };
   }
 
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
+  let minX = Infinity, minY = Infinity;
+  let maxX = -Infinity, maxY = -Infinity;
 
   nodes.forEach((node) => {
-    const nodeSize = getNodeSize(node.data.sceneNode);
-    const { x, y } = node.position;
+    const size = getNodeSize(node.data.type);
+    const x1 = node.position.x;
+    const y1 = node.position.y;
+    const x2 = x1 + size.width;
+    const y2 = y1 + size.height;
 
-    minX = Math.min(minX, x);
-    minY = Math.min(minY, y);
-    maxX = Math.max(maxX, x + nodeSize.width);
-    maxY = Math.max(maxY, y + nodeSize.height);
+    minX = Math.min(minX, x1);
+    minY = Math.min(minY, y1);
+    maxX = Math.max(maxX, x2);
+    maxY = Math.max(maxY, y2);
   });
 
   const padding = 50;
@@ -251,114 +257,57 @@ export function calculateViewportBounds(
     x: minX - padding,
     y: minY - padding,
     width: maxX - minX + 2 * padding,
-    height: maxY - minY + 2 * padding,
+    height: maxY - minY + 2 * padding
   };
 }
 
 /**
- * Calculate viewport to fit bounds
+ * Get the ReactFlow node type for a scene node type
  */
-export function calculateFitViewport(
-  bounds: ViewportBounds,
-  containerWidth: number,
-  containerHeight: number
-): ViewportState {
-  const scaleX = containerWidth / bounds.width;
-  const scaleY = containerHeight / bounds.height;
-  const scale = Math.min(scaleX, scaleY, 1); // Don't zoom in beyond 1x
-
-  return {
-    x: (containerWidth - bounds.width * scale) / 2 - bounds.x * scale,
-    y: (containerHeight - bounds.height * scale) / 2 - bounds.y * scale,
-    zoom: scale,
-  };
+function getNodeType(sceneNodeType: string): string {
+  return NODE_TYPES[sceneNodeType as keyof typeof NODE_TYPES] || NODE_TYPES.default;
 }
 
 /**
- * Get position for a new node to avoid overlaps
+ * Get the ReactFlow edge type for a scene edge type
  */
-export function getAvailablePosition(
-  nodes: ReactFlowNode[],
-  preferredPosition?: Position
-): Position {
-  const defaultPosition = preferredPosition || { x: 100, y: 100 };
-
-  if (nodes.length === 0) {
-    return defaultPosition;
-  }
-
-  // Simple grid placement
-  const gridSize = 200;
-  const cols = Math.ceil(Math.sqrt(nodes.length + 1));
-  const row = Math.floor(nodes.length / cols);
-  const col = nodes.length % cols;
-
-  return {
-    x: defaultPosition.x + col * gridSize,
-    y: defaultPosition.y + row * gridSize,
-  };
+function getEdgeType(sceneEdgeType?: string): string {
+  if (!sceneEdgeType) return 'default';
+  return sceneEdgeType;
 }
 
 /**
- * Check if two nodes are connected
+ * Get display label for a node
  */
-export function areNodesConnected(
-  nodeId1: string,
-  nodeId2: string,
-  edges: ReactFlowEdge[]
-): boolean {
-  return edges.some(
-    (edge) =>
-      (edge.source === nodeId1 && edge.target === nodeId2) ||
-      (edge.source === nodeId2 && edge.target === nodeId1)
-  );
+function getNodeLabel(node: SceneNode): string {
+  if (node.properties?.name) return node.properties.name;
+  if (node.properties?.label) return node.properties.label;
+  if (node.metadata?.name) return node.metadata.name;
+  return node.id;
 }
 
 /**
- * Get all connected nodes for a given node
+ * Get display label for an edge
  */
-export function getConnectedNodes(
-  nodeId: string,
-  edges: ReactFlowEdge[]
-): string[] {
-  const connected = new Set<string>();
-
-  edges.forEach((edge) => {
-    if (edge.source === nodeId) {
-      connected.add(edge.target);
-    } else if (edge.target === nodeId) {
-      connected.add(edge.source);
-    }
-  });
-
-  return Array.from(connected);
+function getEdgeLabel(edge: SceneEdge): string | undefined {
+  if (edge.properties?.label) return edge.properties.label;
+  if (edge.properties?.name) return edge.properties.name;
+  return undefined;
 }
 
 /**
- * Deep clone an object
+ * Get node size based on type
  */
-export function deepClone<T>(obj: T): T {
-  if (obj === null || typeof obj !== 'object') {
-    return obj;
-  }
+function getNodeSize(nodeType: string): { width: number; height: number } {
+  // Return medium size for all nodes by default
+  // Can be enhanced to return different sizes based on type
+  return NODE_SIZES.medium;
+}
 
-  if (obj instanceof Date) {
-    return new Date(obj.getTime()) as unknown as T;
-  }
-
-  if (obj instanceof Array) {
-    return obj.map((item) => deepClone(item)) as unknown as T;
-  }
-
-  if (typeof obj === 'object') {
-    const cloned = {} as T;
-    for (const key in obj) {
-      if (obj.hasOwnProperty(key)) {
-        cloned[key] = deepClone(obj[key]);
-      }
-    }
-    return cloned;
-  }
-
-  return obj;
+/**
+ * Get node color based on type
+ */
+export function getNodeColor(nodeType: string): string {
+  const mappedType = NODE_TYPES[nodeType as keyof typeof NODE_TYPES] || NODE_TYPES.default;
+  return NODE_COLORS[mappedType as keyof typeof NODE_COLORS] || NODE_COLORS.default;
 }

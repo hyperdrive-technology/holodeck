@@ -2,7 +2,28 @@
  * Type definitions for the 2D React viewer
  */
 
-import type { SceneEdge, SceneFile, SceneNode } from '@starfleet/sdk';
+// Local SDK types (until package is available)
+export interface SceneFile {
+  metadata: { name: string; version: string; description?: string; author?: string };
+  scene: { nodes: SceneNode[]; edges: SceneEdge[] };
+}
+
+export interface SceneNode {
+  id: string;
+  type: string;
+  position: { x: number; y: number; z?: number };
+  properties?: Record<string, any>;
+  metadata?: Record<string, any>;
+}
+
+export interface SceneEdge {
+  id: string;
+  from: string;
+  to: string;
+  type?: string;
+  properties?: Record<string, any>;
+  metadata?: Record<string, any>;
+}
 import type { ComponentType, CSSProperties, ReactNode } from 'react';
 import type { Edge, Node, ReactFlowInstance } from 'reactflow';
 
@@ -156,7 +177,11 @@ export interface ReactFlowNode extends Node {
   data: ReactFlowNodeData;
 }
 
-export interface ReactFlowEdge extends Edge {
+export interface ReactFlowEdge {
+  id: string;
+  source: string;
+  target: string;
+  type?: string;
   data: ReactFlowEdgeData;
 }
 
