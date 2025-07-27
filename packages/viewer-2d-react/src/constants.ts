@@ -2,121 +2,104 @@
  * Constants for the 2D React viewer
  */
 
-// Node type constants
+// Default node types mapping
 export const NODE_TYPES = {
-  // Infrastructure nodes
-  SERVER: 'server',
-  DATABASE: 'database',
-  NETWORK: 'network',
-  STORAGE: 'storage',
-  LOAD_BALANCER: 'load-balancer',
-  CONTAINER: 'container',
-  SERVICE: 'service',
-  FUNCTION: 'function',
-  QUEUE: 'queue',
-  CACHE: 'cache',
-
-  // Cloud provider nodes
-  AWS_EC2: 'aws-ec2',
-  AWS_RDS: 'aws-rds',
-  AWS_S3: 'aws-s3',
-  AWS_LAMBDA: 'aws-lambda',
-  AWS_ELB: 'aws-elb',
-  AWS_VPC: 'aws-vpc',
-  AWS_SQS: 'aws-sqs',
-  AWS_SNS: 'aws-sns',
-
-  // Generic nodes
-  GENERIC: 'generic',
-  GROUP: 'group',
-  ANNOTATION: 'annotation',
+  'aws:ec2:instance': 'server',
+  'aws:s3:bucket': 'storage',
+  'aws:rds:instance': 'database',
+  'aws:elb:loadbalancer': 'loadBalancer',
+  'aws:vpc:vpc': 'network',
+  'aws:iam:role': 'security',
+  'aws:lambda:function': 'function',
+  'aws:apigateway:restapi': 'api',
+  'aws:cloudformation:stack': 'stack',
+  'aws:route53:hostedzone': 'dns',
+  'aws:cloudfront:distribution': 'cdn',
+  'aws:eks:cluster': 'container',
+  'aws:ecs:cluster': 'container',
+  'aws:ecr:repository': 'registry',
+  'aws:sns:topic': 'messaging',
+  'aws:sqs:queue': 'queue',
+  'aws:kinesis:stream': 'stream',
+  'aws:dynamodb:table': 'database',
+  'aws:elasticache:cluster': 'cache',
+  'aws:elasticsearch:domain': 'search',
+  // Generic fallbacks
+  'server': 'server',
+  'database': 'database',
+  'storage': 'storage',
+  'network': 'network',
+  'security': 'security',
+  'function': 'function',
+  'api': 'api',
+  'container': 'container',
+  'messaging': 'messaging',
+  'default': 'default'
 } as const;
 
-// Edge type constants
+// Default edge types mapping
 export const EDGE_TYPES = {
-  // Connection types
-  NETWORK: 'network',
-  DATA_FLOW: 'data-flow',
-  DEPENDENCY: 'dependency',
-  API_CALL: 'api-call',
-  MESSAGE: 'message',
-  SYNC: 'sync',
-  ASYNC: 'async',
-
-  // Generic edges
-  GENERIC: 'generic',
-  STRAIGHT: 'straight',
-  SMOOTH: 'smooth',
-  STEP: 'step',
+  'connection': 'default',
+  'dependency': 'dependency',
+  'network': 'network',
+  'data': 'data',
+  'security': 'security',
+  'default': 'default'
 } as const;
 
-// Layout constants
-export const LAYOUT_TYPES = {
-  DAGRE: 'dagre',
-  FORCE: 'force',
-  MANUAL: 'manual',
-} as const;
-
-// Default layout configurations
-export const DEFAULT_LAYOUT_CONFIG = {
-  nodeSpacing: 100,
-  rankSpacing: 150,
-  direction: 'TB' as const,
-  align: 'UL' as const,
-  forceConfig: {
-    strength: -800,
-    distance: 200,
-    iterations: 300,
-  },
-};
-
-// Node size constants
-export const NODE_SIZES = {
-  SMALL: { width: 60, height: 60 },
-  MEDIUM: { width: 120, height: 80 },
-  LARGE: { width: 180, height: 120 },
-  EXTRA_LARGE: { width: 240, height: 160 },
-} as const;
-
-// Color constants
+// Color schemes for different node types
 export const NODE_COLORS = {
-  // Status colors
-  HEALTHY: '#22c55e',
-  WARNING: '#f59e0b',
-  CRITICAL: '#ef4444',
-  UNKNOWN: '#6b7280',
-
-  // Type colors
-  SERVER: '#3b82f6',
-  DATABASE: '#8b5cf6',
-  NETWORK: '#10b981',
-  STORAGE: '#f59e0b',
-  FUNCTION: '#ec4899',
-  QUEUE: '#06b6d4',
-
-  // AWS colors
-  AWS_ORANGE: '#ff9900',
-  AWS_BLUE: '#232f3e',
-  AWS_GREEN: '#146eb4',
-
-  // Default colors
-  DEFAULT: '#6b7280',
-  SELECTED: '#2563eb',
-  HOVER: '#3b82f6',
+  server: '#FF9900',     // AWS Orange
+  database: '#3F48CC',   // Blue
+  storage: '#7AA116',    // Green
+  network: '#232F3E',    // Dark Blue
+  security: '#FF9900',   // Orange
+  function: '#FF9900',   // Orange
+  api: '#3F48CC',       // Blue
+  container: '#FF9900',  // Orange
+  messaging: '#3F48CC',  // Blue
+  cache: '#7AA116',     // Green
+  search: '#232F3E',    // Dark Blue
+  loadBalancer: '#FF9900', // Orange
+  cdn: '#7AA116',       // Green
+  dns: '#3F48CC',       // Blue
+  stack: '#232F3E',     // Dark Blue
+  registry: '#FF9900',  // Orange
+  queue: '#3F48CC',     // Blue
+  stream: '#7AA116',    // Green
+  default: '#8B949E'    // Gray
 } as const;
 
-// Viewport constants
-export const VIEWPORT_DEFAULTS = {
-  x: 0,
-  y: 0,
-  zoom: 1,
+// Node size configurations
+export const NODE_SIZES = {
+  small: { width: 80, height: 60 },
+  medium: { width: 120, height: 80 },
+  large: { width: 160, height: 100 }
+} as const;
+
+// Layout configurations
+export const LAYOUT_CONFIGS = {
+  dagre: {
+    rankdir: 'TB',
+    ranksep: 100,
+    nodesep: 80,
+    align: 'UL'
+  },
+  force: {
+    strength: -1000,
+    distance: 150,
+    iterations: 300
+  }
+} as const;
+
+// View configurations
+export const VIEW_CONFIG = {
+  defaultZoom: 1,
   minZoom: 0.1,
-  maxZoom: 4,
-} as const;
-
-// Animation constants
-export const ANIMATION_DURATION = {
-  FAST: 150,
-  NORMAL: 300,
-  SLOW: 600,
+  maxZoom: 3,
+  fitViewPadding: 0.1,
+  panOnDrag: true,
+  zoomOnScroll: true,
+  zoomOnPinch: true,
+  zoomOnDoubleClick: true
 } as const;
