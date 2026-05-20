@@ -306,4 +306,4 @@ MIT - See [LICENSE](../../LICENSE) for details.
 
 - [`@starfleet/sdk`](../sdk) - Core types and interfaces
 - [`@starfleet/cli`](../cli) - Command-line tools
-- [`@starfleet-pro/viewer-3d-react`](https://github.com/hyperdrive-technology/starfleet-pro) - 3D viewer (commercial)
+- [`@starfleet/viewer-3d-react`](../viewer-3d-react) - 3D viewer (React Three Fiber, WebGPU-ready)

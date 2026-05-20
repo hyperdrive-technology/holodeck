@@ -7,11 +7,12 @@
 - ✅ **Repository Structure**
   - ✅ Monorepo setup with packages/ directory
   - ✅ TypeScript configuration
-  - ✅ Package structure for CLI and viewer-2d-react
+  - ✅ Package structure for CLI, viewer-2d-react, and viewer-3d-react
 
 - ✅ **Basic Package Scaffolding**
   - ✅ CLI package structure (`packages/cli/`)
   - ✅ 2D Viewer package structure (`packages/viewer-2d-react/`)
+  - ✅ 3D Viewer package structure (`packages/viewer-3d-react/`) — R3F v10, WebGPU-ready
   - ✅ Template packages for importers/providers
 
 ## 🚨 Critical - CLI Implementation
@@ -136,10 +137,21 @@
 
 ## 🔄 Low Priority - Advanced Features
 
+### 3D Viewer (R3F + WebGPU) 🌐
+- [x] **Package scaffolding** (`packages/viewer-3d-react/`)
+  - [x] React Three Fiber v10 (`10.0.0-alpha.2`)
+  - [x] `StarfleetCanvas` with `webgl` | `webgpu` | `auto` backends
+  - [x] `StarfleetViewer3D` with scene graph rendering
+  - [x] `@starfleet/viewer-3d-react/webgpu` subpath for TSL hooks
+- [ ] **Full 3D scene implementation**
+  - [ ] Rich node/edge types and labels
+  - [ ] Layout from 2D positions / force layout in 3D
+  - [ ] Selection, tooltips, status overlays
+
 ### Enhanced Viewer Features 🎨
 - [ ] **Advanced rendering**
   - [ ] Animation support
-  - [ ] 3D preview mode (upgrade path)
+  - [x] 3D preview mode (upgrade path) — `@starfleet/viewer-3d-react`
   - [ ] Custom themes and styling
   - [ ] Export capabilities (PNG, SVG)
 
