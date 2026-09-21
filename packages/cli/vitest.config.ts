@@ -20,7 +20,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@starfleet/sdk': '../../../starfleet-sdk/ts/src/index.ts',
+      '@holodeck/sdk': '../../../holodeck-sdk/ts/src/index.ts',
     },
   },
 });

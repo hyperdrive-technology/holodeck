@@ -1,14 +1,14 @@
 /**
- * Type definitions for the 2D React viewer
+ * Type definitions for the 2D React editor
  */
 
-import type { SceneEdge, SceneFile, SceneNode } from '@starfleet/sdk';
+import type { SceneEdge, SceneFile, SceneNode } from '@holodeck/sdk';
 import type { ComponentType, CSSProperties, ReactNode } from 'react';
-import type { Edge, Node, ReactFlowInstance } from 'reactflow';
+import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
 
 // Base viewer types
-export interface StarfleetViewer2DProps {
-  /** Scene file to render */
+export interface HolodeckEditor2DProps {
+  /** Scene file to edit */
   scene: SceneFile;
   /** Width of the viewer */
   width?: number | string;
@@ -18,7 +18,7 @@ export interface StarfleetViewer2DProps {
   showControls?: boolean;
   /** Whether to show minimap */
   showMinimap?: boolean;
-  /** Whether the viewer is interactive */
+  /** Whether the editor is interactive (drag, connect, undo) */
   interactive?: boolean;
   /** Custom node types */
   nodeTypes?: Record<string, ComponentType<any>>;
@@ -26,17 +26,30 @@ export interface StarfleetViewer2DProps {
   edgeTypes?: Record<string, ComponentType<any>>;
   /** Callback when nodes are selected */
   onNodeSelect?: (nodes: SceneNode[]) => void;
+  /** Callback when a node is clicked */
+  onNodeClick?: (node: SceneNode) => void;
+  /** Callback when a node is double clicked */
+  onNodeDoubleClick?: (node: SceneNode) => void;
+  /** Callback when a node label is edited */
+  onNodeLabelEdit?: (node: SceneNode, nextLabel: string) => void;
   /** Callback when edges are selected */
   onEdgeSelect?: (edges: SceneEdge[]) => void;
   /** Callback when the view changes */
   onViewChange?: (viewport: ViewportState) => void;
+  /**
+   * `dagre` recomputes positions (default). Use `manual` when the scene already
+   * carries compiler/authored coordinates (e.g. Hyperdrive LD/FBD/SFC projections).
+   */
+  layout?: 'dagre' | 'manual';
+  /** Auto-layout configuration (dagre direction, spacing) */
+  layoutConfig?: LayoutConfig;
   /** Custom CSS classes */
   className?: string;
   /** Custom styles */
   style?: CSSProperties;
 }
 
-export interface StarfleetProviderProps {
+export interface HolodeckProviderProps {
   /** Scene file to provide */
   scene: SceneFile;
   /** Child components */
@@ -136,15 +149,17 @@ export interface ViewportBounds {
 }
 
 // React Flow adapter types
-export interface ReactFlowNodeData {
+export interface ReactFlowNodeData extends Record<string, unknown> {
   sceneNode: SceneNode;
   type: string;
   label: string;
   status?: string;
   metrics?: Record<string, any>;
+  liveValue?: string;
+  onLabelEdit?: (node: SceneNode, nextLabel: string) => void;
 }
 
-export interface ReactFlowEdgeData {
+export interface ReactFlowEdgeData extends Record<string, unknown> {
   sceneEdge: SceneEdge;
   type: string;
   label?: string;
@@ -152,16 +167,12 @@ export interface ReactFlowEdgeData {
   metrics?: Record<string, any>;
 }
 
-export interface ReactFlowNode extends Node {
-  data: ReactFlowNodeData;
-}
+export type ReactFlowNode = Node<ReactFlowNodeData>;
 
-export interface ReactFlowEdge extends Edge {
-  data: ReactFlowEdgeData;
-}
+export type ReactFlowEdge = Edge<ReactFlowEdgeData>;
 
 // Store types
-export interface StarfleetStore {
+export interface HolodeckStore {
   // Scene state
   scene: SceneFile | null;
   nodes: ReactFlowNode[];

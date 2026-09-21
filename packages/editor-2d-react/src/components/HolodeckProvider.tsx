@@ -1,10 +1,10 @@
 /**
- * Context provider for Starfleet viewer state
+ * Context provider for Holodeck editor state
  */
 
-import type { StarfleetProviderProps } from '../types';
+import type { HolodeckProviderProps } from '../types';
 
-export function StarfleetProvider(props: StarfleetProviderProps) {
+export function HolodeckProvider(props: HolodeckProviderProps) {
   const { children, scene } = props;
 
   // TODO: Implement the actual provider with state management

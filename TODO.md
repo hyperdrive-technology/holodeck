@@ -1,4 +1,4 @@
-# Starfleet Monorepo - TODO
+# Holodeck Monorepo - TODO
 
 **Repository Status**: 🔴 MAJOR WORK NEEDED - Basic structure exists, core functionality missing
 
@@ -7,12 +7,13 @@
 - ✅ **Repository Structure**
   - ✅ Monorepo setup with packages/ directory
   - ✅ TypeScript configuration
-  - ✅ Package structure for CLI and viewer-2d-react
+  - ✅ Package structure for CLI, editor-2d-react, and viewer-3d-react
 
 - ✅ **Basic Package Scaffolding**
   - ✅ CLI package structure (`packages/cli/`)
-  - ✅ 2D Viewer package structure (`packages/viewer-2d-react/`)
-  - ✅ Template packages for importers/providers
+  - ✅ 2D Editor package structure (`packages/editor-2d-react/`, renamed from viewer-2d-react)
+  - ✅ 3D Viewer package structure (`packages/viewer-3d-react/`)
+  - External importers/providers remain in sibling repos
 
 ## 🚨 Critical - CLI Implementation
 
@@ -22,13 +23,13 @@
   - [ ] Fix TypeScript imports and linter errors
   - [ ] Implement importer discovery system
   - [ ] Add proper error handling and validation
-  - [ ] Test with starfleet-importer-brainboard integration
+  - [ ] Test with holodeck-importer-brainboard integration
 
 - [ ] **Implement dev command**
   - [ ] Create `src/commands/dev.ts`
   - [ ] Vite development server integration
   - [ ] Hot reloading for scene files
-  - [ ] Live preview with 2D viewer
+  - [ ] Live preview with 2D editor
   - [ ] File watching with chokidar
 
 - [ ] **Implement validate command**
@@ -58,13 +59,13 @@
 
 - [ ] **Development server**
   - [ ] Vite integration for dev command
-  - [ ] Serve 2D viewer with scene preview
+  - [ ] Serve 2D editor with scene preview
   - [ ] Hot reloading when input files change
   - [ ] WebSocket for live updates
 
-## 🚨 Critical - 2D Viewer Implementation
+## 🚨 Critical - 2D Editor Implementation
 
-### Core Viewer Component 🎯
+### Core Editor Component 🎯
 - [ ] **Replace placeholder implementation**
   - [x] Basic component structure exists
   - [ ] Implement actual scene rendering
@@ -93,8 +94,8 @@
   - [ ] ViewerMinimap.tsx - overview navigation
 
 - [ ] **Provider and hooks**
-  - [ ] StarfleetProvider.tsx - scene state management
-  - [ ] useStarfleet.ts - scene data hook
+  - [ ] HolodeckProvider.tsx - scene state management
+  - [ ] useHolodeck.ts - scene data hook
   - [ ] useLayout.ts - layout calculations
 
 ### Package Dependencies 📦
@@ -104,11 +105,19 @@
   - [ ] Pan/zoom library (react-zoom-pan-pinch or similar)
   - [ ] State management (zustand or context)
 
+## 🚨 Critical - 3D Viewer Implementation (`viewer-3d-react`)
+
+- [ ] **R3F canvas scaffold**
+  - [x] Package + `HolodeckViewer3D` placeholder
+  - [ ] Scene graph → Three.js meshes from `SceneFile`
+  - [ ] Orbit controls, fit-to-scene, node pick → `onNodeSelect`
+  - [ ] Live-data coloring via provider hooks (pairs with `@holodeck/provider-hyperdrive`)
+
 ## 🔄 Medium Priority - Integration & Polish
 
 ### CLI-Viewer Integration 🔗
 - [ ] **Dev server integration**
-  - [ ] Embed 2D viewer in dev server
+  - [ ] Embed 2D editor in dev server
   - [ ] Live preview updates
   - [ ] Error display and debugging tools
 
@@ -174,17 +183,17 @@
    # - src/utils/discovery.ts
    ```
 
-3. **🚨 CRITICAL: Implement 2D viewer core rendering**
+3. **🚨 CRITICAL: Implement 2D editor core rendering**
    ```bash
-   cd packages/viewer-2d-react
-   # Implement actual scene rendering in StarfleetViewer2D.tsx
+   cd packages/editor-2d-react
+   # Implement actual scene rendering in HolodeckEditor2D.tsx
    ```
 
 4. **🔧 HIGH: Test CLI integration with brainboard importer**
    ```bash
    # These commands must work:
-   starfleet generate ../starfleet-importer-brainboard/examples/webapp/aws-3-tier-webapp.json
-   starfleet dev ../starfleet-importer-brainboard/examples/webapp/aws-3-tier-webapp.json
+   holodeck generate ../holodeck-importer-brainboard/examples/webapp/aws-3-tier-webapp.json
+   holodeck dev ../holodeck-importer-brainboard/examples/webapp/aws-3-tier-webapp.json
    ```
 
 5. **🔧 MEDIUM: Implement OpenAI visual testing workflow**
@@ -193,8 +202,8 @@
 ## 🔗 Dependencies & Integration Points
 
 ### Internal Dependencies
-- ✅ `@starfleet/sdk` (ready to use)
-- 🔄 `starfleet-importer-brainboard` (ready, waiting for CLI)
+- ✅ `@holodeck/sdk` (ready to use)
+- 🔄 `holodeck-importer-brainboard` (ready, waiting for CLI)
 
 ### External Dependencies Needed
 - [ ] **CLI package**:
@@ -203,21 +212,21 @@
   - react, react-dom, d3 or konva or custom SVG, zustand, @types/react
 
 ### Integration Points
-- [ ] CLI must discover and load starfleet-importer-brainboard
-- [ ] Dev server must serve viewer-2d-react component
-- [ ] Viewer must render SceneFile from @starfleet/sdk
+- [ ] CLI must discover and load holodeck-importer-brainboard
+- [ ] Dev server must serve editor-2d-react component
+- [ ] Viewer must render SceneFile from @holodeck/sdk
 
 ## 📊 Success Criteria
 
 ### CLI Success Criteria
-- [ ] `starfleet generate` converts Brainboard JSON to Starfleet JSON
-- [ ] `starfleet dev` launches development server with live preview
-- [ ] `starfleet validate` validates scene files
-- [ ] `starfleet info` shows scene file statistics
-- [ ] CLI auto-discovers starfleet-importer-brainboard
+- [ ] `holodeck generate` converts Brainboard JSON to Holodeck JSON
+- [ ] `holodeck dev` launches development server with live preview
+- [ ] `holodeck validate` validates scene files
+- [ ] `holodeck info` shows scene file statistics
+- [ ] CLI auto-discovers holodeck-importer-brainboard
 
 ### Viewer Success Criteria
-- [ ] Renders Starfleet JSON as interactive 2D diagram
+- [ ] Renders Holodeck JSON as interactive 2D diagram
 - [ ] Supports pan, zoom, and selection
 - [ ] Matches visual output of reference PNG
 - [ ] Integrates with dev server for live preview
@@ -234,10 +243,10 @@ pnpm test
 
 # Test CLI globally
 pnpm link --global
-starfleet --help
+holodeck --help
 
 # Viewer package
-cd packages/viewer-2d-react
+cd packages/editor-2d-react
 pnpm install
 pnpm build
 pnpm test
@@ -253,15 +262,15 @@ pnpm test         # Test all packages
 
 ### CLI Command Structure
 ```bash
-starfleet generate <input> [options]    # Convert file to Starfleet JSON
-starfleet dev <input> [options]         # Development server with preview
-starfleet validate <input> [options]    # Validate scene file
-starfleet info <input> [options]        # Show scene file information
+holodeck generate <input> [options]    # Convert file to Holodeck JSON
+holodeck dev <input> [options]         # Development server with preview
+holodeck validate <input> [options]    # Validate scene file
+holodeck info <input> [options]        # Show scene file information
 ```
 
 ### Viewer Integration Architecture
 ```
-Input File → CLI Generate → Starfleet JSON → 2D Viewer → Visual Output
+Input File → CLI Generate → Holodeck JSON → 2D Editor → Visual Output
            ↓
          Dev Server ← Hot Reload ← File Watcher
            ↓
@@ -270,14 +279,14 @@ Input File → CLI Generate → Starfleet JSON → 2D Viewer → Visual Output
 
 ### OpenAI Testing Flow
 ```
-Brainboard JSON → CLI → Starfleet JSON → 2D Viewer → Screenshot → OpenAI Vision API → Similarity Score
+Brainboard JSON → CLI → Holodeck JSON → 2D Editor → Screenshot → OpenAI Vision API → Similarity Score
 ```
 
 ## 🚨 Current Blockers
 
 1. **Missing CLI dependencies** - Package installation fails
 2. **Incomplete command implementations** - Only generate.ts partially done
-3. **2D viewer is placeholder** - No actual rendering implementation
+3. **2D editor is placeholder** - No actual rendering implementation
 4. **No importer discovery** - CLI can't find installed importers
 5. **No dev server** - No way to preview scenes in browser
 

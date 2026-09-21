@@ -1,5 +1,5 @@
 /**
- * Constants for the 2D React viewer
+ * Constants for the 2D React editor
  */
 
 // Node type constants

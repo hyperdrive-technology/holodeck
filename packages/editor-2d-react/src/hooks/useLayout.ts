@@ -5,13 +5,13 @@
 import { useCallback } from 'react';
 import type { LayoutConfig } from '../types';
 import { autoLayoutScene } from '../utils';
-import { useStarfleet } from './useStarfleet';
+import { useHolodeck } from './useHolodeck';
 
 /**
  * Hook for managing layout operations
  */
 export function useLayout() {
-  const store = useStarfleet();
+  const store = useHolodeck();
 
   const applyLayout = useCallback(
     (layoutType: string, config?: LayoutConfig) => {

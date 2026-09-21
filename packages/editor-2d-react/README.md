@@ -1,12 +1,12 @@
-# @starfleet/viewer-2d-react
+# @holodeck/editor-2d-react
 
-> 2D React viewer for Starfleet infrastructure diagrams
+> 2D React editor for Holodeck infrastructure diagrams
 
-A React component library for visualizing infrastructure scenes in 2D using ReactFlow. This package provides interactive viewers for Starfleet scene files, supporting pan, zoom, layout algorithms, and real-time data visualization.
+A React component library for visualizing infrastructure scenes in 2D using ReactFlow. This package provides interactive viewers for Holodeck scene files, supporting pan, zoom, layout algorithms, and real-time data visualization.
 
 ## Features
 
-- **Interactive 2D Visualization**: Pan, zoom, and interact with infrastructure diagrams
+- **Interactive 2D editing**: Pan, zoom, and interact with infrastructure diagrams
 - **Multiple Layout Algorithms**: Dagre hierarchical, force-directed, and manual layouts
 - **Real-time Data**: Display live metrics and status updates on nodes and edges
 - **Customizable Rendering**: Custom node and edge types with extensible styling
@@ -16,16 +16,16 @@ A React component library for visualizing infrastructure scenes in 2D using Reac
 ## Installation
 
 ```bash
-npm install @starfleet/viewer-2d-react
+npm install @holodeck/editor-2d-react
 # or
-pnpm add @starfleet/viewer-2d-react
+pnpm add @holodeck/editor-2d-react
 ```
 
 ## Quick Start
 
 ```tsx
-import { StarfleetViewer2D } from '@starfleet/viewer-2d-react';
-import type { SceneFile } from '@starfleet/sdk';
+import { HolodeckEditor2D } from '@holodeck/editor-2d-react';
+import type { SceneFile } from '@holodeck/sdk';
 
 const scene: SceneFile = {
   version: '1.0.0',
@@ -52,7 +52,7 @@ const scene: SceneFile = {
 
 function App() {
   return (
-    <StarfleetViewer2D
+    <HolodeckEditor2D
       scene={scene}
       width="100%"
       height="600px"
@@ -66,12 +66,12 @@ function App() {
 
 ## Components
 
-### StarfleetViewer2D
+### HolodeckEditor2D
 
-The main viewer component for displaying 2D infrastructure diagrams.
+The main editor component for displaying 2D infrastructure diagrams.
 
 ```tsx
-<StarfleetViewer2D
+<HolodeckEditor2D
   scene={sceneFile}
   width="800px"
   height="600px"
@@ -84,16 +84,16 @@ The main viewer component for displaying 2D infrastructure diagrams.
 />
 ```
 
-### StarfleetProvider
+### HolodeckProvider
 
 Context provider for sharing scene state across multiple components.
 
 ```tsx
-<StarfleetProvider scene={sceneFile} layout="dagre">
-  <StarfleetViewer2D />
+<HolodeckProvider scene={sceneFile} layout="dagre">
+  <HolodeckEditor2D />
   <ViewerControls />
   <ViewerMinimap />
-</StarfleetProvider>
+</HolodeckProvider>
 ```
 
 ## Node Types
@@ -125,7 +125,7 @@ The viewer supports various infrastructure node types out of the box:
 ### Dagre Hierarchical Layout
 
 ```tsx
-import { useLayout } from '@starfleet/viewer-2d-react';
+import { useLayout } from '@holodeck/editor-2d-react';
 
 const { applyLayout } = useLayout();
 
@@ -160,12 +160,12 @@ applyLayout('manual');
 
 ## Hooks
 
-### useStarfleet
+### useHolodeck
 
-Access the Starfleet store and actions:
+Access the Holodeck store and actions:
 
 ```tsx
-import { useStarfleet } from '@starfleet/viewer-2d-react';
+import { useHolodeck } from '@holodeck/editor-2d-react';
 
 function MyComponent() {
   const {
@@ -177,7 +177,7 @@ function MyComponent() {
     fitView,
     zoomIn,
     zoomOut
-  } = useStarfleet();
+  } = useHolodeck();
 
   return (
     <div>
@@ -194,7 +194,7 @@ function MyComponent() {
 Manage layout operations:
 
 ```tsx
-import { useLayout } from '@starfleet/viewer-2d-react';
+import { useLayout } from '@holodeck/editor-2d-react';
 
 function LayoutControls() {
   const {
@@ -226,7 +226,7 @@ function LayoutControls() {
 The viewer uses CSS modules and supports custom styling:
 
 ```tsx
-<StarfleetViewer2D
+<HolodeckEditor2D
   className="my-viewer"
   style={{
     border: '2px solid #blue',
@@ -240,7 +240,7 @@ The viewer uses CSS modules and supports custom styling:
 ### Custom Node Rendering
 
 ```tsx
-import { NodeRenderer } from '@starfleet/viewer-2d-react';
+import { NodeRenderer } from '@holodeck/editor-2d-react';
 
 function CustomServerNode({ node, selected }) {
   return (
@@ -262,7 +262,7 @@ function CustomServerNode({ node, selected }) {
 
 ## Development
 
-This package is part of the Starfleet monorepo. For development:
+This package is part of the Holodeck monorepo. For development:
 
 ```bash
 # Install dependencies
@@ -282,7 +282,7 @@ pnpm dev
 
 ### Props
 
-#### StarfleetViewer2DProps
+#### HolodeckEditor2DProps
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
@@ -304,6 +304,6 @@ MIT - See [LICENSE](../../LICENSE) for details.
 
 ## Related Packages
 
-- [`@starfleet/sdk`](../sdk) - Core types and interfaces
-- [`@starfleet/cli`](../cli) - Command-line tools
-- [`@starfleet-pro/viewer-3d-react`](https://github.com/hyperdrive-technology/starfleet-pro) - 3D viewer (commercial)
+- [`@holodeck/sdk`](../sdk) - Core types and interfaces
+- [`@holodeck/cli`](../cli) - Command-line tools
+- [`@holodeck-pro/viewer-3d-react`](https://github.com/hyperdrive-technology/holodeck-pro) - 3D viewer (commercial)

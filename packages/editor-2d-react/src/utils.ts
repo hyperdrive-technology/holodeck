@@ -1,14 +1,15 @@
 /**
- * Utility functions for the 2D React viewer
+ * Utility functions for the 2D React editor
  */
 
-import type { SceneEdge, SceneFile, SceneNode } from '@starfleet/sdk';
+import type { SceneEdge, SceneFile, SceneNode } from '@holodeck/sdk';
 import dagre from 'dagre';
-import type { Position } from 'reactflow';
+import type { XYPosition } from '@xyflow/react';
 import { DEFAULT_LAYOUT_CONFIG, NODE_COLORS, NODE_SIZES } from './constants';
 import type {
   LayoutConfig,
   ReactFlowEdge,
+  ReactFlowEdgeData,
   ReactFlowNode,
   ViewportBounds,
   ViewportState,
@@ -29,13 +30,14 @@ export function sceneFileToReactFlow(scene: SceneFile): {
         x: sceneNode.transform.position.x,
         y: sceneNode.transform.position.y,
       },
-      data: {
+      data: compactObject({
         sceneNode,
         type: sceneNode.type,
         label: sceneNode.name,
         status: sceneNode.status,
         metrics: sceneNode.metrics,
-      },
+        liveValue: sceneNode.metadata?.liveValue,
+      }) as ReactFlowNode['data'],
       draggable: true,
       selectable: true,
     };
@@ -49,13 +51,12 @@ export function sceneFileToReactFlow(scene: SceneFile): {
       source: sceneEdge.source,
       target: sceneEdge.target,
       type: sceneEdge.type || 'default',
-      data: {
+      data: compactObject({
         sceneEdge,
         type: sceneEdge.type || 'default',
-        label: sceneEdge.id,
-        status: undefined,
+        label: sceneEdge.metadata?.label,
         metrics: sceneEdge.metrics,
-      },
+      }) as ReactFlowEdgeData,
       animated: false,
       selectable: true,
     };
@@ -89,7 +90,7 @@ export function reactFlowToSceneFile(
     };
   });
 
-  const sceneEdges: SceneEdge[] = edges.map((edge) => edge.data.sceneEdge);
+  const sceneEdges: SceneEdge[] = edges.map((edge) => edge.data!.sceneEdge);
 
   return {
     version: '1.0.0',
@@ -279,8 +280,8 @@ export function calculateFitViewport(
  */
 export function getAvailablePosition(
   nodes: ReactFlowNode[],
-  preferredPosition?: Position
-): Position {
+  preferredPosition?: XYPosition
+): XYPosition {
   const defaultPosition = preferredPosition || { x: 100, y: 100 };
 
   if (nodes.length === 0) {
@@ -297,6 +298,10 @@ export function getAvailablePosition(
     x: defaultPosition.x + col * gridSize,
     y: defaultPosition.y + row * gridSize,
   };
+}
+
+function compactObject<T extends Record<string, unknown>>(value: T): Partial<T> {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as Partial<T>;
 }
 
 /**

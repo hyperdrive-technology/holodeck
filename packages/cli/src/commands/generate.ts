@@ -6,15 +6,15 @@ import { basename, extname, resolve } from 'path';
 import { discoverImporters } from '../utils/discovery';
 
 export const generateCommand = new Command('generate')
-  .description('Generate Starfleet scene from input file')
+  .description('Generate Holodeck scene from input file')
   .argument('<input>', 'Input file path')
-  .option('-o, --output <output>', 'Output file path (default: <input>.starfleet.json)')
+  .option('-o, --output <output>', 'Output file path (default: <input>.holodeck.json)')
   .option('-t, --type <type>', 'Force importer type (auto-detect by default)')
   .option('-c, --config <config>', 'Configuration file or preset')
   .option('--dry-run', 'Show what would be generated without writing files')
   .option('--verbose', 'Enable verbose output')
   .action(async (input, options) => {
-    const spinner = ora('Generating Starfleet scene...').start();
+    const spinner = ora('Generating Holodeck scene...').start();
 
     try {
       const inputPath = resolve(input);
@@ -77,7 +77,7 @@ export const generateCommand = new Command('generate')
       }
 
       // Import
-      spinner.text = 'Converting to Starfleet format...';
+      spinner.text = 'Converting to Holodeck format...';
       const result = await importer.import(content, parseConfig(options.config));
 
       if (result.errors && result.errors.length > 0) {
@@ -114,7 +114,7 @@ export const generateCommand = new Command('generate')
 
 function getDefaultOutputPath(inputPath: string): string {
   const baseName = basename(inputPath, extname(inputPath));
-  return `${baseName}.starfleet.json`;
+  return `${baseName}.holodeck.json`;
 }
 
 function parseConfig(configOption?: string): any {

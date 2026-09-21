@@ -10,7 +10,7 @@ import {
   Provider,
   SceneFile,
   validateScene,
-} from '@starfleet/sdk';
+} from '@holodeck/sdk';
 
 // Example 1: Creating a Simple Scene
 function createBasicScene(): SceneFile {
@@ -20,7 +20,7 @@ function createBasicScene(): SceneFile {
     metadata: {
       name: 'Basic Infrastructure Scene',
       description: 'A simple example showing servers and database connections',
-      author: 'Starfleet SDK Example',
+      author: 'Holodeck SDK Example',
       created: new Date().toISOString(),
       tags: ['infrastructure', 'example'],
     },
@@ -253,7 +253,7 @@ class MockMetricsProvider implements Provider {
 
 // Example 6: Using the SDK
 async function runExample() {
-  console.log('=== Starfleet SDK Example ===\n');
+  console.log('=== Holodeck SDK Example ===\n');
 
   // Create and validate a scene
   const scene = createBasicScene();

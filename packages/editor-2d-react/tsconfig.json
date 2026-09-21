@@ -27,7 +27,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": false,
-    "incremental": true,
+    "incremental": false,
     "preserveWatchOutput": true,
     "pretty": true,
     "jsx": "react-jsx",

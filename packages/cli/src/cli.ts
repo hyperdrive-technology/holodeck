@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Starfleet CLI - Main entry point
+ * Holodeck CLI - Main entry point
  */
 
 import chalk from 'chalk';
@@ -19,8 +19,8 @@ const program = new Command();
 const packageJson = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
 
 program
-  .name('starfleet')
-  .description('CLI for Starfleet infrastructure visualization')
+  .name('holodeck')
+  .description('CLI for Holodeck infrastructure visualization')
   .version(packageJson.version);
 
 // Register commands

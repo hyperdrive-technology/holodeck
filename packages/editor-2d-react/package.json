@@ -1,7 +1,7 @@
 {
-  "name": "@starfleet/viewer-2d-react",
-  "version": "0.1.0",
-  "description": "2D React viewer for Starfleet infrastructure diagrams",
+  "name": "@holodeck/editor-2d-react",
+  "version": "0.2.0",
+  "description": "2D React editor for Holodeck infrastructure diagrams",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -31,45 +31,45 @@
     "build-storybook": "storybook build"
   },
   "keywords": [
-    "starfleet",
+    "holodeck",
     "infrastructure",
     "visualization",
     "2d",
     "react",
-    "viewer",
+    "editor",
     "diagram"
   ],
   "author": "Hyperdrive Technology",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/hyperdrive-technology/starfleet.git",
-    "directory": "packages/viewer-2d-react"
+    "url": "git+https://github.com/hyperdrive-technology/holodeck.git",
+    "directory": "packages/editor-2d-react"
   },
   "bugs": {
-    "url": "https://github.com/hyperdrive-technology/starfleet/issues"
+    "url": "https://github.com/hyperdrive-technology/holodeck/issues"
   },
-  "homepage": "https://github.com/hyperdrive-technology/starfleet/tree/main/packages/viewer-2d-react#readme",
+  "homepage": "https://github.com/hyperdrive-technology/holodeck/tree/main/packages/editor-2d-react#readme",
   "dependencies": {
-    "@starfleet/sdk": "workspace:*",
-    "react": "^18.0.0",
-    "react-dom": "^18.0.0",
-    "reactflow": "^11.0.0",
-    "dagre": "^0.8.5",
+    "@holodeck/sdk": "file:../../../holodeck-sdk/ts",
+    "@xyflow/react": "^12.10.2",
     "clsx": "^2.0.0",
-    "lucide-react": "^0.400.0"
+    "dagre": "^0.8.5",
+    "lucide-react": "^0.400.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
   },
   "devDependencies": {
-    "@types/react": "^18.0.0",
-    "@types/react-dom": "^18.0.0",
-    "@types/dagre": "^0.7.52",
-    "@typescript-eslint/eslint-plugin": "^6.0.0",
-    "@typescript-eslint/parser": "^6.0.0",
     "@storybook/addon-essentials": "^7.0.0",
     "@storybook/addon-links": "^7.0.0",
     "@storybook/blocks": "^7.0.0",
     "@storybook/react": "^7.0.0",
     "@storybook/react-vite": "^7.0.0",
+    "@types/dagre": "^0.7.52",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
     "eslint": "^8.0.0",
     "eslint-plugin-react": "^7.33.0",
     "eslint-plugin-react-hooks": "^4.6.0",
