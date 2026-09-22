@@ -6,6 +6,14 @@ import type {
 } from '@holodeck/sdk';
 import type { CSSProperties } from 'react';
 
+export type HolodeckLiveConnectionState = 'live' | 'stale' | 'disconnected';
+
+export interface HolodeckLiveConnection {
+  state: HolodeckLiveConnectionState;
+  targetId: string;
+  targetLabel: string;
+}
+
 export interface HolodeckViewer3DProps {
   scene: SceneFile;
   width?: number | string;
@@ -27,4 +35,6 @@ export interface HolodeckViewer3DProps {
   animationHooks?: AnimationHook[];
   /** Node ids that should render with a selection highlight. */
   selectedNodeIds?: string[];
+  /** Selected runtime target freshness overlay. */
+  liveConnection?: HolodeckLiveConnection;
 }

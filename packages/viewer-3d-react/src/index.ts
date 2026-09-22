@@ -7,7 +7,7 @@ export { SceneNodeMesh } from './components/SceneNodeMesh';
 export type { SceneNodeMeshProps } from './components/SceneNodeMesh';
 export { AnimationRunner } from './components/AnimationRunner';
 export type { AnimationRunnerProps } from './components/AnimationRunner';
-export type { HolodeckViewer3DProps } from './types';
+export type { HolodeckViewer3DProps, HolodeckLiveConnection, HolodeckLiveConnectionState } from './types';
 
 export {
   ISA101_GREY,

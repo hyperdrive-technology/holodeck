@@ -247,14 +247,19 @@ export function HolodeckViewer3D(props: HolodeckViewer3DProps) {
     objectRenderers,
     animationHooks,
     selectedNodeIds,
+    liveConnection,
   } = props;
 
   const camera = scene.scene.camera;
   const background = colorToCss(scene.scene.environment?.background, '#0b1020');
+  const connectionState = liveConnection?.state ?? 'disconnected';
 
   return (
     <div
       className={className}
+      data-testid="holodeck-viewer-3d"
+      data-connection-state={connectionState}
+      data-runtime-target={liveConnection?.targetId ?? ''}
       style={{
         width,
         height,
@@ -262,9 +267,41 @@ export function HolodeckViewer3D(props: HolodeckViewer3DProps) {
         borderRadius: '8px',
         overflow: 'hidden',
         backgroundColor: background,
+        position: 'relative',
         ...style,
       }}
     >
+      {liveConnection ? (
+        <div
+          data-testid="holodeck-live-overlay"
+          data-connection-state={connectionState}
+          data-runtime-target={liveConnection.targetId}
+          style={{
+            position: 'absolute',
+            zIndex: 2,
+            top: 8,
+            left: 8,
+            borderRadius: 999,
+            padding: '4px 10px',
+            fontSize: 11,
+            fontWeight: 600,
+            pointerEvents: 'none',
+            background:
+              connectionState === 'live'
+                ? 'rgba(16, 185, 129, 0.92)'
+                : connectionState === 'stale'
+                  ? 'rgba(245, 158, 11, 0.94)'
+                  : 'rgba(75, 85, 99, 0.94)',
+            color: connectionState === 'disconnected' ? '#f9fafb' : '#042f1e',
+          }}
+        >
+          {connectionState === 'live'
+            ? `Live · ${liveConnection.targetLabel}`
+            : connectionState === 'stale'
+              ? `Stale values · ${liveConnection.targetLabel}`
+              : `Disconnected · ${liveConnection.targetLabel}`}
+        </div>
+      ) : null}
       <Canvas
         shadows
         dpr={[1, 2]}

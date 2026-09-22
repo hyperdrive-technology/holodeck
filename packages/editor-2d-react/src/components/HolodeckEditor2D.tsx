@@ -47,6 +47,7 @@ export function HolodeckEditor2D(props: HolodeckEditor2DProps) {
     onViewChange,
     layout = 'dagre',
     layoutConfig,
+    liveConnection,
   } = props;
 
   const converted = useMemo(() => sceneFileToReactFlow(scene), [scene]);
@@ -112,8 +113,30 @@ export function HolodeckEditor2D(props: HolodeckEditor2DProps) {
     return () => window.cancelAnimationFrame(frame);
   }, [nodes, edges]);
 
+  const connectionState = liveConnection?.state ?? 'disconnected';
+
   return (
-    <div className={className} style={{ width, height, ...style }}>
+    <div
+      className={className}
+      style={{ width, height, position: 'relative', ...style }}
+      data-testid="holodeck-editor-2d"
+      data-connection-state={connectionState}
+      data-runtime-target={liveConnection?.targetId ?? ''}
+    >
+      {liveConnection ? (
+        <div
+          className={`holodeck-live-banner holodeck-live-banner-${connectionState}`}
+          data-testid="holodeck-live-overlay"
+          data-connection-state={connectionState}
+          data-runtime-target={liveConnection.targetId}
+        >
+          {connectionState === 'live'
+            ? `Live · ${liveConnection.targetLabel}`
+            : connectionState === 'stale'
+              ? `Stale values · ${liveConnection.targetLabel}`
+              : `Disconnected · ${liveConnection.targetLabel}`}
+        </div>
+      ) : null}
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -177,6 +200,10 @@ function HolodeckSceneNode({ data, selected }: NodeProps<any>) {
     liveValue && liveValue !== ' [+]' && liveValue !== ' [ ]'
       ? 'holodeck-node-live-value'
       : '',
+    sceneNode.metadata?.liveFreshness === 'stale' ? 'holodeck-node-stale' : '',
+    sceneNode.metadata?.liveFreshness === 'disconnected'
+      ? 'holodeck-node-disconnected'
+      : '',
   ].filter(Boolean).join(' ');
   const testIdSuffix = `${testIdSlug(String(projectionKind ?? 'scene'))}-${testIdSlug(String(role ?? nodeKind))}-${testIdSlug(sceneNode.name)}`;
 
@@ -185,6 +212,12 @@ function HolodeckSceneNode({ data, selected }: NodeProps<any>) {
       className={className}
       data-testid={`holodeck-node-${testIdSuffix}`}
       data-active-step={sceneNode.metadata?.isActiveStep ? 'true' : 'false'}
+      data-live-value={liveValue ? String(liveValue) : undefined}
+      data-live-freshness={
+        typeof sceneNode.metadata?.liveFreshness === 'string'
+          ? sceneNode.metadata.liveFreshness
+          : undefined
+      }
       onDoubleClick={(event) => {
         if (!onLabelEdit || role === 'operator' || role === 'rail') return;
         event.stopPropagation();

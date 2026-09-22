@@ -44,7 +44,33 @@ export function AnimationRunner({
 
     for (const node of nodes) {
       const object = objectRefs.current.get(node.id);
-      if (!object || !node.animations?.length) {
+      if (!object) {
+        continue;
+      }
+
+      const rate =
+        typeof object.userData?.uvOffsetRate === 'number'
+          ? object.userData.uvOffsetRate
+          : (() => {
+              let found: number | undefined;
+              object.traverse((child) => {
+                if (typeof child.userData?.uvOffsetRate === 'number') {
+                  found = child.userData.uvOffsetRate;
+                }
+              });
+              return found;
+            })();
+      if (typeof rate === 'number' && rate !== 0) {
+        const stripe = object.getObjectByName('belt-stripe');
+        if (stripe) {
+          stripe.position.x = ((elapsedTime * rate) % 2) - 1;
+        }
+      }
+
+      if (!node.animations?.length) {
+        for (const hook of animationHooks ?? []) {
+          hook.onNodeUpdate?.(node.id, node, context);
+        }
         continue;
       }
 

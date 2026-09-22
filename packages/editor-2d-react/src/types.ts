@@ -7,9 +7,19 @@ import type { ComponentType, CSSProperties, ReactNode } from 'react';
 import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
 
 // Base viewer types
+export type HolodeckLiveConnectionState = 'live' | 'stale' | 'disconnected';
+
+export interface HolodeckLiveConnection {
+  state: HolodeckLiveConnectionState;
+  targetId: string;
+  targetLabel: string;
+}
+
 export interface HolodeckEditor2DProps {
   /** Scene file to edit */
   scene: SceneFile;
+  /** Selected runtime target freshness — overlay + node stale styling. */
+  liveConnection?: HolodeckLiveConnection;
   /** Width of the viewer */
   width?: number | string;
   /** Height of the viewer */
