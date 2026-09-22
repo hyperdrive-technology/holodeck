@@ -83,7 +83,7 @@ export function SceneNodeMesh({
     return () => {
       refs.delete(node.id);
     };
-  }, [node.id, objectRefs]);
+  }, [node, objectRefs]);
 
   const handleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();

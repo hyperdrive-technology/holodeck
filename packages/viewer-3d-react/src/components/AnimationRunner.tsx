@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import { type MutableRefObject, useRef } from 'react';
 import type { Group } from 'three';
 import { applyPropertyPath, evaluateAnimation } from '../utils/animation';
+import { applyBeltStripe } from './belt-stripe';
 
 export interface AnimationRunnerProps {
   scene: SceneGraph;
@@ -11,10 +12,6 @@ export interface AnimationRunnerProps {
   objectRefs: MutableRefObject<Map<string, Group>>;
 }
 
-/**
- * Per-frame evaluator for `SceneNode.animations[]` tracks + optional AnimationHook.onFrame.
- * Mutates registered Object3D refs so animated transforms stay off the React render path.
- */
 export function AnimationRunner({
   scene,
   nodes,
@@ -44,7 +41,16 @@ export function AnimationRunner({
 
     for (const node of nodes) {
       const object = objectRefs.current.get(node.id);
-      if (!object || !node.animations?.length) {
+      if (!object) {
+        continue;
+      }
+
+      applyBeltStripe(object, elapsedTime);
+
+      if (!node.animations?.length) {
+        for (const hook of animationHooks ?? []) {
+          hook.onNodeUpdate?.(node.id, node, context);
+        }
         continue;
       }
 

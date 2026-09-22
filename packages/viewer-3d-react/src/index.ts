@@ -7,7 +7,16 @@ export { SceneNodeMesh } from './components/SceneNodeMesh';
 export type { SceneNodeMeshProps } from './components/SceneNodeMesh';
 export { AnimationRunner } from './components/AnimationRunner';
 export type { AnimationRunnerProps } from './components/AnimationRunner';
+export {
+  applyBeltStripe,
+  beltStripePositionX,
+  BELT_STRIPE_WRAP,
+  resolveUvOffsetRate,
+} from './components/belt-stripe';
+export type { BeltStripeHost, BeltStripeObject } from './components/belt-stripe';
+export { liveOverlayChrome, liveOverlayCopy } from './live-overlay';
 export type { HolodeckViewer3DProps } from './types';
+export type { HolodeckLiveConnection, HolodeckLiveConnectionState } from '@holodeck/sdk';
 
 export {
   ISA101_GREY,

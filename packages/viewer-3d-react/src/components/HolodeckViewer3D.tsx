@@ -13,6 +13,7 @@ import {
 } from 'react';
 import type { Group } from 'three';
 import type { HolodeckViewer3DProps } from '../types';
+import { liveOverlayChrome, liveOverlayCopy } from '../live-overlay';
 import { colorToRgb } from '../utils/materials';
 import { AnimationRunner } from './AnimationRunner';
 import { SceneNodeMesh } from './SceneNodeMesh';
@@ -247,14 +248,20 @@ export function HolodeckViewer3D(props: HolodeckViewer3DProps) {
     objectRenderers,
     animationHooks,
     selectedNodeIds,
+    liveConnection,
   } = props;
 
   const camera = scene.scene.camera;
   const background = colorToCss(scene.scene.environment?.background, '#0b1020');
+  const overlayCopy = liveConnection ? liveOverlayCopy(liveConnection) : null;
+  const overlayChrome = liveConnection ? liveOverlayChrome(liveConnection.state) : null;
 
   return (
     <div
       className={className}
+      data-testid="holodeck-viewer-3d"
+      data-connection-state={liveConnection?.state ?? ''}
+      data-runtime-target={liveConnection?.targetId ?? ''}
       style={{
         width,
         height,
@@ -262,9 +269,32 @@ export function HolodeckViewer3D(props: HolodeckViewer3DProps) {
         borderRadius: '8px',
         overflow: 'hidden',
         backgroundColor: background,
+        position: 'relative',
         ...style,
       }}
     >
+      {liveConnection && overlayChrome ? (
+        <div
+          data-testid="holodeck-live-overlay"
+          data-connection-state={liveConnection.state}
+          data-runtime-target={liveConnection.targetId}
+          style={{
+            position: 'absolute',
+            zIndex: 2,
+            top: 8,
+            left: 8,
+            borderRadius: 999,
+            padding: '4px 10px',
+            fontSize: 11,
+            fontWeight: 600,
+            pointerEvents: 'none',
+            background: overlayChrome.background,
+            color: overlayChrome.color,
+          }}
+        >
+          {overlayCopy}
+        </div>
+      ) : null}
       <Canvas
         shadows
         dpr={[1, 2]}

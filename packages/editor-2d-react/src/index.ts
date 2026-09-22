@@ -22,6 +22,8 @@ export type {
   NodeRendererProps,
   HolodeckProviderProps,
   HolodeckEditor2DProps,
+  HolodeckLiveConnection,
+  HolodeckLiveConnectionState,
   LayoutConfig,
   ViewerControlsProps,
   ViewerMinimapProps,
