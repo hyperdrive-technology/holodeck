@@ -80,13 +80,6 @@ export function SceneNodeMesh({
       return;
     }
     refs.set(node.id, group);
-    if (typeof group.userData.uvOffsetRate !== 'number') {
-      group.traverse((child) => {
-        if (typeof child.userData?.uvOffsetRate === 'number') {
-          group.userData.uvOffsetRate = child.userData.uvOffsetRate;
-        }
-      });
-    }
     return () => {
       refs.delete(node.id);
     };

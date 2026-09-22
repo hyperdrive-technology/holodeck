@@ -253,13 +253,13 @@ export function HolodeckViewer3D(props: HolodeckViewer3DProps) {
 
   const camera = scene.scene.camera;
   const background = colorToCss(scene.scene.environment?.background, '#0b1020');
-  const connectionState = liveConnection?.state ?? 'disconnected';
+  const overlayCopy = liveConnection ? liveOverlayCopy(liveConnection) : null;
 
   return (
     <div
       className={className}
       data-testid="holodeck-viewer-3d"
-      data-connection-state={connectionState}
+      data-connection-state={liveConnection ? 'live' : ''}
       data-runtime-target={liveConnection?.targetId ?? ''}
       style={{
         width,
@@ -275,7 +275,7 @@ export function HolodeckViewer3D(props: HolodeckViewer3DProps) {
       {liveConnection ? (
         <div
           data-testid="holodeck-live-overlay"
-          data-connection-state={connectionState}
+          data-connection-state="live"
           data-runtime-target={liveConnection.targetId}
           style={{
             position: 'absolute',
@@ -287,16 +287,11 @@ export function HolodeckViewer3D(props: HolodeckViewer3DProps) {
             fontSize: 11,
             fontWeight: 600,
             pointerEvents: 'none',
-            background:
-              connectionState === 'live'
-                ? 'rgba(16, 185, 129, 0.92)'
-                : connectionState === 'stale'
-                  ? 'rgba(245, 158, 11, 0.94)'
-                  : 'rgba(75, 85, 99, 0.94)',
-            color: connectionState === 'disconnected' ? '#f9fafb' : '#042f1e',
+            background: 'rgba(16, 185, 129, 0.92)',
+            color: '#042f1e',
           }}
         >
-          {liveOverlayCopy(liveConnection)}
+          {overlayCopy}
         </div>
       ) : null}
       <Canvas

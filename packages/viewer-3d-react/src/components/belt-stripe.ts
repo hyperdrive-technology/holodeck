@@ -1,7 +1,4 @@
-/**
- * Conveyor belt motion. `AnimationRunner` writes this onto the named
- * `belt-stripe` child each frame from `userData.uvOffsetRate`.
- */
+export const BELT_STRIPE_WRAP = 2;
 
 export interface BeltStripeObject {
   position: { x: number };
@@ -13,16 +10,19 @@ export interface BeltStripeHost {
   getObjectByName: (name: string) => BeltStripeObject | null | undefined;
 }
 
-/** Stripe local X for elapsed seconds and UV offset rate. */
+function wrapTravel(travel: number): number {
+  return ((travel % BELT_STRIPE_WRAP) + BELT_STRIPE_WRAP) % BELT_STRIPE_WRAP;
+}
+
 export function beltStripePositionX(elapsedTime: number, rate: number): number {
-  return ((elapsedTime * rate) % 2) - 1;
+  return wrapTravel(elapsedTime * rate) - BELT_STRIPE_WRAP / 2;
 }
 
 export function resolveUvOffsetRate(object: BeltStripeHost): number | undefined {
-  if (typeof object.userData?.uvOffsetRate === 'number') {
-    return object.userData.uvOffsetRate;
-  }
   let found: number | undefined;
+  if (typeof object.userData?.uvOffsetRate === 'number') {
+    found = object.userData.uvOffsetRate;
+  }
   object.traverse?.((child) => {
     if (typeof child.userData?.uvOffsetRate === 'number') {
       found = child.userData.uvOffsetRate;
@@ -31,10 +31,6 @@ export function resolveUvOffsetRate(object: BeltStripeHost): number | undefined 
   return found;
 }
 
-/**
- * Mutates `belt-stripe`.position.x from `uvOffsetRate`.
- * Returns the written X, or undefined when there is no moving belt.
- */
 export function applyBeltStripe(
   object: BeltStripeHost,
   elapsedTime: number,

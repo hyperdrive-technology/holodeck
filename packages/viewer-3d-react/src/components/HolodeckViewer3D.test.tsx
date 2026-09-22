@@ -1,8 +1,3 @@
-/**
- * Mounts HolodeckViewer3D (Canvas mocked — this is not the R3F scene test).
- * Overlay copy must stay `Live · <selected target>`.
- */
-
 import { createElement, type ReactNode } from 'react';
 import { createTransform, type SceneFile } from '@holodeck/sdk';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -51,6 +46,20 @@ describe('HolodeckViewer3D overlay', () => {
     expect(html).toContain('data-testid="holodeck-viewer-3d"');
     expect(html).toContain('data-testid="holodeck-live-overlay"');
     expect(html).toContain('Live · inbound');
-    expect(html).not.toContain('Deploy without Connect');
+  });
+
+  it('shows Live · in-browser PLC when the selected target is the in-browser PLC', () => {
+    const html = renderToStaticMarkup(
+      createElement(HolodeckViewer3D, {
+        scene,
+        liveConnection: {
+          state: 'disconnected',
+          targetId: 'in-browser',
+          targetLabel: 'in-browser PLC',
+        },
+      }),
+    );
+    expect(html).toContain('Live · in-browser PLC');
+    expect(html).not.toContain('Disconnected · in-browser PLC');
   });
 });

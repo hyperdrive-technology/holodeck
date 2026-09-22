@@ -1,7 +1,3 @@
-/**
- * ISA-101 material helpers used by HolodeckViewer3D.
- */
-
 import { createMaterial, createTransform } from '@holodeck/sdk';
 import { describe, expect, it } from 'vitest';
 import {

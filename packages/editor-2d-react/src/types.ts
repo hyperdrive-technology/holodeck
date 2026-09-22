@@ -2,23 +2,16 @@
  * Type definitions for the 2D React editor
  */
 
-import type { SceneEdge, SceneFile, SceneNode } from '@holodeck/sdk';
+import type { SceneEdge, SceneFile, SceneNode, HolodeckLiveConnection } from '@holodeck/sdk';
 import type { ComponentType, CSSProperties, ReactNode } from 'react';
 import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
 
 // Base viewer types
-export type HolodeckLiveConnectionState = 'live' | 'stale' | 'disconnected';
-
-export interface HolodeckLiveConnection {
-  state: HolodeckLiveConnectionState;
-  targetId: string;
-  targetLabel: string;
-}
+export type { HolodeckLiveConnection, HolodeckLiveConnectionState } from '@holodeck/sdk';
 
 export interface HolodeckEditor2DProps {
   /** Scene file to edit */
   scene: SceneFile;
-  /** Selected runtime target freshness — overlay + node stale styling. */
   liveConnection?: HolodeckLiveConnection;
   /** Width of the viewer */
   width?: number | string;

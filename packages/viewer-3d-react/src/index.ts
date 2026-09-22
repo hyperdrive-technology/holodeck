@@ -10,11 +10,13 @@ export type { AnimationRunnerProps } from './components/AnimationRunner';
 export {
   applyBeltStripe,
   beltStripePositionX,
+  BELT_STRIPE_WRAP,
   resolveUvOffsetRate,
 } from './components/belt-stripe';
 export type { BeltStripeHost, BeltStripeObject } from './components/belt-stripe';
 export { liveOverlayCopy } from './live-overlay';
-export type { HolodeckViewer3DProps, HolodeckLiveConnection, HolodeckLiveConnectionState } from './types';
+export type { HolodeckViewer3DProps } from './types';
+export type { HolodeckLiveConnection, HolodeckLiveConnectionState } from '@holodeck/sdk';
 
 export {
   ISA101_GREY,

@@ -12,20 +12,20 @@ describe('liveOverlayCopy', () => {
     ).toBe('Live · inbound');
   });
 
-  it('keeps stale and disconnected on the same target label', () => {
+  it('keeps the selected in-browser PLC as Live, not Disconnected', () => {
+    expect(
+      liveOverlayCopy({
+        state: 'disconnected',
+        targetId: 'in-browser',
+        targetLabel: 'in-browser PLC',
+      }),
+    ).toBe('Live · in-browser PLC');
     expect(
       liveOverlayCopy({
         state: 'stale',
         targetId: 'inbound',
         targetLabel: 'inbound',
       }),
-    ).toBe('Stale values · inbound');
-    expect(
-      liveOverlayCopy({
-        state: 'disconnected',
-        targetId: 'inbound',
-        targetLabel: 'inbound',
-      }),
-    ).toBe('Disconnected · inbound');
+    ).toBe('Live · inbound');
   });
 });

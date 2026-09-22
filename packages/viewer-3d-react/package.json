@@ -45,15 +45,15 @@
   "homepage": "https://github.com/hyperdrive-technology/holodeck/tree/main/packages/viewer-3d-react#readme",
   "dependencies": {
     "@holodeck/sdk": "file:../../../holodeck-sdk/ts",
-    "@react-three/drei": "^10.7.7",
-    "@react-three/fiber": "^9.4.2",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5",
+    "@react-three/drei": "10.7.7",
+    "@react-three/fiber": "9.4.2",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
     "three": "^0.180.0"
   },
   "devDependencies": {
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
     "@types/three": "^0.180.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
@@ -66,8 +66,15 @@
     "vitest": "^1.0.0"
   },
   "peerDependencies": {
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": ">=19.0.0 <19.3.0",
+    "react-dom": ">=19.0.0 <19.3.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "react": "19.2.5",
+      "react-dom": "19.2.5",
+      "@react-three/fiber": "9.4.2"
+    }
   },
   "engines": {
     "node": ">=18.0.0"

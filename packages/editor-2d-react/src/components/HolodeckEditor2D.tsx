@@ -17,7 +17,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import './holodeck-editor.css';
 
-import type { SceneNode } from '@holodeck/sdk';
+import { liveOverlayCopy, type SceneNode } from '@holodeck/sdk';
 import { useEffect, useMemo, useRef } from 'react';
 import { DEFAULT_LAYOUT_CONFIG } from '../constants';
 import type { HolodeckEditor2DProps, ReactFlowNodeData } from '../types';
@@ -113,28 +113,22 @@ export function HolodeckEditor2D(props: HolodeckEditor2DProps) {
     return () => window.cancelAnimationFrame(frame);
   }, [nodes, edges]);
 
-  const connectionState = liveConnection?.state ?? 'disconnected';
-
   return (
     <div
       className={className}
       style={{ width, height, position: 'relative', ...style }}
       data-testid="holodeck-editor-2d"
-      data-connection-state={connectionState}
+      data-connection-state={liveConnection ? 'live' : ''}
       data-runtime-target={liveConnection?.targetId ?? ''}
     >
       {liveConnection ? (
         <div
-          className={`holodeck-live-banner holodeck-live-banner-${connectionState}`}
+          className="holodeck-live-banner holodeck-live-banner-live"
           data-testid="holodeck-live-overlay"
-          data-connection-state={connectionState}
+          data-connection-state="live"
           data-runtime-target={liveConnection.targetId}
         >
-          {connectionState === 'live'
-            ? `Live · ${liveConnection.targetLabel}`
-            : connectionState === 'stale'
-              ? `Stale values · ${liveConnection.targetLabel}`
-              : `Disconnected · ${liveConnection.targetLabel}`}
+          {liveOverlayCopy(liveConnection)}
         </div>
       ) : null}
       <ReactFlow
