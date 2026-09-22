@@ -1,0 +1,37 @@
+---
+description: Hyperdrive sibling graph (Starfleet / Holodeck, SDK, providers, Turso, AWS proxy)
+alwaysApply: true
+---
+# Hyperdrive org graph
+
+This checkout is `hyperdrive-technology/starfleet`. GitHub still uses the Starfleet names. Packages ship as `@holodeck/*`. Holodeck is the HMI and scene layer. Hyperdrive is the control runtime.
+
+## Sibling repos (`hyperdrive-technology/`)
+
+| Repo | Role |
+|------|------|
+| `starfleet` | Browser HMI monorepo. `@holodeck/cli`, `@holodeck/editor-2d-react`, `@holodeck/viewer-3d-react`. Scene tooling and live overlays only. |
+| `starfleet-sdk` | `@holodeck/sdk` contracts. SceneFile, Importer, Provider, AnimationHook, JSON Schema. Open packages depend on this only. |
+| `starfleet-provider-hyperdrive` | Live Hyperdrive runtime data for diagrams (WS/HTTP bridge to variables, alarms, scan timing, diagnostics). |
+| `starfleet-provider-otel` | Live OTEL / Prometheus data for diagrams. |
+| `starfleet-gateway-grafana` | Proxies Grafana LGTM (Loki, Prometheus, Tempo) for the OTEL provider. |
+| `turso-timeseries` | Rust Turso time-series extension (hypertables, line protocol, WASM ext). Historian-adjacent storage. Not HMI. |
+| `aws-controllers-k8s-proxy` | AWS ACK proxy. |
+| `core` (private) | Hyperdrive runtime, compiler, host API, `core/gateway`. Rust native services live here. Holodeck does not run PLC scan logic. |
+
+GitHub URLs follow `https://github.com/hyperdrive-technology/<repo>`. Docs may still say `holodeck`, `holodeck-sdk`, or `holodeck-provider-*`. Those names map to the Starfleet repos above.
+
+## Ownership
+
+- Hyperdrive (`core`) owns control, compile, deploy, and the host API (port 4444).
+- Holodeck (`starfleet` + SDK + providers) owns scene tooling and live overlays.
+- Providers and gateways implement `@holodeck/sdk` interfaces. They do not hard-depend on `@holodeck-pro/*`.
+- Commercial / gated assets stay in private `holodeck-pro` if it exists. Do not invent that tree in these OSS repos.
+
+## Live values stay IEC tails
+
+Do not invent, copy, or commit live process values, production credentials, customer endpoints, or runtime tag snapshots into these repos.
+
+Those live values stay in IEC tails (the Hyperdrive / IEC 61131 runtime and its historian). Scene files and provider code may name tags or aliases. They must not embed live readings or secrets.
+
+If a task needs a live value, read it from the runtime or an IEC tail. Do not fabricate one.
