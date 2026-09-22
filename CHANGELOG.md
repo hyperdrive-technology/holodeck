@@ -26,5 +26,5 @@ First tagged Holodeck monorepo release (formerly Starfleet).
 
 - `@starfleet/viewer-2d-react` package name (replaced by `@holodeck/editor-2d-react`)
 
-[Unreleased]: https://github.com/hyperdrive-technology/starfleet/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/hyperdrive-technology/starfleet/releases/tag/v0.1.0
+[Unreleased]: https://github.com/hyperdrive-technology/holodeck/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/hyperdrive-technology/holodeck/releases/tag/v0.1.0
