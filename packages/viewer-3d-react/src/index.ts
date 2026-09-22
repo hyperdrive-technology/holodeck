@@ -14,7 +14,7 @@ export {
   resolveUvOffsetRate,
 } from './components/belt-stripe';
 export type { BeltStripeHost, BeltStripeObject } from './components/belt-stripe';
-export { liveOverlayCopy } from './live-overlay';
+export { liveOverlayChrome, liveOverlayCopy } from './live-overlay';
 export type { HolodeckViewer3DProps } from './types';
 export type { HolodeckLiveConnection, HolodeckLiveConnectionState } from '@holodeck/sdk';
 
