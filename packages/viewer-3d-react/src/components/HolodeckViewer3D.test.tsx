@@ -45,10 +45,27 @@ describe('HolodeckViewer3D overlay', () => {
     );
     expect(html).toContain('data-testid="holodeck-viewer-3d"');
     expect(html).toContain('data-testid="holodeck-live-overlay"');
+    expect(html).toContain('data-connection-state="live"');
     expect(html).toContain('Live · inbound');
   });
 
-  it('shows Live · in-browser PLC when the selected target is the in-browser PLC', () => {
+  it('shows Live · in-browser PLC when that target is live', () => {
+    const html = renderToStaticMarkup(
+      createElement(HolodeckViewer3D, {
+        scene,
+        liveConnection: {
+          state: 'live',
+          targetId: 'in-browser',
+          targetLabel: 'in-browser PLC',
+        },
+      }),
+    );
+    expect(html).toContain('Live · in-browser PLC');
+    expect(html).toContain('data-connection-state="live"');
+    expect(html).not.toContain('Disconnected · in-browser PLC');
+  });
+
+  it('shows Disconnected · in-browser PLC when that target is disconnected', () => {
     const html = renderToStaticMarkup(
       createElement(HolodeckViewer3D, {
         scene,
@@ -59,7 +76,8 @@ describe('HolodeckViewer3D overlay', () => {
         },
       }),
     );
-    expect(html).toContain('Live · in-browser PLC');
-    expect(html).not.toContain('Disconnected · in-browser PLC');
+    expect(html).toContain('Disconnected · in-browser PLC');
+    expect(html).toContain('data-connection-state="disconnected"');
+    expect(html).not.toContain('Live · in-browser PLC');
   });
 });

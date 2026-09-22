@@ -13,7 +13,7 @@ import {
 } from 'react';
 import type { Group } from 'three';
 import type { HolodeckViewer3DProps } from '../types';
-import { liveOverlayCopy } from '../live-overlay';
+import { liveOverlayChrome, liveOverlayCopy } from '../live-overlay';
 import { colorToRgb } from '../utils/materials';
 import { AnimationRunner } from './AnimationRunner';
 import { SceneNodeMesh } from './SceneNodeMesh';
@@ -254,12 +254,13 @@ export function HolodeckViewer3D(props: HolodeckViewer3DProps) {
   const camera = scene.scene.camera;
   const background = colorToCss(scene.scene.environment?.background, '#0b1020');
   const overlayCopy = liveConnection ? liveOverlayCopy(liveConnection) : null;
+  const overlayChrome = liveConnection ? liveOverlayChrome(liveConnection.state) : null;
 
   return (
     <div
       className={className}
       data-testid="holodeck-viewer-3d"
-      data-connection-state={liveConnection ? 'live' : ''}
+      data-connection-state={liveConnection?.state ?? ''}
       data-runtime-target={liveConnection?.targetId ?? ''}
       style={{
         width,
@@ -272,10 +273,10 @@ export function HolodeckViewer3D(props: HolodeckViewer3DProps) {
         ...style,
       }}
     >
-      {liveConnection ? (
+      {liveConnection && overlayChrome ? (
         <div
           data-testid="holodeck-live-overlay"
-          data-connection-state="live"
+          data-connection-state={liveConnection.state}
           data-runtime-target={liveConnection.targetId}
           style={{
             position: 'absolute',
@@ -287,8 +288,8 @@ export function HolodeckViewer3D(props: HolodeckViewer3DProps) {
             fontSize: 11,
             fontWeight: 600,
             pointerEvents: 'none',
-            background: 'rgba(16, 185, 129, 0.92)',
-            color: '#042f1e',
+            background: overlayChrome.background,
+            color: overlayChrome.color,
           }}
         >
           {overlayCopy}

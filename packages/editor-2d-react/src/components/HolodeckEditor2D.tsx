@@ -118,14 +118,14 @@ export function HolodeckEditor2D(props: HolodeckEditor2DProps) {
       className={className}
       style={{ width, height, position: 'relative', ...style }}
       data-testid="holodeck-editor-2d"
-      data-connection-state={liveConnection ? 'live' : ''}
+      data-connection-state={liveConnection?.state ?? ''}
       data-runtime-target={liveConnection?.targetId ?? ''}
     >
       {liveConnection ? (
         <div
-          className="holodeck-live-banner holodeck-live-banner-live"
+          className={`holodeck-live-banner holodeck-live-banner-${liveConnection.state}`}
           data-testid="holodeck-live-overlay"
-          data-connection-state="live"
+          data-connection-state={liveConnection.state}
           data-runtime-target={liveConnection.targetId}
         >
           {liveOverlayCopy(liveConnection)}

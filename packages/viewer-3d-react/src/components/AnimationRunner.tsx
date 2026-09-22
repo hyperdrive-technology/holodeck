@@ -12,10 +12,6 @@ export interface AnimationRunnerProps {
   objectRefs: MutableRefObject<Map<string, Group>>;
 }
 
-/**
- * Per-frame evaluator for `SceneNode.animations[]` tracks + optional AnimationHook.onFrame.
- * Mutates registered Object3D refs so animated transforms stay off the React render path.
- */
 export function AnimationRunner({
   scene,
   nodes,
