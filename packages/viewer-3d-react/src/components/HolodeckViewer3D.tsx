@@ -13,6 +13,7 @@ import {
 } from 'react';
 import type { Group } from 'three';
 import type { HolodeckViewer3DProps } from '../types';
+import { liveOverlayCopy } from '../live-overlay';
 import { colorToRgb } from '../utils/materials';
 import { AnimationRunner } from './AnimationRunner';
 import { SceneNodeMesh } from './SceneNodeMesh';
@@ -295,11 +296,7 @@ export function HolodeckViewer3D(props: HolodeckViewer3DProps) {
             color: connectionState === 'disconnected' ? '#f9fafb' : '#042f1e',
           }}
         >
-          {connectionState === 'live'
-            ? `Live · ${liveConnection.targetLabel}`
-            : connectionState === 'stale'
-              ? `Stale values · ${liveConnection.targetLabel}`
-              : `Disconnected · ${liveConnection.targetLabel}`}
+          {liveOverlayCopy(liveConnection)}
         </div>
       ) : null}
       <Canvas

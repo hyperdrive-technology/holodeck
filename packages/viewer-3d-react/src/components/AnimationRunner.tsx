@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import { type MutableRefObject, useRef } from 'react';
 import type { Group } from 'three';
 import { applyPropertyPath, evaluateAnimation } from '../utils/animation';
+import { applyBeltStripe } from './belt-stripe';
 
 export interface AnimationRunnerProps {
   scene: SceneGraph;
@@ -48,24 +49,7 @@ export function AnimationRunner({
         continue;
       }
 
-      const rate =
-        typeof object.userData?.uvOffsetRate === 'number'
-          ? object.userData.uvOffsetRate
-          : (() => {
-              let found: number | undefined;
-              object.traverse((child) => {
-                if (typeof child.userData?.uvOffsetRate === 'number') {
-                  found = child.userData.uvOffsetRate;
-                }
-              });
-              return found;
-            })();
-      if (typeof rate === 'number' && rate !== 0) {
-        const stripe = object.getObjectByName('belt-stripe');
-        if (stripe) {
-          stripe.position.x = ((elapsedTime * rate) % 2) - 1;
-        }
-      }
+      applyBeltStripe(object, elapsedTime);
 
       if (!node.animations?.length) {
         for (const hook of animationHooks ?? []) {
