@@ -1,0 +1,212 @@
+/**
+ * Holodeck "Arcentry-style" iso look as one token object.
+ *
+ * Every value the process parts used to hard-code (unlit white body, #666
+ * fat edges, the view-space left-dark / right-light iso shade on vessels)
+ * lives here. Code-built parts read these tokens through the older constant
+ * names (`TANK_SHADE_MIN`, `PIPE_WIRE_WIDTH`, `EDGE`, …), which are now
+ * aliases. GLB parts from Blender get the same look through
+ * `applyHolodeckStyle` (apply-style.ts), which maps material names
+ * (`hd.white`, `hd.vessel`, …) onto the `finishes` below.
+ *
+ * Phase 1 rule: these numbers are the exact values the scene rendered with
+ * before the extraction. `style.test.ts` pins them so a typo here shows up
+ * as a failing test, not as a subtle grey shift in the snapshot.
+ *
+ * No three / React imports on purpose — this file is plain data so the
+ * Blender pipeline (or a node script) can read it without a renderer.
+ */
+
+/** Unlit flat colour. `white` and `accent` are this kind. */
+export type UnlitFinish = {
+  kind: 'unlit';
+  color: string;
+  /**
+   * Push the fill back in depth so coplanar edge lines win. Off for pipes
+   * and other white parts: the offset lets the floor grid steal the
+   * underside and it reads as ground-only shade.
+   */
+  offset: boolean;
+};
+
+/**
+ * View-space iso gradient. `shadeMin` is the darkest grey (normal facing
+ * screen-left), `shadeMax` the lightest (screen-right). `hubWhite` is the
+ * grey at the local Y axis when `whiteHub` is on (caps / dome apex).
+ */
+export type IsoFinish = {
+  kind: 'iso';
+  shadeMin: number;
+  shadeMax: number;
+  hubWhite: number;
+  whiteHub: boolean;
+  /** Tanks need this so Edges win over the fill. */
+  offset: boolean;
+};
+
+export type Finish = UnlitFinish | IsoFinish;
+
+/** Finish names. A GLB material named `hd.<name>` picks the matching finish. */
+export type FinishName = 'white' | 'shaded' | 'vessel' | 'flask' | 'accent';
+
+export type HolodeckStyle = {
+  colors: {
+    /** Unlit body fill for pipes, fittings, caps. */
+    body: string;
+    /** Fat outline colour on every part. */
+    edge: string;
+    /** Supply-area slab fill. */
+    areaFill: string;
+    /** Supply-area outline: lighter than `edge` so the slab sits behind the plant. */
+    areaEdge: string;
+    /** Default accent: valve handwheels. */
+    accent: string;
+    /** Unique-mesh `Pipe` band stripe default (`FittingParams.pipeBandColor`). */
+    band: string;
+    /** Instanced pipe band fallback when a scene pipe has no `band` (see InstancedLibrary). */
+    bandInstanced: string;
+    /** Pipe wireframe colour in the fitting tuner (`FittingParams.pipeWireColor`). */
+    pipeWire: string;
+    /** Liquid fill default (`TankParams.fillColor`). */
+    liquid: string;
+    /** Mixer liquid / temperature label when the live value alarms. */
+    alarm: string;
+    /** Dark bore inside the steam hex coupling. */
+    bore: string;
+  };
+  edges: {
+    /** `EdgesGeometry` crease angle in degrees when a part does not name one. */
+    threshold: number;
+    /**
+     * Named crease thresholds. Lower draws more edges (1 ≈ every face
+     * boundary), higher draws only hard creases.
+     */
+    thresholds: {
+      /** Tank wall Edges (only drawn when the cage is off). */
+      tankWall: number;
+      /** Mixer bottle wall. */
+      mixerWall: number;
+      /** Quarter-torus elbows. Must be < 11.25 (the 8-step sweep) to outline the sweep joints. */
+      elbow: number;
+      /** Pipe tube + joint rings + end flanges (8-gon: 45° facets, 90° ring steps). */
+      pipe: number;
+      /** Valve barrel, flanges, bonnet. */
+      valve: number;
+      /** Valve handwheel: above the 30° rim facets so only the 90° box/cylinder steps (rim, hub, spokes) outline. */
+      valveWheel: number;
+      /** West packaging hex nut: every face edge. */
+      nut: number;
+      /** West packaging hex ridges around the nut. */
+      westRing: number;
+      /** Steam-out hex coupling. */
+      steamNut: number;
+      /** Supply-area slab outline. */
+      area: number;
+    };
+    /** `Edges` default width in CSS px (Line2NodeMaterial.linewidth). */
+    lineWidth: number;
+    /** Pipe / fitting / vessel wire width in CSS px. */
+    wireWidth: number;
+  };
+  finishes: Record<FinishName, Finish> & {
+    white: UnlitFinish;
+    shaded: IsoFinish;
+    vessel: IsoFinish;
+    flask: IsoFinish;
+    accent: UnlitFinish;
+  };
+};
+
+export const HOLODECK_STYLE: HolodeckStyle = {
+  colors: {
+    body: '#ffffff',
+    // Edges stay #666. Phong + lights flattened the plant to an even grey,
+    // so fills are unlit and only the outline carries the drawing.
+    edge: '#666666',
+    areaFill: '#f3f3f3',
+    areaEdge: '#c8c8c8',
+    accent: '#c0392b',
+    band: '#c0392b',
+    // Not the same red as `band`. Kept separate so phase 1 does not shift
+    // any instanced band that falls back to it.
+    bandInstanced: '#e74c3c',
+    pipeWire: '#888888',
+    liquid: '#4aa3d9',
+    alarm: '#e85d5d',
+    bore: '#3a3a3a',
+  },
+  edges: {
+    threshold: 15,
+    thresholds: {
+      // Tanks inherited wallThreshold 7 so the silo Edges sat a wire cage vs
+      // r-holdbody quieter wall. Mixer stays 7.
+      tankWall: 15,
+      mixerWall: 7,
+      // 22 hid the 15° sweep joints; 10 draws them without adding
+      // any extra lines (torus facets are 45° across, 11.25° along since round 2).
+      elbow: 10,
+      // Round 3: 30 (was 15). The 8-gon facets are 45° and the joint bump crest ~44°, both above 30; the bump
+      // feet are ~22°, below it, so each joint draws ONE line (was two: a fat ring's 90° end caps). See
+      // pipe-geometry.ts and PIPE_RING_FOOT_DEG / PIPE_RING_CREST_DEG. Raising it past 45 would drop the
+      // longitudinal facets, which is the wire mesh itself.
+      pipe: 30,
+      valve: 15,
+      // Round 3: at 15 the 12-gon rim facets + inner ring + hub + spokes drew ~40 wire segments over a 16 px
+      // disc and turned the tint to grey/brown mush. 40 keeps the 90° steps (rim edge, spokes) only.
+      valveWheel: 40,
+      // threshold 1 on the west hex rings drew every face vs r-west filled
+      // ridges. Nut stays 1.
+      nut: 1,
+      westRing: 15,
+      // threshold 1 / instanced wireframe caged every hex face vs r-steam2
+      // filled coupling. West rings already use 15; west nut stays 1.
+      steamNut: 15,
+      area: 1,
+    },
+    lineWidth: 1,
+    // Line2 width in CSS px. meshBasic wireframe / gl.lineWidth stay 1 on
+    // most GPUs, which is why the outlines are fat Line2 meshes at all.
+    wireWidth: 1.5,
+  },
+  finishes: {
+    // Unlit white fill. Iso shade is tanks-only — pipes read as grey if
+    // they share it.
+    white: { kind: 'unlit', color: '#ffffff', offset: false },
+    // Generic iso shade: the `ShadedFill` defaults (end-cap spheres use it).
+    shaded: { kind: 'iso', shadeMin: 0.5, shadeMax: 0.92, hubWhite: 0.92, whiteHub: false, offset: true },
+    vessel: {
+      kind: 'iso',
+      // 0.27 left the silo left-wall too white vs r-holdbody iso (darker
+      // left, lighter right).
+      shadeMin: 0.22,
+      // Tanks inherited shadeMax 0.92 so the light side greyed vs
+      // r-holdbody even silo. Mixer stays 0.97.
+      shadeMax: 0.95,
+      // Tanks inherited hubWhite 0.77 so the iso hub greyed vs r-holdbody
+      // even silo. Mixer stays 0.88.
+      hubWhite: 0.85,
+      whiteHub: false,
+      offset: true,
+    },
+    flask: {
+      kind: 'iso',
+      // Mixer inherited TANK_SHADE_MIN 0.22 so the bottle left-wall charcoal
+      // dualled vs r-mixer's paler flask.
+      shadeMin: 0.4,
+      // Mixer inherited shadeMax 0.92 so the light side still greyed vs
+      // r-mixer white flask. Tanks keep the vessel shadeMax.
+      shadeMax: 0.97,
+      // Mixer inherited hubWhite 0.77 so the iso hub still greyed vs r-mixer
+      // even flask.
+      hubWhite: 0.88,
+      whiteHub: false,
+      offset: true,
+    },
+    // Unlit flat colour. On a GLB the source material's base colour wins
+    // over this default; `applyHolodeckStyle(..., { accent })` wins over both.
+    accent: { kind: 'unlit', color: '#c0392b', offset: false },
+  },
+};
+
+/** Finish names in a fixed order (tests, tuners, material-name parsing). */
+export const FINISH_NAMES: readonly FinishName[] = ['white', 'shaded', 'vessel', 'flask', 'accent'];
