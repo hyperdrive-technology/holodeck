@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getDefaultIsoRegistry } from '../registry/default';
-import { committedScene, createEditorState, editorReducer, emptyScene, nextId, stamp } from './editor-state';
+import { NO_ROUTE_NOTICE, committedScene, createEditorState, editorReducer, emptyScene, nextId, stamp } from './editor-state';
 
 const registry = getDefaultIsoRegistry();
 
@@ -246,5 +246,135 @@ describe('run mode', () => {
     s = editorReducer(s, { type: 'set-read-only', readOnly: false });
     s = editorReducer(s, { type: 'delete' });
     expect(s.scene.objects).toHaveLength(0);
+  });
+});
+
+describe('auto-routed pipes', () => {
+  const withTanks = () =>
+    createEditorState(
+      {
+        ...emptyScene('doc'),
+        objects: [
+          stamp(registry, 'tank', 0, 0, 'tank-1'),
+          stamp(registry, 'tank', 6, 0, 'tank-2'),
+          stamp(registry, 'tank', 12, 0, 'tank-3'),
+        ],
+      },
+      { registry },
+    );
+
+  const drawPipe = (s: ReturnType<typeof blank>, a: [number, number], b: [number, number]) => {
+    s = editorReducer(s, { type: 'pipe-mode' });
+    s = editorReducer(s, { type: 'floor-click', x: a[0], y: a[1] });
+    return editorReducer(s, { type: 'floor-click', x: b[0], y: b[1] });
+  };
+
+  it('commits a routed multi-segment pipe as ONE undo step', () => {
+    const before = withTanks();
+    // Tank 1 east port to tank 3 west port, with tank 2 in the way.
+    const s = drawPipe(before, [1, 0], [11, 0]);
+    expect(s.past).toHaveLength(1);
+    expect(s.revision).toBe(before.revision + 1);
+    const added = s.scene.objects.filter((o) => o.object === 'pipe' || o.object === 'elbow');
+    expect(added.filter((o) => o.object === 'elbow').length).toBeGreaterThanOrEqual(2);
+    expect(s.notice).toBeNull();
+    const undone = editorReducer(s, { type: 'undo' });
+    expect(undone.scene.objects.map((o) => o.id)).toEqual(['tank-1', 'tank-2', 'tank-3']);
+  });
+
+  it('snaps the first click to a port heading and chains from the end cell', () => {
+    let s = editorReducer(withTanks(), { type: 'pipe-mode' });
+    s = editorReducer(s, { type: 'floor-click', x: 0, y: 1 }); // inside tank-1 -> nearest port
+    // Equidistant from the east and west ports: declaration order (east first) wins.
+    expect(s.pipeStart).toEqual({ x: 1, y: 0 });
+    expect(s.pipeStartHeading).toBe('e');
+    s = editorReducer(s, { type: 'floor-click', x: 3, y: 5 });
+    expect(s.pipeStart).toEqual({ x: 3, y: 5 });
+    expect(s.pipeStartHeading).toBeNull();
+  });
+
+  it('falls back to the manhattan L with a notice when walled in, then clears the notice', () => {
+    const wall = [-1, 0, 1]
+      .flatMap((dx) => [-1, 0, 1].map((dy) => stamp(registry, 'valve', 20 + dx, dy, `v${dx}${dy}`)))
+      .filter((o) => !(o.x === 20 && o.y === 0));
+    const base = createEditorState({ ...emptyScene('doc'), objects: wall }, { registry });
+    const s = drawPipe(base, [20, 0], [24, 3]);
+    expect(s.notice).toBe(NO_ROUTE_NOTICE);
+    expect(s.scene.objects.filter((o) => o.object === 'pipe')).toHaveLength(2);
+    expect(s.scene.objects.find((o) => o.object === 'elbow')).toMatchObject({ x: 24, y: 0 });
+    expect(editorReducer(s, { type: 'cursor', x: 1, y: 1 }).notice).toBe(NO_ROUTE_NOTICE);
+    expect(editorReducer(s, { type: 'select-mode' }).notice).toBeNull();
+  });
+
+  it('a clear route sets no notice', () => {
+    expect(drawPipe(blank(), [0, 0], [4, 3]).notice).toBeNull();
+  });
+
+  describe('reroute-selected', () => {
+    it('replaces the selected run with a route around a new obstacle; undo restores it', () => {
+      let s = drawPipe(blank(), [0, 0], [10, 0]);
+      expect(s.scene.objects.map((o) => o.object)).toEqual(['pipe']);
+      // Drop a tank across the pipe, then reroute.
+      s = {
+        ...s,
+        scene: { ...s.scene, objects: [...s.scene.objects, stamp(registry, 'tank', 5, 0, 'tank-1')] },
+        selectedId: 'pipe-1',
+      };
+      const before = s.scene.objects;
+      const r = editorReducer(s, { type: 'reroute-selected' });
+      expect(r.past).toHaveLength(s.past.length + 1);
+      expect(r.revision).toBe(s.revision + 1);
+      expect(r.scene.objects.find((o) => o.id === 'tank-1')).toBeDefined();
+      const pipes = r.scene.objects.filter((o) => o.object === 'pipe');
+      expect(pipes.length).toBeGreaterThanOrEqual(3);
+      expect(r.scene.objects.filter((o) => o.object === 'elbow').length).toBeGreaterThanOrEqual(2);
+      expect(r.selectedId).toBe(pipes[0]!.id);
+      expect(pipes[0]).toMatchObject({ x: 0, y: 0 });
+      expect(pipes[pipes.length - 1]).toMatchObject({ toX: 10, toY: 0 });
+      const u = editorReducer(r, { type: 'undo' });
+      expect(u.scene.objects).toEqual(before);
+    });
+
+    it('reroutes the whole connected run when an elbow is selected', () => {
+      let s = drawPipe(blank(), [0, 0], [4, 3]);
+      expect(s.scene.objects).toHaveLength(3);
+      s = { ...s, scene: { ...s.scene, objects: [...s.scene.objects, stamp(registry, 'tank', 4, 0, 'tank-1')] } };
+      s = editorReducer(s, { type: 'select', id: 'elbow-1' });
+      const r = editorReducer(s, { type: 'reroute-selected' });
+      // Old run gone, endpoints preserved, and nothing routed through the tank.
+      expect(r.scene.objects.some((o) => o.id === 'elbow-1' && o.x === 4 && o.y === 0)).toBe(false);
+      const pipes = r.scene.objects.filter((o) => o.object === 'pipe');
+      expect(pipes[0]).toMatchObject({ x: 0, y: 0 });
+      expect(pipes[pipes.length - 1]).toMatchObject({ toX: 4, toY: 3 });
+    });
+
+    it('does not block itself: a free run reroutes to an equivalent route', () => {
+      let s = drawPipe(blank(), [0, 0], [5, 0]);
+      s = editorReducer(s, { type: 'select', id: 'pipe-1' });
+      const r = editorReducer(s, { type: 'reroute-selected' });
+      expect(r.scene.objects).toHaveLength(1);
+      expect(r.scene.objects[0]).toMatchObject({ x: 0, y: 0, toX: 5, toY: 0 });
+    });
+
+    it('is a no-op for non-pipe selections, no selection, and run mode', () => {
+      const s = editorReducer(withTanks(), { type: 'select', id: 'tank-1' });
+      expect(editorReducer(s, { type: 'reroute-selected' })).toBe(s);
+      const none = withTanks();
+      expect(editorReducer(none, { type: 'reroute-selected' })).toBe(none);
+      let p = drawPipe(blank(), [0, 0], [5, 0]);
+      p = editorReducer(editorReducer(p, { type: 'select', id: 'pipe-1' }), { type: 'set-read-only', readOnly: true });
+      expect(editorReducer(p, { type: 'reroute-selected' })).toBe(p);
+    });
+
+    it('flags the fallback when no route exists', () => {
+      const wall = [-1, 0, 1]
+        .flatMap((dx) => [-1, 0, 1].map((dy) => stamp(registry, 'valve', 20 + dx, dy, `v${dx}${dy}`)))
+        .filter((o) => !(o.x === 20 && o.y === 0));
+      let s = createEditorState({ ...emptyScene('doc'), objects: wall }, { registry });
+      s = { ...s, scene: { ...s.scene, objects: [...wall, { id: 'pipe-1', object: 'pipe', x: 20, y: 0, toX: 24, toY: 3 }] } };
+      s = editorReducer(s, { type: 'select', id: 'pipe-1' });
+      const r = editorReducer(s, { type: 'reroute-selected' });
+      expect(r.notice).toBe(NO_ROUTE_NOTICE);
+    });
   });
 });

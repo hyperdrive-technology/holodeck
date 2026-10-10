@@ -63,3 +63,8 @@ export type { AnimationBinding } from './anim/use-iso-animators';
 export { HolodeckModel } from './anim/HolodeckModel';
 export type { EditorHostMode, EditorMode, EditorState } from './editor/editor-state';
 export { BUILTIN_MODEL_URLS, modelUrl } from '../assets/models';
+
+// Obstacle-avoiding pipe routing (pure; see docs/routing.md).
+export { buildOccupancy, resolveRouteEnd, routePipe } from './routing';
+export type { Occupancy, OccupancyOptions, ResolvedRouteEnd, RouteEnd, RouteOptions, RoutePath } from './routing';
+export type { GridPoint, Heading } from './routing';

@@ -203,6 +203,11 @@ const ANNOTATION = 'Annotation';
 
 const LEVEL = { type: 'number', label: 'Level', default: 0.35, min: 0, max: 1, step: 0.01 } as const;
 
+const VESSEL_SIDE_PORTS: NonNullable<IsoPartDefinition['ports']> = {
+  east: { x: 1, y: 0, dir: 'e' },
+  west: { x: -1, y: 0, dir: 'w' },
+};
+
 export const BUILTIN_ISO_PARTS: readonly IsoPartDefinition[] = [
   {
     id: 'tank',
@@ -210,6 +215,9 @@ export const BUILTIN_ISO_PARTS: readonly IsoPartDefinition[] = [
     hint: '2×2 vessel',
     category: VESSELS,
     footprint: { w: 2, h: 2 },
+    // Side nozzles at floor level on the vessel edge (+-1 cell from the centre of the 2x2).
+    // `dir` is outward; routing/ports.ts rotates both offset and dir with placement.rotation.
+    ports: VESSEL_SIDE_PORTS,
     params: {
       // 0..1 fraction. The host maps REAL percent (0..100) to this range.
       level: LEVEL,
@@ -225,6 +233,9 @@ export const BUILTIN_ISO_PARTS: readonly IsoPartDefinition[] = [
     hint: '2×2 agitated vessel',
     category: VESSELS,
     footprint: { w: 2, h: 2 },
+    // Side nozzles at floor level on the vessel edge (+-1 cell from the centre of the 2x2).
+    // `dir` is outward; routing/ports.ts rotates both offset and dir with placement.rotation.
+    ports: VESSEL_SIDE_PORTS,
     params: {
       level: LEVEL,
       rpm: { type: 'number', label: 'Agitator speed', default: 0, min: 0, max: 300, step: 1, unit: 'rpm' },

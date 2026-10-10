@@ -2,8 +2,14 @@ import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { getDefaultIsoRegistry } from '../registry/default';
 import type { IsoPartDefinition } from '../registry/types';
+import type { Heading } from '../routing/grid';
+import { resolveRouteEnd } from '../routing/ports';
+import { findRun } from '../routing/run';
 import { routeToPlacements, type GridPoint } from './routing';
 import { sameCell } from './snap';
+
+/** Shown when A* finds no clear route and the manhattan L was drawn instead. */
+export const NO_ROUTE_NOTICE = 'No clear route — drew a straight L';
 
 /** `run` = view only; `edit` = place / drag / delete. Set by the host via `ProcessEditor`'s `mode`. */
 export type EditorHostMode = 'run' | 'edit';
@@ -18,6 +24,10 @@ export interface EditorState {
   placing: string | null;
   selectedId: string | null;
   pipeStart: GridPoint | null;
+  /** Required exit direction at `pipeStart` (outward port heading), or null for a bare cell. */
+  pipeStartHeading: Heading | null;
+  /** One-line inline message (e.g. the routing fallback). Cleared by the next non-pointer action. */
+  notice: string | null;
   cursor: GridPoint | null;
   drag: { id: string; origin: GridPoint; grab: GridPoint } | null;
   /**
@@ -42,6 +52,11 @@ export type EditorAction =
   | { type: 'drag-move'; x: number; y: number }
   | { type: 'drag-end' }
   | { type: 'delete' }
+  /**
+   * Re-route the pipe/elbow run containing the selection around the current
+   * obstacles (the run itself excluded). One undo step.
+   */
+  | { type: 'reroute-selected' }
   | { type: 'rotate-selected'; direction: 1 | -1 }
   | { type: 'undo' }
   | { type: 'redo' }
@@ -87,6 +102,8 @@ export function createEditorState(
     placing: null,
     selectedId: null,
     pipeStart: null,
+    pipeStartHeading: null,
+    notice: null,
     cursor: null,
     drag: null,
     revision: 0,
@@ -158,22 +175,61 @@ function placeAt(state: EditorState, x: number, y: number): EditorState {
   );
 }
 
-function finishPipe(state: EditorState, to: GridPoint): EditorState {
-  if (!state.pipeStart || sameCell(state.pipeStart, to)) {
-    return { ...state, pipeStart: to };
+function finishPipe(state: EditorState, click: GridPoint): EditorState {
+  if (!state.pipeStart) {
+    // First click: snap to a part port (heading = outward) or keep the bare cell.
+    const start = resolveRouteEnd(state.scene, state.registry, click);
+    return { ...state, pipeStart: start.cell, pipeStartHeading: start.heading ?? null };
   }
-  const objects = state.scene.objects;
-  const pipeA = nextId('pipe', objects);
-  const pipeB = nextId('pipe', [...objects, { id: pipeA, object: 'pipe', x: 0, y: 0 }]);
-  const added = routeToPlacements(state.pipeStart, to, {
-    pipeA,
-    pipeB,
-    elbow: nextId('elbow', objects),
-  });
+  const end = resolveRouteEnd(state.scene, state.registry, click);
+  if (sameCell(state.pipeStart, end.cell)) {
+    return { ...state, pipeStart: end.cell, pipeStartHeading: end.heading ?? null };
+  }
+  const { placements, noRoute } = routeToPlacements(
+    state.scene,
+    state.registry,
+    { cell: state.pipeStart, heading: state.pipeStartHeading ?? undefined },
+    end,
+    nextId,
+  );
+  // Chaining continues from the end cell with no required heading: a port's
+  // outward heading points back out of the pipe we just drew into it.
   return commit(
     state,
-    { ...state.scene, objects: [...state.scene.objects, ...added] },
-    { pipeStart: to, selectedId: added[0]?.id ?? state.selectedId },
+    { ...state.scene, objects: [...state.scene.objects, ...placements] },
+    {
+      pipeStart: end.cell,
+      pipeStartHeading: null,
+      selectedId: placements[0]?.id ?? state.selectedId,
+      notice: noRoute ? NO_ROUTE_NOTICE : null,
+    },
+  );
+}
+
+/**
+ * Replace the selected run with a fresh route between its two ends. The run is
+ * excluded from the obstacles so it does not block itself; its ends re-resolve
+ * through `resolveRouteEnd` so a run that leaves a tank port keeps leaving it.
+ */
+function rerouteSelected(state: EditorState): EditorState {
+  const run = state.selectedId ? findRun(state.scene.objects, state.selectedId) : null;
+  if (!run) {
+    return state;
+  }
+  if (sameCell(run.start, run.end)) {
+    return state; // closed loop: nothing sensible to route between
+  }
+  const ids = new Set(run.ids);
+  const rest = state.scene.objects.filter((o) => !ids.has(o.id));
+  const without = { objects: rest };
+  const from = resolveRouteEnd(without, state.registry, run.start);
+  const to = resolveRouteEnd(without, state.registry, run.end);
+  const band = state.scene.objects.find((o) => o.id === run.ids[0])?.band;
+  const { placements, noRoute } = routeToPlacements(without, state.registry, from, to, nextId, { band });
+  return commit(
+    state,
+    { ...state.scene, objects: [...rest, ...placements] },
+    { selectedId: placements[0]?.id ?? null, notice: noRoute ? NO_ROUTE_NOTICE : null },
   );
 }
 
@@ -190,7 +246,19 @@ function isRunPart(state: EditorState, partId: string): boolean {
   return state.registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, partId)?.draw === 'run';
 }
 
+/** Actions that may set a notice; every other non-pointer action dismisses it. */
+const NOTICE_KEEPERS: ReadonlySet<EditorAction['type']> = new Set(['cursor', 'drag-move', 'load', 'set-read-only']);
+
 export function editorReducer(state: EditorState, action: EditorAction): EditorState {
+  let next = reduce(state, action);
+  if (next.pipeStart === null && next.pipeStartHeading !== null) {
+    next = { ...next, pipeStartHeading: null };
+  }
+  const setsNotice = action.type === 'floor-click' || action.type === 'reroute-selected';
+  return next.notice && !setsNotice && !NOTICE_KEEPERS.has(action.type) ? { ...next, notice: null } : next;
+}
+
+function reduce(state: EditorState, action: EditorAction): EditorState {
   if (state.readOnly && !RUN_MODE_ACTIONS.has(action.type)) {
     return state;
   }
@@ -199,11 +267,11 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return { ...state, mode: 'select', placing: null, pipeStart: null, drag: null };
     case 'place-mode':
       if (isRunPart(state, action.object)) {
-        return { ...state, mode: 'draw-pipe', placing: null, pipeStart: null, selectedId: null, drag: null };
+        return { ...state, mode: 'draw-pipe', placing: null, pipeStart: null, pipeStartHeading: null, selectedId: null, drag: null };
       }
       return { ...state, mode: 'place', placing: action.object, pipeStart: null, selectedId: null, drag: null };
     case 'pipe-mode':
-      return { ...state, mode: 'draw-pipe', placing: null, pipeStart: null, selectedId: null, drag: null };
+      return { ...state, mode: 'draw-pipe', placing: null, pipeStart: null, pipeStartHeading: null, selectedId: null, drag: null };
     case 'cursor':
       return { ...state, cursor: { x: action.x, y: action.y } };
     case 'floor-click': {
@@ -294,6 +362,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         { selectedId: null },
       );
     }
+    case 'reroute-selected':
+      return rerouteSelected(state);
     case 'rotate-selected':
       return updateSelected(state, (o) => ({
         ...o,
@@ -335,6 +405,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return commit(state, { ...emptyScene(state.scene.id), theme: state.scene.theme, extensions: state.scene.extensions }, {
         selectedId: null,
         pipeStart: null,
+        pipeStartHeading: null,
         placing: null,
         mode: 'select',
       });

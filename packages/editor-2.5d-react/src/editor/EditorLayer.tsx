@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type ThreeEvent } from '@react-three/fiber';
 import { Pipe } from '../../assets/process';
 import { SceneGraph } from '../iso/SceneGraph';
@@ -9,7 +9,8 @@ import type { IsoMetrics } from '../registry/types';
 import { useIsoRegistry } from '../registry/react';
 import type { Vector3Tuple } from 'three';
 import type { ContributionRegistry } from '@holodeck/sdk';
-import { manhattanRoute, footprint } from './routing';
+import { resolveRouteEnd } from '../routing/ports';
+import { footprint, planRoute, type PlannedRoute } from './routing';
 import { pointerToGrid } from './snap';
 import { stamp, type EditorState } from './editor-state';
 
@@ -135,7 +136,7 @@ export function EditorLayer({
         <Ghost kind={state.placing} x={state.cursor.x} y={state.cursor.y} registry={registry} />
       ) : null}
       {!readOnly && state.mode === 'draw-pipe' && state.pipeStart && state.cursor ? (
-        <PipePreview from={state.pipeStart} to={state.cursor} registry={registry} />
+        <PipePreview state={state} registry={registry} />
       ) : null}
     </group>
   );
@@ -165,24 +166,51 @@ function Ghost({
   );
 }
 
-function PipePreview({
-  from,
-  to,
-  registry,
-}: {
-  from: { x: number; y: number };
-  to: { x: number; y: number };
-  registry: ContributionRegistry;
-}) {
-  const { pipes, elbow } = manhattanRoute(from, to);
+/** Ghost route colours: neutral grey while a clear route exists, red when only the straight-L fallback would be drawn. */
+const GHOST_OK = '#95a5a6';
+const GHOST_BLOCKED = '#ff3b30';
+
+/**
+ * Live route from the first click to the hovered cell. Recomputed at most once
+ * per animation frame (the cleanup cancels a pending frame when the pointer
+ * moves again, so only the latest cell is routed). `@tanstack/pacer` is not a
+ * dependency of this package, hence requestAnimationFrame.
+ */
+function useGhostRoute(state: EditorState, registry: ContributionRegistry): PlannedRoute | null {
+  const [plan, setPlan] = useState<PlannedRoute | null>(null);
+  const { pipeStart, pipeStartHeading, cursor, scene } = state;
+  const cx = cursor?.x;
+  const cy = cursor?.y;
+  useEffect(() => {
+    if (!pipeStart || cx === undefined || cy === undefined) {
+      setPlan(null);
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      const end = resolveRouteEnd(scene, registry, { x: cx, y: cy });
+      setPlan(planRoute(scene, registry, { cell: pipeStart, heading: pipeStartHeading ?? undefined }, end));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [scene, registry, pipeStart, pipeStartHeading, cx, cy]);
+  return plan;
+}
+
+function PipePreview({ state, registry }: { state: EditorState; registry: ContributionRegistry }) {
+  const plan = useGhostRoute(state, registry);
+  if (!plan) {
+    return null;
+  }
+  const band = plan.noRoute ? GHOST_BLOCKED : GHOST_OK;
   return (
     <group>
-      {pipes.map((pipe, i) => {
+      {plan.pipes.map((pipe, i) => {
         const [wx, , wz] = gridToWorld(pipe.x, pipe.y);
         const [tx, , tz] = gridToWorld(pipe.toX, pipe.toY);
-        return <Pipe key={i} from={[wx, wz]} to={[tx, tz]} band="#95a5a6" />;
+        return <Pipe key={i} from={[wx, wz]} to={[tx, tz]} band={band} />;
       })}
-      {elbow ? <SelectionHalo object={{ id: 'elbow-preview', object: 'elbow', x: elbow.x, y: elbow.y }} registry={registry} /> : null}
+      {plan.bends.map((b, i) => (
+        <SelectionHalo key={i} object={{ id: `elbow-preview-${i}`, object: 'elbow', x: b.x, y: b.y }} registry={registry} />
+      ))}
     </group>
   );
 }

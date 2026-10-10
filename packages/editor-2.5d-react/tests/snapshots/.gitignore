@@ -4,3 +4,4 @@
 *.png
 !reference-canvas.png
 !scene-json-arcentry*.png
+!auto-route.png

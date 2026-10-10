@@ -68,6 +68,7 @@ export function ProcessEditor({
     ? registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, selected.object)
     : undefined;
   const topDown = pose.radius < 1e-3;
+  const canReroute = !readOnly && Boolean(selected && (selected.object === 'pipe' || selected.object === 'elbow'));
   const parts = useIsoParts(registry);
   const firstPlaceable = parts.find((p) => !p.hideInPalette && p.draw !== 'run')?.id;
 
@@ -198,6 +199,10 @@ export function ProcessEditor({
       if (event.key === 'p' || event.key === 'P') {
         dispatch({ type: 'pipe-mode' });
       }
+      // R = reroute (the view rotates on Q/E, so R was free). Cmd/Ctrl+R stays the browser's reload.
+      if (!meta && (event.key === 'r' || event.key === 'R')) {
+        dispatch({ type: 'reroute-selected' });
+      }
       if (event.key === 'q' || event.key === 'Q') {
         setPose((p) => rotatePose(p, 1));
       }
@@ -234,6 +239,8 @@ export function ProcessEditor({
         data-testid="process-editor"
         data-mode={state.mode}
         data-host-mode={mode}
+        data-cursor={state.cursor ? `${state.cursor.x},${state.cursor.y}` : ''}
+        data-pipe-start={state.pipeStart ? `${state.pipeStart.x},${state.pipeStart.y}` : ''}
         data-object-count={String(state.scene.objects.length)}
         data-zoom={zoom.toFixed(1)}
         style={{
@@ -277,7 +284,29 @@ export function ProcessEditor({
               </aside>
             </>
           )}
-          <div ref={viewRef} style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
+          <div ref={viewRef} style={{ flex: 1, minWidth: 0, minHeight: 0, position: 'relative' }}>
+            {state.notice ? (
+              <div
+                role="status"
+                data-testid="editor-notice"
+                style={{
+                  position: 'absolute',
+                  top: 10,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  zIndex: 1,
+                  padding: '6px 12px',
+                  borderRadius: 4,
+                  background: SIDEBAR,
+                  color: SIDEBAR_TEXT,
+                  border: `1px solid ${ACCENT}`,
+                  font: FONT,
+                  pointerEvents: 'none',
+                }}
+              >
+                {state.notice}
+              </div>
+            ) : null}
             <ProcessSceneView
               scene={state.scene}
               zoom={zoom}
@@ -333,6 +362,8 @@ export function ProcessEditor({
           canUndo={state.past.length > 0}
           canRedo={state.future.length > 0}
           topDown={topDown}
+          canReroute={canReroute}
+          onReroute={() => dispatch({ type: 'reroute-selected' })}
           count={state.scene.objects.length}
           onNew={() => dispatch({ type: 'new-document' })}
           onUndo={() => dispatch({ type: 'undo' })}
@@ -437,8 +468,10 @@ function BottomBar({
   canUndo,
   canRedo,
   topDown,
+  canReroute,
   count,
   readOnly,
+  onReroute,
   onNew,
   onUndo,
   onRedo,
@@ -452,8 +485,10 @@ function BottomBar({
   canUndo: boolean;
   canRedo: boolean;
   topDown: boolean;
+  canReroute: boolean;
   count: number;
   readOnly: boolean;
+  onReroute: () => void;
   onNew: () => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -486,6 +521,9 @@ function BottomBar({
           <BarBtn onClick={onRedo} disabled={!canRedo}>
             redo
           </BarBtn>
+          <BarBtn onClick={onReroute} disabled={!canReroute} title="Reroute the selected pipe run around obstacles (R)">
+            Reroute
+          </BarBtn>
         </>
       )}
       <BarBtn onClick={onFit}>fit</BarBtn>
@@ -503,15 +541,18 @@ function BottomBar({
 function BarBtn({
   onClick,
   disabled,
+  title,
   children,
 }: {
   onClick: () => void;
   disabled?: boolean;
+  title?: string;
   children: string;
 }) {
   return (
     <button
       type="button"
+      title={title}
       onClick={onClick}
       disabled={disabled}
       style={{
