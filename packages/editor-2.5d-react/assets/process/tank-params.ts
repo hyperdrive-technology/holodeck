@@ -1,7 +1,21 @@
 import { Color } from 'three';
 import { HOLODECK_STYLE } from './style';
 
+/** Legacy cap prop on `<Tank cap>`; maps onto `TankTop` ('flat' = flat lid with a hatch). */
 export type TankCap = 'dome' | 'flat';
+
+/** Top closure of the base vessel. */
+export type TankTop = 'dome' | 'flat' | 'cone';
+/** Bottom closure (drawn below the shell floor, so `height` stays the straight-wall height). */
+export type TankBottom = 'flat' | 'dish' | 'cone';
+/** Stand under the bottom closure. */
+export type TankSupport = 'none' | 'legs' | 'skirt';
+/** Side nozzle on the kept arc. 'tangential' is the whirlpool inlet. */
+export type TankNozzle = 'none' | 'tangential';
+
+export const TANK_TOPS: readonly TankTop[] = ['dome', 'flat', 'cone'];
+export const TANK_BOTTOMS: readonly TankBottom[] = ['flat', 'dish', 'cone'];
+export const TANK_SUPPORTS: readonly TankSupport[] = ['none', 'legs', 'skirt'];
 
 /** Holding / ingredient flask. 0.9 filled the silo like a pie vs r-holdbody's inset U.
  *  0.8 / 0.76 were still a tad wide in o-holdbody after the lathe flask. */
@@ -33,7 +47,7 @@ export const MIXER_SHADE_MIN = HOLODECK_STYLE.finishes.flask.shadeMin;
 export const MIXER_LIQUID_OPACITY = 0.84;
 
 /** Tanks inherited liquidOpacity 0.69 so meridians printed through the fill vs r-holdbody solid U. Mixer stays 0.84. */
-export const TANK_LIQUID_OPACITY = 0.88; // round 3: 0.78 -> 0.9, reference liquid is solid; wire lines draw over it anyway (separate LineBags)
+export const TANK_LIQUID_OPACITY = 1; // was 0.88 with depthWrite off: back-wall lines and the liner printed through the cutout. Solid now.
 
 /** Aliases of `HOLODECK_STYLE.edges.thresholds.tankWall` / `.mixerWall`. */
 export const TANK_WALL_THRESHOLD = HOLODECK_STYLE.edges.thresholds.tankWall;
@@ -106,7 +120,10 @@ export type TankParams = {
   showWall: boolean;
   showLiner: boolean;
   showDome: boolean;
+  /** Flask (liquid) meridian lines, drawn all round. Off: they printed through the cutout as "mesh lines". */
   showBowl: boolean;
+  /** Inner ullage cage (meridians at the inner radius above the liquid). Off for the same reason. */
+  showInnerCage: boolean;
   showLiquid: boolean;
   shaftRadius: number;
   shaftLength: number;
@@ -118,6 +135,33 @@ export type TankParams = {
   shoulderTopRatio: number;
   /** Outer heel height. 0 = flat cylinder floor (tanks). */
   outerBowlHeight: number;
+  // --- Base-vessel presets (brewery HLT / mash tun / kettle / whirlpool) ---
+  /** Top closure. `<Tank cap>` (legacy) overrides this when given. */
+  top: TankTop;
+  /** Bottom closure below the shell floor. */
+  bottom: TankBottom;
+  /** Stand below the bottom closure (lifts the vessel by `standHeight`). */
+  support: TankSupport;
+  /** Draw the agitator (drive hat on the top, shaft + 3-blade impeller in the window). */
+  agitator: boolean;
+  /** Side nozzle on the kept arc. */
+  nozzle: TankNozzle;
+  /** Cone lid height (world units) for `top: 'cone'`. */
+  coneTopHeight: number;
+  /** Cone lid top radius as a fraction of the tank radius. */
+  coneTopRatio: number;
+  /** Dish depth below the floor for `bottom: 'dish'`. */
+  dishBottomHeight: number;
+  /** Cone depth below the floor for `bottom: 'cone'`. */
+  coneBottomHeight: number;
+  /** Cone outlet radius as a fraction of the tank radius. */
+  coneBottomRatio: number;
+  /** Stand height (legs or skirt) in world units. */
+  standHeight: number;
+  /** Leg radius. */
+  legRadius: number;
+  /** Number of legs. */
+  legCount: number;
 };
 
 export const DEFAULT_TANK_PARAMS: TankParams = {
@@ -160,7 +204,8 @@ export const DEFAULT_TANK_PARAMS: TankParams = {
   showWall: true,
   showLiner: true,
   showDome: true,
-  showBowl: true,
+  showBowl: false,
+  showInnerCage: false,
   showLiquid: true,
   shaftRadius: 0.04,
   shaftLength: 0.88,
@@ -169,7 +214,178 @@ export const DEFAULT_TANK_PARAMS: TankParams = {
   shoulderRatio: 0,
   shoulderTopRatio: 1,
   outerBowlHeight: 0,
+  top: 'dome',
+  bottom: 'flat',
+  support: 'none',
+  agitator: false,
+  nozzle: 'none',
+  coneTopHeight: 0.3,
+  coneTopRatio: 0.3,
+  dishBottomHeight: 0.14,
+  coneBottomHeight: 0.45,
+  coneBottomRatio: 0.12,
+  standHeight: 0.35,
+  legRadius: 0.035,
+  legCount: 4,
 };
+
+/**
+ * Vertical layout of the base vessel. `height` is the straight-wall height
+ * (what the scene stores and the resize handle drags); the top closure sits
+ * above it and the bottom closure + stand below it. `y0` is the shell floor in
+ * the Tank's local frame (origin at the wall's mid-height), `floorY` the
+ * lowest point (where the stand or closure meets the ground). A part
+ * positions the Tank at `[x, -floorY, z]` so that point lands on y = 0.
+ */
+export function tankLayout(
+  height: number,
+  radius: number,
+  p: Pick<
+    TankParams,
+    | 'top'
+    | 'bottom'
+    | 'support'
+    | 'domeHeight'
+    | 'domeYOffset'
+    | 'coneTopHeight'
+    | 'coneTopRatio'
+    | 'dishBottomHeight'
+    | 'coneBottomHeight'
+    | 'coneBottomRatio'
+    | 'standHeight'
+  >,
+): {
+  y0: number;
+  bodyTop: number;
+  topHeight: number;
+  apexY: number;
+  bottomDepth: number;
+  bottomY: number;
+  standHeight: number;
+  floorY: number;
+  /** Radius where the top closure ends (cone tip / hatch). */
+  topR: number;
+  /** Radius where the bottom closure ends (cone outlet). */
+  bottomR: number;
+} {
+  const y0 = -height / 2;
+  const bodyTop = height / 2;
+  const topHeight =
+    p.top === 'dome' ? Math.max(0, p.domeHeight + p.domeYOffset) : p.top === 'cone' ? Math.max(0.02, p.coneTopHeight) : 0;
+  const bottomDepth =
+    p.bottom === 'dish'
+      ? Math.min(Math.max(0, p.dishBottomHeight), radius)
+      : p.bottom === 'cone'
+        ? Math.max(0.02, p.coneBottomHeight)
+        : 0;
+  const standHeight = p.support === 'none' ? 0 : Math.max(0, p.standHeight);
+  const bottomY = y0 - bottomDepth;
+  return {
+    y0,
+    bodyTop,
+    topHeight,
+    apexY: bodyTop + topHeight,
+    bottomDepth,
+    bottomY,
+    standHeight,
+    floorY: bottomY - standHeight,
+    topR: p.top === 'cone' ? radius * Math.min(0.95, Math.max(0, p.coneTopRatio)) : radius,
+    bottomR: p.bottom === 'cone' ? radius * Math.min(0.9, Math.max(0, p.coneBottomRatio)) : radius,
+  };
+}
+
+/**
+ * World Y range of the straight (windowed) wall for a vessel seated on the
+ * floor by `tankLayout` (the part puts the Tank at y = -floorY). This is
+ * `IsoPartDefinition.wallSpan`: routing/vessel-ports.ts uses it to tell a
+ * pipe running through the cut-away window from one passing under a vessel
+ * on legs or a skirt.
+ */
+export function tankWallSpan(layout: Pick<ReturnType<typeof tankLayout>, 'y0' | 'bodyTop' | 'floorY'>): {
+  bottomY: number;
+  topY: number;
+} {
+  return { bottomY: layout.y0 - layout.floorY, topY: layout.bodyTop - layout.floorY };
+}
+
+/** Grid footprint (whole cells) that covers a vessel of `radius`; routing treats it as the obstacle box. */
+export function vesselFootprint(radius: number): { w: number; h: number } {
+  const cells = Math.max(1, Math.ceil(2 * Math.max(0, radius) - 1e-6));
+  return { w: cells, h: cells };
+}
+
+/**
+ * Pipe attach points for a vessel: east/west on the footprint edge at floor
+ * level, so a resized vessel keeps its nozzles on its silhouette.
+ */
+export function vesselPorts(radius: number): Record<string, { x: number; y: number; dir: 'n' | 'e' | 's' | 'w' }> {
+  const half = vesselFootprint(radius).w / 2;
+  return {
+    east: { x: half, y: 0, dir: 'e' },
+    west: { x: -half, y: 0, dir: 'w' },
+  };
+}
+
+/**
+ * Lathe profile (r, y) of a cone frustum, `stacks` segments from (r0, y0) to
+ * (r1, y1). Shared by the cone lid and the cone bottom.
+ */
+export function frustumProfile(r0: number, y0: number, r1: number, y1: number, stacks = 1): Array<[number, number]> {
+  const n = Math.max(1, Math.round(stacks));
+  const pts: Array<[number, number]> = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    pts.push([r0 + (r1 - r0) * t, y0 + (y1 - y0) * t]);
+  }
+  return pts;
+}
+
+/**
+ * Lathe profile of a shallow dish under the floor: a spherical cap of depth
+ * `depth` whose rim is at (radius, yRim) and pole at (0, yRim - depth).
+ */
+export function dishProfile(radius: number, yRim: number, depth: number, stacks = 3): Array<[number, number]> {
+  const d = Math.min(Math.max(1e-4, depth), radius);
+  // Sphere through the rim circle and the pole: R = (r^2 + d^2) / 2d.
+  const R = (radius * radius + d * d) / (2 * d);
+  const cy = yRim - d + R;
+  const n = Math.max(2, Math.round(stacks));
+  const phiRim = Math.asin(Math.min(1, radius / R));
+  const pts: Array<[number, number]> = [];
+  for (let i = 0; i <= n; i++) {
+    const phi = phiRim * (1 - i / n);
+    pts.push([R * Math.sin(phi), cy - R * Math.cos(phi)]);
+  }
+  return pts;
+}
+
+/** Leg positions around the vessel, inset from the wall so legs sit under the floor rim. */
+export function legPositions(radius: number, count: number, yawOffset = Math.PI / 4): Array<[number, number]> {
+  const n = Math.max(1, Math.round(count));
+  const r = radius * 0.78;
+  return Array.from({ length: n }, (_, i) => {
+    const a = yawOffset + (i * Math.PI * 2) / n;
+    return [r * Math.sin(a), r * Math.cos(a)];
+  });
+}
+
+/**
+ * Does any line-segment endpoint of `positions` (x,y,z triples) lie inside
+ * the window arc? Test helper for "no outline inside the cutout".
+ */
+export function segmentsInsideWindow(positions: Float32Array, windowStart: number, windowRad: number): number {
+  let n = 0;
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i];
+    const z = positions[i + 2];
+    if (Math.hypot(x, z) < 1e-6) continue;
+    // Cylinder theta: (x,z) = (sin θ, cos θ).
+    const th = Math.atan2(x, z);
+    // Strictly inside (jambs are allowed on the boundary).
+    if (angleOnArc(th, windowStart + 1e-3, windowRad - 2e-3)) n += 1;
+  }
+  return n;
+}
 
 export function mergeTankParams(partial?: Partial<TankParams>): TankParams {
   return { ...DEFAULT_TANK_PARAMS, ...partial };

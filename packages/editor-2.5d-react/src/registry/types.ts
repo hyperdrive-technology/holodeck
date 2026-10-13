@@ -11,6 +11,7 @@ import type { HolodeckStyle } from '../../assets/process/style';
 import type { FittingParams } from '../../assets/process/fitting-params';
 import type { TankParams } from '../../assets/process/tank-params';
 import type { IsoPlacement } from '../iso/scene';
+import type { PipeRunSpec } from '../iso/pipe-runs';
 
 export interface IsoPartParamSpec {
   type: 'number' | 'boolean' | 'string' | 'enum';
@@ -32,6 +33,11 @@ export interface IsoPartTuning {
   fittings?: Partial<FittingParams>;
   /** Grid cells that have a 90 degree elbow, so unique-mesh pipes trim like the pooled ones. */
   bendKeys?: ReadonlySet<string>;
+  /**
+   * Resolved pipe runs (bend + vessel-window clipping, src/iso/pipe-runs.ts),
+   * computed once in SceneGraph so unique-mesh pipes match the pooled ones.
+   */
+  pipeRuns?: ReadonlyMap<string, PipeRunSpec>;
 }
 
 export interface IsoPartProps {
@@ -50,7 +56,16 @@ export interface IsoInstancedRendererProps {
   items: IsoPlacement[];
   /** Every placement in the scene (pipes read neighbouring elbows to trim). */
   all: readonly IsoPlacement[];
+  /** Resolved pipe runs by id (SceneGraph); absent = the renderer trims from `all` itself. */
+  pipeRuns?: ReadonlyMap<string, PipeRunSpec>;
   onObjectPointerDown?: (id: string, event: import('@react-three/fiber').ThreeEvent<PointerEvent>) => void;
+}
+
+/** A pipe attach point: part-local offset from the centre (cells) and outward direction. */
+export interface IsoPartPort {
+  x: number;
+  y: number;
+  dir: 'n' | 'e' | 's' | 'w';
 }
 
 export interface IsoPartDefinition extends Contribution {
@@ -64,8 +79,46 @@ export interface IsoPartDefinition extends Contribution {
   hideInPalette?: boolean;
   /** Grid cells; rotation is handled by the editor. */
   footprint: { w: number; h: number };
-  /** Grid-relative pipe attach points. */
-  ports?: Record<string, { x: number; y: number; dir: 'n' | 'e' | 's' | 'w' }>;
+  /**
+   * Per-placement footprint for parts whose size is a param (a vessel's
+   * `radius`). The editor's halo / resize handles read it through
+   * `placementFootprint()`; `footprint` stays the default-size fallback.
+   * TODO(routing): src/routing/occupancy.ts still reads `def.footprint`
+   * only, so a resized vessel blocks its default footprint until routing
+   * adopts `placementFootprint` (owned by the routing work stream).
+   */
+  footprintOf?: (placement: IsoPlacement) => { w: number; h: number };
+  /**
+   * On-canvas resize handles (edit mode). Names the number params the
+   * handles drag: `radius` (side handle, world units from the centre) and
+   * `height` (top handle, world units from the floor). Both must be declared
+   * in `params` with min/max/step so the drag can clamp and snap.
+   */
+  resize?: {
+    radius?: string;
+    height?: string;
+    /** World Y of the top handle for a placement (default: the height param + 0.4). */
+    topY?: (placement: IsoPlacement) => number;
+  };
+  /**
+   * Grid-relative pipe attach points. Ports inside the vessel's cutout are
+   * valid: a pipe there is drawn clipped at the wall with a cut-section end
+   * (see `cutout` and routing/vessel-ports.ts).
+   */
+  ports?: Record<string, IsoPartPort>;
+  /**
+   * Fixed cut-away window (degrees, Tank's wall-angle frame: windowYaw 0 = +y,
+   * 90 = +x), for parts whose window is not a `windowYaw` / `windowDeg` param.
+   * Pipes that run into it are clipped at the wall (routing/vessel-ports.ts).
+   */
+  cutout?: { windowYawDeg: number; windowDeg: number };
+  /**
+   * World Y range of the straight (windowed) wall, for vessels raised on
+   * legs or a skirt: a floor-level pipe below `bottomY` passes under the
+   * window rather than through it. Absent = the wall stands on the floor up
+   * to the placement height (routing/vessel-ports.ts `vesselWallSpan`).
+   */
+  wallSpan?: (placement: IsoPlacement) => { bottomY: number; topY: number };
   /** The animatable / inspectable surface (level, rpm, open, running, temp...). */
   params: Record<string, IsoPartParamSpec>;
   /** What the palette stamps onto a new placement (height, band, width...). */

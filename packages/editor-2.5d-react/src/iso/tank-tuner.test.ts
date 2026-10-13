@@ -135,7 +135,7 @@ describe('tank tuner', () => {
     expect(DEFAULT_TANK_PARAMS.innerRatio).toBeCloseTo(TANK_INNER_RATIO);
     expect(DEFAULT_TANK_PARAMS.radialSegments).toBe(15);
     expect(DEFAULT_TANK_PARAMS.cageThreshold).toBe(1);
-    expect(DEFAULT_TANK_PARAMS.domeHeightSegments).toBe(2);
+    expect(DEFAULT_TANK_PARAMS.domeHeightSegments).toBe(3);
     expect(DEFAULT_TANK_PARAMS.domeHeight).toBeCloseTo(0.32);
     expect(DEFAULT_TANK_PARAMS.domeYOffset).toBeCloseTo(-0.02);
     expect(DEFAULT_TANK_PARAMS.bowlHeight).toBeCloseTo(0.24);

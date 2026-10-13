@@ -9,7 +9,8 @@ import { Area, Elbow, EndCap, Label, Mixer, Pipe, Shaft, Tank, Valve } from '../
 import { LABEL_PLANE_Y } from '../../assets/process/Label';
 import { formatLabelText } from './label-text';
 import { mergeFittingParams } from '../../assets/process/fitting-params';
-import { pipeWorldY, trimRun } from '../../assets/process/pipe-math';
+import { pipeWorldY } from '../../assets/process/pipe-math';
+import { pipeRunSpec } from '../iso/pipe-runs';
 import {
   tunedVesselHeight,
   MIXER_INNER_RATIO,
@@ -33,6 +34,8 @@ import {
   MIXER_WALL_THRESHOLD,
   type TankParams,
 } from '../../assets/process/tank-params';
+import { ELBOW_BEND_MODES, ELBOW_BEND_PARAM } from '../routing/elbows';
+import { DEFAULT_TANK_CUTOUT } from '../routing/vessel-ports';
 import type { HolodeckStyle } from '../../assets/process/style';
 import { BUILTIN_ISO_ANIMATORS } from '../anim/animators';
 import { gridToWorld } from '../iso/grid';
@@ -124,17 +127,11 @@ function ValvePart({ placement, tuning }: IsoPartProps) {
 }
 
 function PipePart({ placement, tuning }: IsoPartProps) {
-  if (placement.toX === undefined || placement.toY === undefined) return null;
-  const [wx, , wz] = gridToWorld(placement.x, placement.y);
-  const [tx, , tz] = gridToWorld(placement.toX, placement.toY);
-  const bends = tuning?.bendKeys;
-  const trimmed = trimRun(
-    [wx, wz],
-    [tx, tz],
-    Boolean(bends?.has(`${placement.x},${placement.y}`)),
-    Boolean(bends?.has(`${placement.toX},${placement.toY}`)),
-  );
-  return <Pipe from={trimmed.from} to={trimmed.to} band={placement.band} params={tuning?.fittings} />;
+  // SceneGraph resolves every run once (bends + vessel windows); a bare
+  // SceneObjectView (no SceneGraph) falls back to bend trimming only.
+  const run = tuning?.pipeRuns?.get(placement.id) ?? pipeRunSpec(placement, tuning?.bendKeys);
+  if (!run || run.hidden) return null;
+  return <Pipe from={run.from} to={run.to} ends={run.ends} band={placement.band} params={tuning?.fittings} />;
 }
 
 function ElbowPart({ placement, tuning }: IsoPartProps) {
@@ -184,8 +181,13 @@ function EndCapPart({ placement, tuning }: IsoPartProps) {
 
 // Pool renderers: thin adapters from the generic (items, all) contract to the
 // InstancedLibrary components, which keep their own props.
-const PipePool = ({ items, all, onObjectPointerDown }: IsoInstancedRendererProps) => (
-  <InstancedPipes items={items} elbows={all.filter((o) => o.object === 'elbow')} onObjectPointerDown={onObjectPointerDown} />
+const PipePool = ({ items, all, pipeRuns, onObjectPointerDown }: IsoInstancedRendererProps) => (
+  <InstancedPipes
+    items={items}
+    elbows={all.filter((o) => o.object === 'elbow')}
+    runs={pipeRuns}
+    onObjectPointerDown={onObjectPointerDown}
+  />
 );
 const ElbowPool = ({ items, onObjectPointerDown }: IsoInstancedRendererProps) => (
   <InstancedElbows items={items} onObjectPointerDown={onObjectPointerDown} />
@@ -218,6 +220,9 @@ export const BUILTIN_ISO_PARTS: readonly IsoPartDefinition[] = [
     // Side nozzles at floor level on the vessel edge (+-1 cell from the centre of the 2x2).
     // `dir` is outward; routing/ports.ts rotates both offset and dir with placement.rotation.
     ports: VESSEL_SIDE_PORTS,
+    // Cut-away window (TankPart renders the default Tank window). The east port
+    // sits inside this arc: pipes there are clipped at the wall (routing/vessel-ports.ts).
+    cutout: DEFAULT_TANK_CUTOUT,
     params: {
       // 0..1 fraction. The host maps REAL percent (0..100) to this range.
       level: LEVEL,
@@ -236,6 +241,7 @@ export const BUILTIN_ISO_PARTS: readonly IsoPartDefinition[] = [
     // Side nozzles at floor level on the vessel edge (+-1 cell from the centre of the 2x2).
     // `dir` is outward; routing/ports.ts rotates both offset and dir with placement.rotation.
     ports: VESSEL_SIDE_PORTS,
+    cutout: { windowYawDeg: MIXER_WINDOW_YAW, windowDeg: MIXER_WINDOW_DEG },
     params: {
       level: LEVEL,
       rpm: { type: 'number', label: 'Agitator speed', default: 0, min: 0, max: 300, step: 1, unit: 'rpm' },
@@ -289,7 +295,11 @@ export const BUILTIN_ISO_PARTS: readonly IsoPartDefinition[] = [
     hint: 'corner fitting',
     category: PIPING,
     footprint: { w: 1, h: 1 },
-    params: {},
+    params: {
+      // "manual": `rotation` sets the bend (absent = knuckle collar).
+      // "auto": the rotation comes from the two pipe ends on this cell (routing/elbows.ts).
+      [ELBOW_BEND_PARAM]: { type: 'enum', label: 'Bend', default: 'manual', options: [...ELBOW_BEND_MODES] },
+    },
     instanced: true,
     instancedRenderer: ElbowPool,
     component: ElbowPart,

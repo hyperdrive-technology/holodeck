@@ -140,7 +140,7 @@ describe('scene document', () => {
     expect(MIXER_SHADE_MIN).toBeCloseTo(0.4);
     expect(MIXER_SHADE_MIN).toBeGreaterThan(TANK_SHADE_MIN);
     expect(MIXER_LIQUID_OPACITY).toBeCloseTo(0.84);
-    expect(TANK_LIQUID_OPACITY).toBeCloseTo(0.88); // round 3: 0.78 -> 0.88, solid-looking liquid (reference)
+    expect(TANK_LIQUID_OPACITY).toBe(1); // solid: 0.88 with depthWrite off let back-wall lines print through the cutout
     expect(TANK_LIQUID_OPACITY).toBeGreaterThan(0.69);
     expect(DEFAULT_TANK_PARAMS.liquidOpacity).toBe(TANK_LIQUID_OPACITY);
     // Round 3 dropped the old MIXER > TANK invariant: tank liquid now has shaded side/surface, so it can be as solid as the mixer's.

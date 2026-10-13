@@ -1,6 +1,7 @@
 import { Instance, Instances } from '@react-three/drei';
 import { useEffect, useMemo } from 'react';
-import { buildPipeGeometry } from '../../assets/process/pipe-geometry';
+import { buildPipeBoreGeometry, buildPipeGeometry } from '../../assets/process/pipe-geometry';
+import { bendKeysOf, pipeRunSpec, type PipeRunSpec } from './pipe-runs';
 import { Edges } from '../../assets/process/Edges';
 import type { ThreeEvent } from '@react-three/fiber';
 import { STEAM_NUT_BORE_SIDES, STEAM_NUT_EDGE_THRESHOLD, STEAM_NUT_INNER, STEAM_NUT_LEN, STEAM_NUT_R, STEAM_NUT_ROT, STEAM_NUT_ROT_ORDER } from '../../assets/process/EndCap';
@@ -29,11 +30,9 @@ import {
   WEST_RING_RADIAL,
   WEST_TANK_END,
   alongPipe,
-  elbowOffsetShift,
-  ELBOW_OFFSET,
+  elbowInstancePose,
   pipePose,
   pipeWorldY,
-  trimRun,
 } from '../../assets/process/pipe-math';
 import { INSTANCE_LIMIT, slices } from './partition-scene';
 import { gridToWorld } from './grid';
@@ -91,27 +90,21 @@ function collarsFor(
 export function InstancedPipes({
   items,
   elbows = [],
+  runs,
   onObjectPointerDown,
 }: {
   items: ScenePlacement[];
   elbows?: ScenePlacement[];
+  /** Resolved runs from SceneGraph (bend + vessel-window clipping); absent = trim from `elbows` here. */
+  runs?: ReadonlyMap<string, PipeRunSpec>;
   onObjectPointerDown?: ObjectPointer;
 }) {
   const style = useHolodeckStyle();
-  const bends = new Set(
-    elbows.filter((e) => e.rotation != null).map((e) => `${e.x},${e.y}`),
-  );
-  const posed = items.map((object) => {
-    const [wx, , wz] = gridToWorld(object.x, object.y);
-    const [tx, , tz] = gridToWorld(object.toX ?? object.x, object.toY ?? object.y);
-    const trimmed = trimRun(
-      [wx, wz],
-      [tx, tz],
-      bends.has(`${object.x},${object.y}`),
-      bends.has(`${object.toX},${object.toY}`),
-    );
-    const pose = pipePose(trimmed.from, trimmed.to);
-    return { object, pose };
+  const bends = runs ? undefined : bendKeysOf(elbows);
+  const posed = items.flatMap((object) => {
+    const run = runs?.get(object.id) ?? pipeRunSpec(object, bends);
+    if (!run || run.hidden) return [];
+    return [{ object, run, pose: pipePose(run.from, run.to) }];
   });
   return (
     <>
@@ -129,12 +122,12 @@ export function InstancedPipes({
             save no draw calls, and rings need real (unscaled) geometry.
             The west nipple gets its own hex collars below, so no end flanges.
           */}
-          {slice.map(({ object, pose }) => (
+          {slice.map(({ object, run, pose }) => (
             <PipeRun
               key={object.id}
               object={object}
               pose={pose}
-              endFlanges={object.id !== WEST_NIPPLE_ID}
+              ends={object.id === WEST_NIPPLE_ID ? plainUnlessCut(run.ends) : run.ends}
               onObjectPointerDown={onObjectPointerDown}
             />
           ))}
@@ -187,34 +180,46 @@ export function InstancedPipes({
   );
 }
 
+/** The west nipple draws its own hex collars, so its uncut ends get no flange. */
+function plainUnlessCut(ends: PipeRunSpec['ends']): PipeRunSpec['ends'] {
+  return { from: ends.from === 'cut' ? 'cut' : 'plain', to: ends.to === 'cut' ? 'cut' : 'plain' };
+}
+
 function PipeRun({
   object,
   pose,
-  endFlanges,
+  ends,
   onObjectPointerDown,
 }: {
   object: ScenePlacement;
   pose: ReturnType<typeof pipePose>;
-  endFlanges: boolean;
+  ends: PipeRunSpec['ends'];
   onObjectPointerDown?: ObjectPointer;
 }) {
   const style = useHolodeckStyle();
   const geometry = useMemo(
-    () => buildPipeGeometry({ length: pose.length, endFlanges }),
-    [pose.length, endFlanges],
+    () => buildPipeGeometry({ length: pose.length, ends }),
+    [pose.length, ends.from, ends.to],
   );
   useEffect(() => () => geometry.dispose(), [geometry]);
+  // Cut ends (pipe running into a vessel window) show the open bore inside the tube-wall ring.
+  const bore = useMemo(
+    () => buildPipeBoreGeometry({ length: pose.length, ends }),
+    [pose.length, ends.from, ends.to],
+  );
+  useEffect(() => () => bore?.dispose(), [bore]);
   return (
-    <mesh
-      geometry={geometry}
-      position={pose.mid}
-      rotation={pose.rotation}
-      rotation-order={pose.rotationOrder}
-      onPointerDown={(event) => onObjectPointerDown?.(object.id, event)}
-    >
-      <WhiteFill />
-      <Edges threshold={style.edges.thresholds.pipe} lineWidth={PIPE_WIRE_WIDTH} />
-    </mesh>
+    <group position={pose.mid} rotation={pose.rotation} rotation-order={pose.rotationOrder}>
+      <mesh geometry={geometry} onPointerDown={(event) => onObjectPointerDown?.(object.id, event)}>
+        <WhiteFill />
+        <Edges threshold={style.edges.thresholds.pipe} lineWidth={PIPE_WIRE_WIDTH} />
+      </mesh>
+      {bore ? (
+        <mesh geometry={bore}>
+          <meshBasicMaterial color={style.colors.bore} toneMapped={false} />
+        </mesh>
+      ) : null}
+    </group>
   );
 }
 
@@ -231,6 +236,12 @@ function knucklePose(object: ScenePlacement): {
     position: [wx, pipeWorldY(), wz],
     rotation: object.id.includes('-front') ? [0, 0, Math.PI / 2] : [Math.PI / 2, 0, 0],
   };
+}
+
+/** Bend elbows (numeric rotation): see `elbowInstancePose` for the yaw convention. */
+function bendPose(object: ScenePlacement) {
+  const [wx, , wz] = gridToWorld(object.x, object.y);
+  return elbowInstancePose(wx, wz, object.rotation ?? 0);
 }
 
 export function InstancedElbows({
@@ -254,30 +265,26 @@ export function InstancedElbows({
                 <torusGeometry args={[ELBOW_RADIUS, PIPE_RADIUS, ELBOW_RADIAL, ELBOW_SWEEP, Math.PI / 2]} />
                 <WhiteFill />
                 {bends.map((object) => {
-                  const [wx, , wz] = gridToWorld(object.x, object.y);
-                  const yaw = object.rotation ?? 0;
-                  const [dx, dz] = elbowOffsetShift(yaw, ELBOW_OFFSET);
+                  const pose = bendPose(object);
                   return (
                     <Instance
                       key={object.id}
-                      position={[wx + dx, pipeWorldY(), wz + dz]}
-                      rotation={[Math.PI / 2, yaw, 0]}
-                      rotation-order="XYZ"
+                      position={pose.position}
+                      rotation={pose.rotation}
+                      rotation-order={pose.rotationOrder}
                       onPointerDown={(event) => onObjectPointerDown?.(object.id, event)}
                     />
                   );
                 })}
               </Instances>
               {bends.map((object) => {
-                const [wx, , wz] = gridToWorld(object.x, object.y);
-                const yaw = object.rotation ?? 0;
-                const [dx, dz] = elbowOffsetShift(yaw, ELBOW_OFFSET);
+                const pose = bendPose(object);
                 return (
                   <mesh
                     key={`${object.id}-e`}
-                    position={[wx + dx, pipeWorldY(), wz + dz]}
-                    rotation={[Math.PI / 2, yaw, 0]}
-                    rotation-order="XYZ"
+                    position={pose.position}
+                    rotation={pose.rotation}
+                    rotation-order={pose.rotationOrder}
                   >
                     <torusGeometry args={[ELBOW_RADIUS, PIPE_RADIUS, ELBOW_RADIAL, ELBOW_SWEEP, Math.PI / 2]} />
                     <meshBasicMaterial transparent opacity={0} depthWrite={false} />

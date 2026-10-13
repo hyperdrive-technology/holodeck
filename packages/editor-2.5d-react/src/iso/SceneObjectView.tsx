@@ -18,6 +18,7 @@ export function SceneObjectView({
   tankParams,
   fittings,
   bendKeys,
+  pipeRuns,
   selected = false,
   registry: registryProp,
 }: {
@@ -28,6 +29,8 @@ export function SceneObjectView({
   fittings?: IsoPartTuning['fittings'];
   /** Grid cells that have a 90° elbow, so unique-mesh pipes trim like InstancedPipes. */
   bendKeys?: ReadonlySet<string>;
+  /** Resolved pipe runs (SceneGraph, pipe-runs.ts): bend + vessel-window clipping. */
+  pipeRuns?: IsoPartTuning['pipeRuns'];
   selected?: boolean;
   registry?: ContributionRegistry;
 }) {
@@ -44,7 +47,7 @@ export function SceneObjectView({
       style={style}
       selected={selected}
       def={def}
-      tuning={{ tankParams, fittings, bendKeys }}
+      tuning={{ tankParams, fittings, bendKeys, pipeRuns }}
     />
   );
 }

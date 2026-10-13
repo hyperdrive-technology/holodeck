@@ -237,3 +237,31 @@ describe('resolveParams', () => {
     expect(metrics).toEqual({ a: { level: 0.9 } });
   });
 });
+
+import { placementFootprint, snapParamValue } from './params';
+describe('placementFootprint / snapParamValue', () => {
+  it('uses footprintOf when the part sizes itself from a param, else the static footprint', () => {
+    const registry = createIsoRegistryWithBuiltins();
+    const sized: IsoPartDefinition = {
+      id: 'test:sized',
+      label: 'Sized',
+      footprint: { w: 2, h: 2 },
+      footprintOf: (p) => ({ w: Math.ceil(2 * Number(p.params?.radius ?? 1)), h: 2 }),
+      params: { radius: { type: 'number', label: 'R', default: 1 } },
+      component: () => null,
+    };
+    registry.install({ id: 'test.sized', version: '1', contributions: { [HOLODECK_KINDS.isoPart]: [sized] } });
+    expect(placementFootprint(registry, { id: 'a', object: 'test:sized', x: 0, y: 0, params: { radius: 1.6 } })).toEqual({ w: 4, h: 2 });
+    expect(placementFootprint(registry, { id: 'a', object: 'tank', x: 0, y: 0 })).toEqual({ w: 2, h: 2 });
+    expect(placementFootprint(registry, { id: 'a', object: 'nope', x: 0, y: 0 })).toEqual({ w: 1, h: 1 });
+  });
+
+  it('snaps to the step and clamps to min/max without float noise', () => {
+    const spec = { min: 0.3, max: 3, step: 0.05 };
+    expect(snapParamValue(spec, 1.2345)).toBe(1.25);
+    expect(snapParamValue(spec, 0.1)).toBe(0.3);
+    expect(snapParamValue(spec, 9)).toBe(3);
+    expect(snapParamValue({ step: 0.1 }, 0.3000000004)).toBe(0.3);
+    expect(snapParamValue(undefined, 1.234)).toBe(1.234);
+  });
+});

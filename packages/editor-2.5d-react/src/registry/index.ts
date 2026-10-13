@@ -1,5 +1,5 @@
 export * from './types';
-export { resolveParams } from './params';
+export { placementFootprint, resolveParams, snapParamValue } from './params';
 export {
   ISO_KINDS,
   ISO_PART_KIND,
