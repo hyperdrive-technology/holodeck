@@ -23,7 +23,10 @@ import { Palette } from './Palette';
 import { ProcessSceneView, sceneTarget } from './ProcessSceneView';
 
 export interface ProcessEditorProps {
-  /** The document. Controlled: edits are reported through `onChange`; a new object here replaces the editor's copy. */
+  /**
+   * The document. Controlled: edits are reported through `onChange`; a new object here replaces the editor's copy.
+   * `scene.id` is the document identity: a new id resets undo/redo, selection and in-progress tools.
+   */
   scene: IsoSceneFile;
   /** Called with the new scene after each committed action (place, delete, drag end, inspector edit, undo, redo). */
   onChange: (scene: IsoSceneFile) => void;

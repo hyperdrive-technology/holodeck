@@ -468,3 +468,113 @@ describe('resize handles (radius / height params)', () => {
     expect(editorReducer(s, { type: 'load', scene: s.scene }).resize).toBeNull();
   });
 });
+
+/** holodeck#9: undo/redo must never cross a document switch. */
+describe('load: switching documents', () => {
+  const docA = () => {
+    let s = createEditorState(emptyScene('A'));
+    s = editorReducer(s, { type: 'place-mode', object: 'tank' });
+    s = editorReducer(s, { type: 'floor-click', x: 0, y: 0 }); // tank-1
+    s = editorReducer(s, { type: 'floor-click', x: 4, y: 0 }); // tank-2
+    s = editorReducer(s, { type: 'undo' }); // A: past 1, future 1
+    return s;
+  };
+  const docB = () => ({ ...emptyScene('B'), objects: [stamp(registry, 'valve', 2, 2, 'v-1')] });
+
+  it('the repro: edit A, load B, undo does not restore A (and emits nothing)', () => {
+    const a = docA();
+    expect(a.past).toHaveLength(1);
+    expect(a.future).toHaveLength(1);
+    const b = docB();
+    const loaded = editorReducer(a, { type: 'load', scene: b });
+    expect(loaded.past).toEqual([]);
+    expect(loaded.future).toEqual([]);
+    expect(committedScene(a, loaded)).toBeNull();
+
+    const undone = editorReducer(loaded, { type: 'undo' });
+    expect(undone).toBe(loaded);
+    expect(committedScene(loaded, undone)).toBeNull();
+    const redone = editorReducer(loaded, { type: 'redo' });
+    expect(redone).toBe(loaded);
+    expect(redone.scene.id).toBe('B');
+  });
+
+  it('resets every transient editing field but keeps registry, read-only and a monotonic revision', () => {
+    let a = docA();
+    a = editorReducer(a, { type: 'select', id: 'tank-1' });
+    a = editorReducer(a, { type: 'drag-start', id: 'tank-1', x: 0, y: 0 });
+    a = editorReducer(a, { type: 'cursor', x: 3, y: 3 });
+    a = { ...a, notice: 'something', mode: 'draw-pipe', pipeStart: { x: 1, y: 1 }, pipeStartHeading: 'e', placing: 'tank' };
+    const b = docB();
+    const loaded = editorReducer(a, { type: 'load', scene: b });
+    expect(loaded).toMatchObject({
+      mode: 'select',
+      placing: null,
+      selectedId: null,
+      pipeStart: null,
+      pipeStartHeading: null,
+      notice: null,
+      cursor: null,
+      drag: null,
+      resize: null,
+      readOnly: a.readOnly,
+      revision: a.revision,
+    });
+    expect(loaded.registry).toBe(a.registry);
+    // The caller's object, so ProcessEditor's echo check (`scene !== sceneRef`) holds.
+    expect(loaded.scene).toBe(b);
+  });
+
+  it('keeps read-only across a switch', () => {
+    const ro = editorReducer(docA(), { type: 'set-read-only', readOnly: true });
+    expect(editorReducer(ro, { type: 'load', scene: docB() }).readOnly).toBe(true);
+  });
+
+  it('edits in B after the switch undo back to B, never to A', () => {
+    let s = editorReducer(docA(), { type: 'load', scene: docB() });
+    s = editorReducer(s, { type: 'place-mode', object: 'tank' });
+    s = editorReducer(s, { type: 'floor-click', x: 8, y: 8 });
+    s = editorReducer(s, { type: 'undo' });
+    expect(s.scene.id).toBe('B');
+    expect(s.scene.objects.map((o) => o.id)).toEqual(['v-1']);
+    expect(editorReducer(s, { type: 'undo' })).toBe(s);
+  });
+
+  it('switching back to A starts A with empty history too', () => {
+    const a = docA();
+    const back = editorReducer(editorReducer(a, { type: 'load', scene: docB() }), { type: 'load', scene: a.scene });
+    expect(back.scene.id).toBe('A');
+    expect(back.past).toEqual([]);
+    expect(back.future).toEqual([]);
+  });
+
+  it('same id (external update of the open document) keeps history and a still-present selection', () => {
+    let a = docA();
+    a = editorReducer(a, { type: 'select', id: 'tank-1' });
+    const external = { ...a.scene, objects: [...a.scene.objects, stamp(registry, 'valve', 9, 9, 'v-9')] };
+    const loaded = editorReducer(a, { type: 'load', scene: external });
+    expect(loaded.past).toBe(a.past);
+    expect(loaded.future).toBe(a.future);
+    expect(loaded.selectedId).toBe('tank-1');
+    const gone = editorReducer(a, { type: 'load', scene: { ...a.scene, objects: [] } });
+    expect(gone.selectedId).toBeNull();
+  });
+
+  it('emits nothing for the switch in an action stream, then one emit per commit in B', () => {
+    const emitted: { id: string }[] = [];
+    let s = docA();
+    for (const action of [
+      { type: 'load', scene: docB() },
+      { type: 'undo' },
+      { type: 'redo' },
+      { type: 'place-mode', object: 'valve' },
+      { type: 'floor-click', x: 5, y: 5 },
+    ] as Parameters<typeof editorReducer>[1][]) {
+      const next = editorReducer(s, action);
+      const scene = committedScene(s, next);
+      if (scene) emitted.push(scene);
+      s = next;
+    }
+    expect(emitted.map((e) => e.id)).toEqual(['B']);
+  });
+});
