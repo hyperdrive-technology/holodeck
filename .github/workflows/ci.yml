@@ -102,3 +102,10 @@ jobs:
       - name: Build
         working-directory: holodeck/packages/${{ matrix.package }}
         run: pnpm build
+
+      # Load the built dist/ by package name in plain Node, as both ESM and CJS,
+      # and (editor-2.5d-react) check every bundled GLB URL points at a real,
+      # published file. Catches holodeck#7-style "builds fine, crashes on import".
+      - name: Smoke-test built package
+        working-directory: holodeck/packages/${{ matrix.package }}
+        run: node ../../scripts/smoke-dist.mjs .
