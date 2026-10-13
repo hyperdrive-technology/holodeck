@@ -89,7 +89,7 @@
     "react-dom": "^17.0.0 || ^18.0.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=26"
   },
   "publishConfig": {
     "access": "public"

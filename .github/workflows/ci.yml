@@ -70,11 +70,10 @@ jobs:
         with:
           version: 10.33.2
 
-      # Node 26 satisfies every engines field (packages: >=18; the stray root
-      # package.json: >=26.3.1).
+      # Node 26 only (repo .node-version; every engines field is >=26).
       - uses: actions/setup-node@v4
         with:
-          node-version: 26
+          node-version-file: holodeck/.node-version
           cache: pnpm
           cache-dependency-path: |
             holodeck-sdk/ts/pnpm-lock.yaml
