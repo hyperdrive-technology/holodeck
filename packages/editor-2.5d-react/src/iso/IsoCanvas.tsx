@@ -21,6 +21,8 @@ import { IsoRegistryProvider, useIsoRegistry } from '../registry/react';
 import { FloorGrid } from './FloorGrid';
 import { useWebGPUSupport, WebGPUMissing } from './use-webgpu';
 import { createWebGPURenderer } from './webgpu-renderer';
+import { cameraOffset } from './pan';
+import { useViewPan } from './use-view-pan';
 import {
   initialIsoPose,
   lerpPose,
@@ -31,6 +33,8 @@ import {
 } from './pose';
 
 const VIEW_DISTANCE = 18;
+/** Module-level so the default does not change identity every render (IsoRig effects depend on it). */
+const DEFAULT_TARGET: Vector3Tuple = [0, 0, 0];
 const ANIM_SECONDS = 0.45;
 
 function IsoRig({
@@ -48,25 +52,36 @@ function IsoRig({
   const started = useRef(0);
   const animating = useRef(false);
   const snapped = useRef(false);
+  // Target the camera was last placed around. The animation start pose is
+  // measured against this, not the new prop: a pan changes `target` before
+  // the camera has moved, and measuring against it read as a yaw/radius jump.
+  const placedAt = useRef<Vector3Tuple>(target);
+  const lastPose = useRef(pose);
 
   useEffect(() => {
-    const dx = camera.position.x - target[0];
-    const dz = camera.position.z - target[2];
+    if (!snapped.current) {
+      const [x, y, z] = cameraOffset(pose);
+      camera.position.set(x + target[0], y + target[1], z + target[2]);
+      camera.lookAt(target[0], target[1], target[2]);
+      camera.zoom = zoom;
+      camera.updateProjectionMatrix();
+      placedAt.current = target;
+      from.current = pose;
+      lastPose.current = pose;
+      snapped.current = true;
+      return;
+    }
+    // Only a pose change (rotate / 2D toggle / fit) animates. Zoom and pan
+    // apply directly in useFrame so dragging stays glued to the pointer.
+    if (pose === lastPose.current) return;
+    lastPose.current = pose;
+    const dx = camera.position.x - placedAt.current[0];
+    const dz = camera.position.z - placedAt.current[2];
     from.current = {
       yaw: dx === 0 && dz === 0 ? pose.yaw : Math.atan2(dz, dx),
       radius: Math.hypot(dx, dz),
       height: pose.height,
     };
-    if (!snapped.current) {
-      const [x, y, z] = posePosition(pose);
-      camera.position.set(x + target[0], y + target[1], z + target[2]);
-      camera.lookAt(target[0], target[1], target[2]);
-      camera.zoom = zoom;
-      camera.updateProjectionMatrix();
-      from.current = pose;
-      snapped.current = true;
-      return;
-    }
     to.current = pose;
     started.current = performance.now();
     animating.current = true;
@@ -74,8 +89,9 @@ function IsoRig({
 
   useFrame(() => {
     camera.zoom = zoom;
+    placedAt.current = target;
     if (!animating.current) {
-      const [x, y, z] = posePosition(pose);
+      const [x, y, z] = cameraOffset(pose);
       camera.position.set(x + target[0], y + target[1], z + target[2]);
       camera.lookAt(target[0], target[1], target[2]);
       camera.updateProjectionMatrix();
@@ -83,7 +99,7 @@ function IsoRig({
     }
     const t = (performance.now() - started.current) / (ANIM_SECONDS * 1000);
     const next = lerpPose(from.current, to.current, t);
-    const [x, y, z] = posePosition(next);
+    const [x, y, z] = cameraOffset(next);
     camera.position.set(x + target[0], y + target[1], z + target[2]);
     camera.lookAt(target[0], target[1], target[2]);
     camera.updateProjectionMatrix();
@@ -104,10 +120,20 @@ export interface IsoCanvasProps {
   onZoomChange?: (zoom: number) => void;
   /** World-space look-at. Camera sits on the isometric offset from this point. */
   target?: Vector3Tuple;
+  /**
+   * Enables panning: left drag on unclaimed canvas (see `claimPointer`),
+   * right / middle drag, two-finger trackpad scroll, Shift + wheel. Wheel and
+   * pinch zoom also keep the point under the cursor fixed when this is set.
+   * Mapping and math: use-view-pan.ts / pan.ts.
+   */
+  onTargetChange?: (target: Vector3Tuple) => void;
+  /** Pan with any button even when a scene handler claimed the press (Space held). */
+  forcePan?: boolean;
   pose?: IsoPose;
   onPoseChange?: (pose: IsoPose) => void;
   /** Hide rotate / 2D buttons. Snapshot renders turn this off. */
   showControls?: boolean;
+  /** Idle cursor. While a pan is in progress the canvas shows `grabbing`. */
   cursor?: string;
   showGrid?: boolean;
   /** Style tokens for code-built parts inside the canvas. Default: `HOLODECK_STYLE`. */
@@ -121,7 +147,9 @@ export function IsoCanvas({
   className,
   zoom = 42,
   onZoomChange,
-  target = [0, 0, 0],
+  target = DEFAULT_TARGET,
+  onTargetChange,
+  forcePan = false,
   pose: poseProp,
   onPoseChange,
   showControls = true,
@@ -139,19 +167,33 @@ export function IsoCanvas({
   const topDown = pose.radius < 1e-3;
   const [ox, oy, oz] = posePosition(home);
   const webgpu = useWebGPUSupport();
+  const container = useRef<HTMLDivElement>(null);
+  const { onPointerDown, panning } = useViewPan(container, {
+    zoom,
+    target,
+    pose,
+    onTargetChange,
+    onZoomChange,
+    forcePan,
+  });
 
   return (
     <div
+      ref={container}
       className={className}
-      style={{ position: 'relative', width: '100%', height: '100%', background: '#fff', cursor }}
-      onWheel={(event) => {
-        if (!onZoomChange) {
-          return;
-        }
-        event.preventDefault();
-        const factor = event.deltaY > 0 ? 1 / 1.2 : 1.2;
-        onZoomChange(Math.min(80, Math.max(8, zoom * factor)));
+      data-iso-target={target.map((v) => v.toFixed(3)).join(',')}
+      data-panning={panning ? 'true' : 'false'}
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        background: '#fff',
+        cursor: panning ? 'grabbing' : cursor,
+        // Trackpad gestures belong to the canvas, not to page scroll / overscroll navigation.
+        touchAction: 'none',
+        overscrollBehavior: 'contain',
       }}
+      onPointerDown={onPointerDown}
     >
       {webgpu === 'missing' ? <WebGPUMissing /> : null}
       {webgpu === 'ready' ? (

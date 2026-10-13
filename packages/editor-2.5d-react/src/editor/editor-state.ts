@@ -7,6 +7,10 @@ import { resolveRouteEnd } from '../routing/ports';
 import { findRun } from '../routing/run';
 import { routeToPlacements, type GridPoint } from './routing';
 import { sameCell } from './snap';
+import { snapParamValue } from '../registry/params';
+
+/** Which on-canvas handle a resize drag grabbed. */
+export type ResizeHandle = 'radius' | 'height';
 
 /** Shown when A* finds no clear route and the manhattan L was drawn instead. */
 export const NO_ROUTE_NOTICE = 'No clear route — drew a straight L';
@@ -31,6 +35,12 @@ export interface EditorState {
   cursor: GridPoint | null;
   drag: { id: string; origin: GridPoint; grab: GridPoint } | null;
   /**
+   * Live resize drag (radius / height handle). `param` is the number param
+   * the handle edits, `origin` its value when the handle was grabbed, so a
+   * no-op drag commits nothing and `resize-end` writes one history step.
+   */
+  resize: { id: string; handle: ResizeHandle; param: string; origin: number } | null;
+  /**
    * Bumped by every committed change (place, delete, drag-end that moved,
    * inspector edit, undo, redo, new-document). `ProcessEditor` calls
    * `onChange` when this changes: drag-move frames and `load` do not bump it.
@@ -51,6 +61,11 @@ export type EditorAction =
   | { type: 'drag-start'; id: string; x: number; y: number }
   | { type: 'drag-move'; x: number; y: number }
   | { type: 'drag-end' }
+  /** Grab a resize handle on the selection (`def.resize` names the params). */
+  | { type: 'resize-start'; id: string; handle: ResizeHandle }
+  /** Live value in world units; clamped and snapped to the param spec, not committed. */
+  | { type: 'resize-move'; value: number }
+  | { type: 'resize-end' }
   | { type: 'delete' }
   /**
    * Re-route the pipe/elbow run containing the selection around the current
@@ -106,6 +121,7 @@ export function createEditorState(
     notice: null,
     cursor: null,
     drag: null,
+    resize: null,
     revision: 0,
     readOnly: opts.readOnly ?? false,
     registry: opts.registry ?? getDefaultIsoRegistry(),
@@ -147,6 +163,7 @@ function commit(state: EditorState, scene: IsoSceneFile, extra: Partial<EditorSt
     past: [...state.past, cloneScene(state.scene)].slice(-HISTORY_CAP),
     future: [],
     drag: null,
+    resize: null,
     revision: state.revision + 1,
   };
 }
@@ -247,7 +264,23 @@ function isRunPart(state: EditorState, partId: string): boolean {
 }
 
 /** Actions that may set a notice; every other non-pointer action dismisses it. */
-const NOTICE_KEEPERS: ReadonlySet<EditorAction['type']> = new Set(['cursor', 'drag-move', 'load', 'set-read-only']);
+const NOTICE_KEEPERS: ReadonlySet<EditorAction['type']> = new Set(['cursor', 'drag-move', 'resize-move', 'load', 'set-read-only']);
+
+/** The number-param spec a resize handle edits, or null when the part is not resizable that way. */
+function resizeParam(state: EditorState, partId: string, handle: ResizeHandle): { param: string; spec: IsoPartDefinition['params'][string] } | null {
+  const def = state.registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, partId);
+  const param = def?.resize?.[handle];
+  if (!def || !param) return null;
+  const spec = def.params[param];
+  if (!spec || spec.type !== 'number') return null;
+  return { param, spec };
+}
+
+/** Effective value of a number param on a placement (placement.params, else the spec default). */
+function numberParam(obj: IsoPlacement, param: string, fallback: unknown): number {
+  const v = obj.params?.[param] ?? fallback;
+  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+}
 
 export function editorReducer(state: EditorState, action: EditorAction): EditorState {
   let next = reduce(state, action);
@@ -264,7 +297,7 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
   }
   switch (action.type) {
     case 'select-mode':
-      return { ...state, mode: 'select', placing: null, pipeStart: null, drag: null };
+      return { ...state, mode: 'select', placing: null, pipeStart: null, drag: null, resize: null };
     case 'place-mode':
       if (isRunPart(state, action.object)) {
         return { ...state, mode: 'draw-pipe', placing: null, pipeStart: null, pipeStartHeading: null, selectedId: null, drag: null };
@@ -352,6 +385,74 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
         revision: state.revision + 1,
       };
     }
+    case 'resize-start': {
+      const obj = state.scene.objects.find((o) => o.id === action.id);
+      if (!obj) {
+        return state;
+      }
+      const target = resizeParam(state, obj.object, action.handle);
+      if (!target) {
+        return state;
+      }
+      return {
+        ...state,
+        selectedId: action.id,
+        mode: 'select',
+        placing: null,
+        pipeStart: null,
+        drag: null,
+        resize: {
+          id: action.id,
+          handle: action.handle,
+          param: target.param,
+          origin: numberParam(obj, target.param, target.spec.default),
+        },
+      };
+    }
+    case 'resize-move': {
+      const resize = state.resize;
+      if (!resize || !Number.isFinite(action.value)) {
+        return state;
+      }
+      const objects = state.scene.objects.map((o) => {
+        if (o.id !== resize.id) {
+          return o;
+        }
+        const target = resizeParam(state, o.object, resize.handle);
+        if (!target) {
+          return o;
+        }
+        const value = snapParamValue(target.spec, action.value);
+        if (numberParam(o, resize.param, target.spec.default) === value) {
+          return o;
+        }
+        return { ...o, params: { ...o.params, [resize.param]: value } };
+      });
+      return { ...state, scene: { ...state.scene, objects } };
+    }
+    case 'resize-end': {
+      const resize = state.resize;
+      if (!resize) {
+        return state;
+      }
+      const current = state.scene.objects.find((o) => o.id === resize.id);
+      const now = current ? numberParam(current, resize.param, resize.origin) : resize.origin;
+      if (!current || now === resize.origin) {
+        return { ...state, resize: null };
+      }
+      // One undo step: the scene as it was before the handle moved.
+      const before = cloneScene(state.scene);
+      before.objects = before.objects.map((o) =>
+        o.id === resize.id ? { ...o, params: { ...o.params, [resize.param]: resize.origin } } : o,
+      );
+      return {
+        ...state,
+        resize: null,
+        past: [...state.past, before].slice(-HISTORY_CAP),
+        future: [],
+        revision: state.revision + 1,
+      };
+    }
     case 'delete': {
       if (!state.selectedId) {
         return state;
@@ -411,12 +512,12 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
       });
     case 'load': {
       const selectedId = action.scene.objects.some((o) => o.id === state.selectedId) ? state.selectedId : null;
-      return { ...state, scene: action.scene, selectedId, drag: null };
+      return { ...state, scene: action.scene, selectedId, drag: null, resize: null };
     }
     case 'set-read-only':
       return action.readOnly === state.readOnly
         ? state
-        : { ...state, readOnly: action.readOnly, mode: 'select', placing: null, pipeStart: null, drag: null };
+        : { ...state, readOnly: action.readOnly, mode: 'select', placing: null, pipeStart: null, drag: null, resize: null };
     case 'cancel':
       return {
         ...state,
@@ -424,6 +525,7 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
         placing: null,
         pipeStart: null,
         drag: null,
+        resize: null,
       };
     default: {
       const _never: never = action;

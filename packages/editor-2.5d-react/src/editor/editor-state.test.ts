@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { getDefaultIsoRegistry } from '../registry/default';
+import { HOLODECK_KINDS } from '@holodeck/sdk';
+import { createIsoRegistryWithBuiltins, getDefaultIsoRegistry } from '../registry/default';
 import { NO_ROUTE_NOTICE, committedScene, createEditorState, editorReducer, emptyScene, nextId, stamp } from './editor-state';
 
 const registry = getDefaultIsoRegistry();
@@ -285,7 +286,9 @@ describe('auto-routed pipes', () => {
   it('snaps the first click to a port heading and chains from the end cell', () => {
     let s = editorReducer(withTanks(), { type: 'pipe-mode' });
     s = editorReducer(s, { type: 'floor-click', x: 0, y: 1 }); // inside tank-1 -> nearest port
-    // Equidistant from the east and west ports: declaration order (east first) wins.
+    // East and west ports tie; declaration order picks east. It sits in the
+    // tank's cut-away window, which is allowed: the pipe is drawn clipped at
+    // the wall (routing/vessel-ports.ts clipPipeEnd).
     expect(s.pipeStart).toEqual({ x: 1, y: 0 });
     expect(s.pipeStartHeading).toBe('e');
     s = editorReducer(s, { type: 'floor-click', x: 3, y: 5 });
@@ -376,5 +379,92 @@ describe('auto-routed pipes', () => {
       const r = editorReducer(s, { type: 'reroute-selected' });
       expect(r.notice).toBe(NO_ROUTE_NOTICE);
     });
+  });
+});
+
+describe('resize handles (radius / height params)', () => {
+  const sized = {
+    id: 'test:vessel',
+    label: 'Vessel',
+    footprint: { w: 2, h: 2 },
+    params: {
+      radius: { type: 'number', label: 'Radius', default: 1, min: 0.3, max: 3, step: 0.05 },
+      height: { type: 'number', label: 'Height', default: 2, min: 0.5, max: 6, step: 0.1 },
+      level: { type: 'number', label: 'Level', default: 0 },
+    },
+    resize: { radius: 'radius', height: 'height' },
+    component: () => null,
+  } as const;
+  const withVessel = () => {
+    const reg = createIsoRegistryWithBuiltins();
+    reg.install({ id: 'test.vessel', version: '1', contributions: { [HOLODECK_KINDS.isoPart]: [sized] } });
+    let s = createEditorState(emptyScene('doc'), { registry: reg });
+    s = editorReducer(s, { type: 'place-mode', object: 'test:vessel' });
+    s = editorReducer(s, { type: 'floor-click', x: 0, y: 0 });
+    return s;
+  };
+
+  it('drags the radius: live updates snap to the step, one undo step on release', () => {
+    let s = withVessel();
+    const rev = s.revision;
+    s = editorReducer(s, { type: 'resize-start', id: 'test:vessel-1', handle: 'radius' });
+    expect(s.resize).toEqual({ id: 'test:vessel-1', handle: 'radius', param: 'radius', origin: 1 });
+    expect(s.selectedId).toBe('test:vessel-1');
+    s = editorReducer(s, { type: 'resize-move', value: 1.4321 });
+    expect(s.scene.objects[0]?.params?.radius).toBe(1.45);
+    expect(s.revision).toBe(rev); // not committed yet
+    s = editorReducer(s, { type: 'resize-move', value: 99 });
+    expect(s.scene.objects[0]?.params?.radius).toBe(3); // clamped to max
+    s = editorReducer(s, { type: 'resize-end' });
+    expect(s.resize).toBeNull();
+    expect(s.revision).toBe(rev + 1);
+    s = editorReducer(s, { type: 'undo' });
+    expect(s.scene.objects[0]?.params?.radius).toBe(1);
+    s = editorReducer(s, { type: 'redo' });
+    expect(s.scene.objects[0]?.params?.radius).toBe(3);
+  });
+
+  it('drags the height from the placement value and reports the committed scene', () => {
+    let s = withVessel();
+    s = editorReducer(s, { type: 'set-param', param: 'height', value: 2.5 });
+    const before = s;
+    s = editorReducer(s, { type: 'resize-start', id: 'test:vessel-1', handle: 'height' });
+    expect(s.resize?.origin).toBe(2.5);
+    s = editorReducer(s, { type: 'resize-move', value: 3.04 });
+    expect(s.scene.objects[0]?.params?.height).toBe(3);
+    expect(committedScene(before, s)).toBeNull();
+    const end = editorReducer(s, { type: 'resize-end' });
+    expect(committedScene(s, end)?.objects[0]?.params).toEqual({ height: 3 });
+  });
+
+  it('a release without movement commits nothing', () => {
+    let s = withVessel();
+    const rev = s.revision;
+    s = editorReducer(s, { type: 'resize-start', id: 'test:vessel-1', handle: 'height' });
+    s = editorReducer(s, { type: 'resize-move', value: 2.01 }); // snaps back to 2.0
+    s = editorReducer(s, { type: 'resize-end' });
+    expect(s.revision).toBe(rev);
+    expect(s.past).toHaveLength(1); // only the stamp
+  });
+
+  it('ignores handles on parts without `resize`, unknown ids, NaN values and run mode', () => {
+    let s = editorReducer(blank(), { type: 'place-mode', object: 'tank' });
+    s = editorReducer(s, { type: 'floor-click', x: 0, y: 0 });
+    expect(editorReducer(s, { type: 'resize-start', id: 'tank-1', handle: 'radius' }).resize).toBeNull();
+    let v = withVessel();
+    expect(editorReducer(v, { type: 'resize-start', id: 'nope', handle: 'radius' }).resize).toBeNull();
+    v = editorReducer(v, { type: 'resize-start', id: 'test:vessel-1', handle: 'radius' });
+    expect(editorReducer(v, { type: 'resize-move', value: Number.NaN })).toBe(v);
+    v = editorReducer(v, { type: 'set-read-only', readOnly: true });
+    expect(v.resize).toBeNull();
+    expect(editorReducer(v, { type: 'resize-start', id: 'test:vessel-1', handle: 'radius' }).resize).toBeNull();
+  });
+
+  it('cancel / select-mode / load drop an in-flight resize', () => {
+    let s = withVessel();
+    s = editorReducer(s, { type: 'resize-start', id: 'test:vessel-1', handle: 'radius' });
+    expect(editorReducer(s, { type: 'cancel' }).resize).toBeNull();
+    expect(editorReducer(s, { type: 'select-mode' }).resize).toBeNull();
+    expect(editorReducer(s, { type: 'load', scene: s.scene }).resize).toBeNull();
   });
 });

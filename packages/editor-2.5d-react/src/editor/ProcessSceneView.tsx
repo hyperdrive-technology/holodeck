@@ -48,6 +48,8 @@ export function ProcessSceneView({
   zoom = 20,
   onZoomChange,
   target,
+  onTargetChange,
+  forcePan,
   pose,
   onPoseChange,
   showControls = false,
@@ -60,6 +62,9 @@ export function ProcessSceneView({
   zoom?: number;
   onZoomChange?: (zoom: number) => void;
   target?: Vector3Tuple;
+  /** Enables drag / trackpad panning; see IsoCanvas. */
+  onTargetChange?: (target: Vector3Tuple) => void;
+  forcePan?: boolean;
   pose?: IsoPose;
   onPoseChange?: (pose: IsoPose) => void;
   showControls?: boolean;
@@ -76,6 +81,8 @@ export function ProcessSceneView({
       showControls={showControls}
       showGrid={showGrid}
       target={lookAt}
+      onTargetChange={onTargetChange}
+      forcePan={forcePan}
       zoom={zoom}
       onZoomChange={onZoomChange}
       pose={pose}

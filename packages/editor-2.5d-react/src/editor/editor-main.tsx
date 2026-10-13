@@ -29,7 +29,9 @@ function Host() {
   const [scene, setScene] = useState(initialScene);
   // Test hook: the committed scene, readable from Playwright.
   (window as unknown as { __scene: IsoSceneFile }).__scene = scene;
-  return <ProcessEditor scene={scene} onChange={setScene} mode="edit" />;
+  // `?mode=run`: the read-only host mode (pan browser test).
+  const mode = new URLSearchParams(window.location.search).get('mode') === 'run' ? 'run' : 'edit';
+  return <ProcessEditor scene={scene} onChange={setScene} mode={mode} />;
 }
 
 createRoot(root).render(<Host />);

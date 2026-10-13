@@ -2,10 +2,12 @@ import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { initialIsoPose, rotatePose, toggleTopDown } from '../iso/pose';
 import type { IsoSceneFile } from '../iso/scene';
+import type { Vector3Tuple } from 'three';
 import { getDefaultIsoRegistry } from '../registry/default';
 import { IsoRegistryProvider, useIsoParts } from '../registry/react';
 import type { IsoInspectorSlot, IsoMetrics, IsoPartDefinition } from '../registry/types';
 import { EditorLayer } from './EditorLayer';
+import { clampZoom, WHEEL_ZOOM_STEP } from '../iso/pan';
 import { fitView, sceneWorldBox } from './fit';
 import {
   committedScene,
@@ -60,6 +62,7 @@ export function ProcessEditor({
   const [pose, setPose] = useState(home);
   const [target, setTarget] = useState(() => sceneTarget(scene));
   const [spacePan, setSpacePan] = useState(false);
+  const [overObject, setOverObject] = useState(false);
   // Canvas size, for fit-to-scene. Null until the first layout.
   const viewRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<{ w: number; h: number } | null>(null);
@@ -226,12 +229,29 @@ export function ProcessEditor({
     };
   }, [home.radius]);
 
+  // IsoCanvas swaps in `grabbing` while a pan is live. Idle: `grab` wherever a
+  // left drag would pan (all of Run mode; empty floor in Edit/select), the
+  // default arrow over objects you can drag, a crosshair while placing.
   const cursor =
-    spacePan || state.mode === 'select' && state.drag
+    state.mode === 'select' && state.drag
       ? 'grabbing'
-      : state.mode === 'place' || state.mode === 'draw-pipe'
-        ? 'crosshair'
-        : 'default';
+      : spacePan || readOnly
+        ? 'grab'
+        : state.mode === 'place' || state.mode === 'draw-pipe'
+          ? 'crosshair'
+          : overObject
+            ? 'default'
+            : 'grab';
+
+  /** Any user zoom / pan / rotate: the view is theirs and stops auto-fitting until "fit". */
+  const userZoom = (z: number) => {
+    userMovedView.current = true;
+    setZoom(z);
+  };
+  const userTarget = (t: Vector3Tuple) => {
+    userMovedView.current = true;
+    setTarget(t);
+  };
 
   return (
     <IsoRegistryProvider registry={registry}>
@@ -243,6 +263,7 @@ export function ProcessEditor({
         data-pipe-start={state.pipeStart ? `${state.pipeStart.x},${state.pipeStart.y}` : ''}
         data-object-count={String(state.scene.objects.length)}
         data-zoom={zoom.toFixed(1)}
+        data-target={target.map((v) => v.toFixed(3)).join(',')}
         style={{
           display: 'flex',
           flexDirection: 'column',
@@ -310,11 +331,10 @@ export function ProcessEditor({
             <ProcessSceneView
               scene={state.scene}
               zoom={zoom}
-              onZoomChange={(z) => {
-                userMovedView.current = true;
-                setZoom(z);
-              }}
+              onZoomChange={userZoom}
               target={target}
+              onTargetChange={userTarget}
+              forcePan={spacePan}
               pose={pose}
               onPoseChange={(p) => {
                 userMovedView.current = true;
@@ -326,7 +346,6 @@ export function ProcessEditor({
             >
               <EditorLayer
                 state={state}
-                target={target}
                 spacePan={spacePan}
                 metrics={metrics}
                 readOnly={readOnly}
@@ -336,10 +355,10 @@ export function ProcessEditor({
                 onDragStart={(id, x, y) => dispatch({ type: 'drag-start', id, x, y })}
                 onDragMove={(x, y) => dispatch({ type: 'drag-move', x, y })}
                 onDragEnd={() => dispatch({ type: 'drag-end' })}
-                onPan={(t) => {
-                  userMovedView.current = true;
-                  setTarget(t);
-                }}
+                onResizeStart={(id, handle) => dispatch({ type: 'resize-start', id, handle })}
+                onResizeMove={(value) => dispatch({ type: 'resize-move', value })}
+                onResizeEnd={() => dispatch({ type: 'resize-end' })}
+                onHoverObject={setOverObject}
               />
             </ProcessSceneView>
           </div>
@@ -368,14 +387,8 @@ export function ProcessEditor({
           onNew={() => dispatch({ type: 'new-document' })}
           onUndo={() => dispatch({ type: 'undo' })}
           onRedo={() => dispatch({ type: 'redo' })}
-          onZoomIn={() => {
-            userMovedView.current = true;
-            setZoom((z) => Math.min(80, z * 1.2));
-          }}
-          onZoomOut={() => {
-            userMovedView.current = true;
-            setZoom((z) => Math.max(8, z / 1.2));
-          }}
+          onZoomIn={() => userZoom(clampZoom(zoom * WHEEL_ZOOM_STEP))}
+          onZoomOut={() => userZoom(clampZoom(zoom / WHEEL_ZOOM_STEP))}
           onFit={() => {
             userMovedView.current = false;
             const fit = fitScene(state.scene);

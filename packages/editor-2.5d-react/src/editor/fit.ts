@@ -1,13 +1,13 @@
 import type { Vector3Tuple } from 'three';
 import { gridToWorld } from '../iso/grid';
-import { posePosition, type IsoPose } from '../iso/pose';
+import { cameraBasis, clampZoom } from '../iso/pan';
+import type { IsoPose } from '../iso/pose';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { partScale } from '../registry/part-scale';
 import type { IsoPartDefinition } from '../registry/types';
 
-/** Same bounds the wheel handler in IsoCanvas clamps to. */
-export const MIN_ZOOM = 8;
-export const MAX_ZOOM = 80;
+/** Same bounds the wheel / pinch / toolbar zoom clamps to (defined with the pan math). */
+export { MAX_ZOOM, MIN_ZOOM } from '../iso/pan';
 
 export interface WorldBox {
   min: Vector3Tuple;
@@ -73,7 +73,7 @@ export interface FitOptions {
  * orthographic camera at `pose`. Ortho zoom is pixels per world unit, so the
  * zoom is the viewport size over the box's projected size on the camera's
  * right/up axes. The look-at is the box centre (a box projects symmetrically
- * about its centre). Zoom is clamped to the editor's wheel range.
+ * about its centre). Zoom is clamped to MIN_ZOOM..MAX_ZOOM.
  */
 export function fitView(
   box: WorldBox,
@@ -87,20 +87,8 @@ export function fitView(
     (box.min[1] + box.max[1]) / 2,
     (box.min[2] + box.max[2]) / 2,
   ];
-  // Camera basis. A near-zero radius (top-down) is nudged so the cross product stays defined.
-  const [px, py, pz] = posePosition({ ...pose, radius: Math.max(pose.radius, 1e-3) });
-  const len = Math.hypot(px, py, pz);
-  const f: Vector3Tuple = [-px / len, -py / len, -pz / len];
-  // right = f x up(0,1,0); up' = right x f
-  const rx = -f[2];
-  const rz = f[0];
-  const rl = Math.hypot(rx, rz);
-  const r: Vector3Tuple = [rx / rl, 0, rz / rl];
-  const u: Vector3Tuple = [
-    r[1] * f[2] - r[2] * f[1],
-    r[2] * f[0] - r[0] * f[2],
-    r[0] * f[1] - r[1] * f[0],
-  ];
+  // Camera axes; shared with the pan math so fit and pan agree on screen-right / screen-up.
+  const { right: r, up: u } = cameraBasis(pose);
   let maxR = 0;
   let maxU = 0;
   for (const x of [box.min[0], box.max[0]]) {
@@ -116,6 +104,6 @@ export function fitView(
   const zoomX = maxR > 0 ? (viewW * usable) / (2 * maxR) : Infinity;
   const zoomY = maxU > 0 ? (viewH * usable) / (2 * maxU) : Infinity;
   const raw = Math.min(zoomX, zoomY);
-  const zoom = Number.isFinite(raw) ? Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, raw)) : 20;
+  const zoom = Number.isFinite(raw) ? clampZoom(raw) : 20;
   return { zoom, target: center };
 }
