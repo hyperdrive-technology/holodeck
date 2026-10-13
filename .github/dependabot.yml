@@ -1,0 +1,21 @@
+version: 2
+# npm updates are disabled for now: every package depends on @holodeck/sdk through
+# `file:../../../holodeck-sdk/ts` (a sibling checkout outside this repo), which Dependabot's pnpm
+# updater can't resolve, so every npm update job would fail. Re-enable npm entries per package once
+# @holodeck/sdk is published to npm (hyperdrive-technology/holodeck-sdk#8).
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - "area:ci"
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

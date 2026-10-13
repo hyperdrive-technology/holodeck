@@ -1,6 +1,6 @@
-# Holodeck Monorepo - TODO
+# Holodeck Monorepo - Historical TODO
 
-**Repository Status**: 🔴 MAJOR WORK NEEDED - Basic structure exists, core functionality missing
+This checklist predates the current milestones. Its status claims, priority order, and setup recipes are historical, not current instructions. Use [GitHub issues](https://github.com/hyperdrive-technology/holodeck/issues) and [ROADMAP.md](ROADMAP.md) for current work, and [CONTRIBUTING.md](CONTRIBUTING.md) for setup and verified commands. The React editors and viewer now have implementations and tests; the CLI remains incomplete.
 
 ## 📋 Completed ✅
 
@@ -234,29 +234,7 @@
 
 ## 🔧 Development Commands
 
-```bash
-# CLI package
-cd packages/cli
-pnpm install
-pnpm build
-pnpm test
-
-# Test CLI globally
-pnpm link --global
-holodeck --help
-
-# Viewer package
-cd packages/editor-2d-react
-pnpm install
-pnpm build
-pnpm test
-pnpm storybook  # Once implemented
-
-# Monorepo commands
-pnpm install      # Install all package dependencies
-pnpm build        # Build all packages
-pnpm test         # Test all packages
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md#checks-by-area). Packages install and build independently; root commands do not operate on all packages. The CLI is excluded from CI until its build and dependency setup are restored.
 
 ## 📝 Implementation Notes
 

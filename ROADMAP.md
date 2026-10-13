@@ -1,101 +1,25 @@
-# Holodeck Roadmap
+# Holodeck roadmap
 
-Phased plan for the Holodeck HMI and visualization stack. Hyperdrive master plan (package roles, licensing): [../PLAN.md](../PLAN.md) § Holodeck HMI And Visualization. Active tasks: [TODO.md](./TODO.md).
+Holodeck owns browser scene tooling and live visual overlays. [Hyperdrive core](https://github.com/hyperdrive-technology/core) owns PLC compilation and execution; the [Holodeck SDK](https://github.com/hyperdrive-technology/holodeck-sdk) owns shared scene and extension contracts. See [README.md](README.md#project-status) for the status snapshot and [CONTRIBUTING.md](CONTRIBUTING.md) for setup and checks.
 
-**Policy:** Rust for native services, browser TypeScript for HMI packages — see [LANGUAGE_POLICY.md](../LANGUAGE_POLICY.md). No Go gateways or importers.
+## M1 — Brewery on WASM
 
-## Role
+The current milestone is [M1 — Brewery on WASM](https://github.com/hyperdrive-technology/holodeck/milestone/1), shared with [core](https://github.com/hyperdrive-technology/core/milestone/1) and [holodeck-sdk](https://github.com/hyperdrive-technology/holodeck-sdk/milestone/1). The brewery demo currently uses a TypeScript interpreter. M1 runs it in the browser on the real Rust runtime compiled to WASM, with Holodeck imported as built packages.
 
-Holodeck consumes Hyperdrive runtime data for 2D/3D HMI and infrastructure visualization. It does **not** run PLC scan logic. Hyperdrive owns control, compile, deploy, and the host API; Holodeck owns scene tooling and live overlays.
+Holodeck's immediate work is to fix built-package imports and ship usable GLB assets ([#7](https://github.com/hyperdrive-technology/holodeck/issues/7)), alongside scene validation, document-switch state, and rerouting fixes ([#8](https://github.com/hyperdrive-technology/holodeck/issues/8), [#9](https://github.com/hyperdrive-technology/holodeck/issues/9), [#10](https://github.com/hyperdrive-technology/holodeck/issues/10)). Core tracks package integration in [#34](https://github.com/hyperdrive-technology/core/issues/34). The demo path must not execute through an interpreter, mock, shim, or fallback.
 
-## Repositories
+The 2.5D process editor already has equipment models, routing, animation, and editing. The 2D editor and 3D viewer have implementations and tests; they are no longer empty rendering placeholders. Package build success does not yet prove host import and asset delivery work.
 
-| Repo | Status | Role |
-|------|--------|------|
-| [`holodeck-sdk/`](../holodeck-sdk/) | **Mostly done** — TS + JSON Schema | `@holodeck/sdk` contracts |
-| [`holodeck/`](./) (this monorepo) | **Partial** — scaffolds exist | `@holodeck/cli`, `@holodeck/editor-2d-react`, `@holodeck/viewer-3d-react` |
-| [`holodeck-importer-brainboard/`](../holodeck-importer-brainboard/) | **Complete** | Brainboard SVG → `SceneFile` |
-| [`core/gateway/`](../core/gateway/) | **Planned** | Rust metrics fan-out (not a separate `holodeck-gateway` service) |
-| `holodeck-pro` (private) | **Planned** | Commercial renderer, assets, licence SDK, gated plugins |
-| External OSS (future) | **Planned** | `@holodeck/importer-tf`, `@holodeck/provider-otel`, `@holodeck/provider-hyperdrive` |
+## M2 — Holodeck standalone scene builder
 
-Open-source packages depend only on `@holodeck/sdk`. Commercial packages use `@holodeck-pro/*` and ship from the private registry.
+[M2](https://github.com/hyperdrive-technology/holodeck/milestone/2) develops Holodeck as a standalone browser scene builder after M1. Work includes a 2D editor host round trip, 3D viewer registry integration, and mapping the isometric scene format to the SDK's `SceneFile` contract.
 
-## Phases
+## Later tooling and extensions
 
-| Phase | Focus | Status |
-|-------|--------|--------|
-| **0 — Scaffolding** | Monorepo layout, package stubs | **Partial** — structure in place |
-| **1 — SDK** | `SceneFile`, `Importer`, `Provider`, JSON Schema, semver publish | **Mostly done** — publish `@holodeck/sdk` v0.1.0 pending |
-| **2 — CLI** | `generate`, `dev`, `validate`, `info`; importer auto-discovery | **Blocked** — `generate` partial; dev/validate/info missing |
-| **3 — Importers** | Brainboard; Terraform (TS or Rust CLI) | **Partial** — Brainboard done; TF pending |
-| **4 — Viewers** | 2D editor (React Flow), 3D viewer (R3F) | **Partial** — placeholders; rendering not wired |
-| **5 — Providers & gateway** | OTLP/Prometheus, Hyperdrive WS bridge, `core/gateway` `/query` fan-out | **Not started** |
-| **6 — Pro tier** | 3D editor, Draco assets, licence JWT | **Not started** (private repo) |
-| **7 — Hyperdrive embed** | `<HolodeckEditor>` in engineering UI with runtime provider | **Not started** |
-| **8–9 — Docs & release** | Contributor guides, templates, v1 npm publish | **Not started** |
+The CLI remains incomplete: `generate` is partial, other command implementations are missing, and its build entry and dependency setup need restoration. Importer discovery, development preview, scene validation, and scene inspection remain future tooling work.
 
-## Package matrix
+Importers and providers live in separate repositories and target `@holodeck/sdk`. Longer-term plans include Terraform import, Hyperdrive runtime data, telemetry adapters, extension templates, and commercial renderers and asset tiers under `@holodeck-pro/*`. Open packages do not depend on commercial packages. Native services belong in core and use Rust; browser packages use TypeScript.
 
-**Core contracts**
+## Tracking
 
-- `@holodeck/sdk` — scene types, plugin interfaces, JSON Schema ([`holodeck-sdk/schema/scenefile.schema.json`](../holodeck-sdk/schema/scenefile.schema.json))
-
-**CLI & tooling**
-
-- `@holodeck/cli` — `holodeck generate`, `dev`, `validate`, `info`; discovers `node_modules/@holodeck/importer-*`
-
-**Rendering**
-
-- `@holodeck/editor-2d-react` — editable 2D diagram (evolved from original viewer scaffold)
-- `@holodeck/viewer-3d-react` — read-only 3D scene with live-data coloring
-- `@holodeck-pro/viewer-3d-react`, `@holodeck-pro/editor-3d-react` — commercial (licence-gated)
-
-**Importers**
-
-- `@holodeck-pro/importer-brainboard` — **done** ([`holodeck-importer-brainboard`](../holodeck-importer-brainboard/))
-- `@holodeck/importer-tf` — Terraform state → `SceneFile` (external TS or Rust CLI + thin npm wrapper)
-
-**Providers**
-
-- `@holodeck/provider-hyperdrive` — WebSocket/HTTP bridge to runtime variables, alarms, scan timing, diagnostics
-- `@holodeck/provider-otel` — OTLP/Prometheus (Rust adapter in `core/gateway`)
-- `@holodeck-pro/provider-datadog` — commercial Datadog metrics API
-
-**Templates**
-
-- `@holodeck/create-importer`, `@holodeck/create-provider` — starter scaffolds for plugin authors
-
-**Naming:** `@holodeck/<role>-<id>-<lang>` (OSS) · `@holodeck-pro/<role>-<id>-<lang>` (commercial)
-
-## Hyperdrive integration
-
-- `@holodeck/provider-hyperdrive` subscribes to the host HTTP/WebSocket surface (port **4444**): live variables, diagnostics, scan timing, protocol status.
-- Tracked in [PLAN.md § Product depth backlog](../PLAN.md) and [core/.agents/TODO.md § Product depth backlog](../core/.agents/TODO.md) (CODESYS 2025 alignment — WS HMI + **alarms** when historian events land).
-- Scene nodes map to runtime tag names or configured aliases; overlays show health, alarms, and timing — not control logic.
-- Cantina and the browser IDE may embed Holodeck views later; scan execution stays in `core/runtime`.
-
-## Licensing
-
-| Package / repo | Licence |
-|----------------|---------|
-| `holodeck`, `holodeck-sdk`, OSS importers/providers | MIT |
-| `holodeck-importer-brainboard` | MIT (may also ship as `@holodeck-pro/*`) |
-| `holodeck-pro`, Datadog provider, pro renderers/assets | Commercial EULA |
-
-Community plugins target the MIT `@holodeck/sdk` contract only.
-
-## Non-goals
-
-- Holodeck does not replace the Hyperdrive compiler, runtime, or historian.
-- No safety-PLC or certified HMI claims in the OSS milestone.
-- No vendor-native PLC project parsers in Holodeck repos (those stay Hyperdrive cloud importers per master plan).
-
-## Next priorities
-
-1. Publish `@holodeck/sdk` v0.1.0 with stable semver and CI.
-2. Finish `@holodeck/cli` commands and importer discovery (unblocks Brainboard E2E).
-3. Implement real scene rendering in `@holodeck/editor-2d-react`.
-4. Spike `@holodeck/provider-hyperdrive` against runtime `/ws` and variable snapshot APIs.
-
-See [TODO.md](./TODO.md) for file-level checklists.
+Use [GitHub issues](https://github.com/hyperdrive-technology/holodeck/issues) and milestone pages for current priorities. The older [TODO.md](TODO.md) checklist predates the current milestones and contains superseded status and setup notes; use [CONTRIBUTING.md](CONTRIBUTING.md) for commands. Cross-repository runtime work is tracked in [core's backlog](https://github.com/hyperdrive-technology/core/blob/feat/brewery-extensions/.agents/TODO.md).

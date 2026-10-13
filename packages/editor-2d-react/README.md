@@ -304,6 +304,6 @@ MIT - See [LICENSE](../../LICENSE) for details.
 
 ## Related Packages
 
-- [`@holodeck/sdk`](../sdk) - Core types and interfaces
+- [`@holodeck/sdk`](https://github.com/hyperdrive-technology/holodeck-sdk) - Core types and interfaces
 - [`@holodeck/cli`](../cli) - Command-line tools
 - [`@holodeck-pro/viewer-3d-react`](https://github.com/hyperdrive-technology/holodeck-pro) - 3D viewer (commercial)
