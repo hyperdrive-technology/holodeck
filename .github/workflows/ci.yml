@@ -34,18 +34,29 @@ jobs:
         with:
           path: holodeck
 
-      # Use the SDK branch with the same name as this branch when it exists (so
-      # paired holodeck + SDK PRs are tested together), else the SDK's main.
+      # Which SDK ref to test against, first one that exists on the SDK remote:
+      #   1. a branch with the same name as this branch (paired PRs);
+      #   2. the branch named in .github/holodeck-sdk-ref (for a holodeck branch
+      #      that needs unmerged SDK work under a different branch name; once that
+      #      SDK branch is merged and deleted this falls through to main, so the
+      #      file can be reset to `main` at leisure);
+      #   3. main.
       - name: Pick holodeck-sdk ref
         id: sdk
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          if git ls-remote --exit-code --heads https://github.com/hyperdrive-technology/holodeck-sdk.git "$BRANCH" >/dev/null; then
-            echo "ref=$BRANCH" >> "$GITHUB_OUTPUT"
-          else
-            echo "ref=main" >> "$GITHUB_OUTPUT"
-          fi
+          remote=https://github.com/hyperdrive-technology/holodeck-sdk.git
+          pinned=$(tr -d '[:space:]' < holodeck/.github/holodeck-sdk-ref 2>/dev/null || true)
+          ref=main
+          for candidate in "$BRANCH" "$pinned"; do
+            if [ -n "$candidate" ] && git ls-remote --exit-code --heads "$remote" "$candidate" >/dev/null; then
+              ref=$candidate
+              break
+            fi
+          done
+          echo "Using holodeck-sdk ref: $ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       - name: Checkout holodeck-sdk (${{ steps.sdk.outputs.ref }})
         uses: actions/checkout@v4
