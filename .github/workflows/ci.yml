@@ -109,3 +109,16 @@ jobs:
       - name: Smoke-test built package
         working-directory: holodeck/packages/${{ matrix.package }}
         run: node ../../scripts/smoke-dist.mjs .
+
+      # editor-2.5d-react only: consume the built package from a throwaway Vite app
+      # in real Chromium and fetch every GLB URL (holodeck#28: Vite dev pre-bundling
+      # rewrites them to 404s unless optimizeDeps.exclude is set). No GPU needed.
+      - name: Install Chromium for the Vite consumer check
+        if: matrix.package == 'editor-2.5d-react'
+        working-directory: holodeck/packages/${{ matrix.package }}
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Vite consumer check (GLB URLs resolve)
+        if: matrix.package == 'editor-2.5d-react'
+        working-directory: holodeck/packages/${{ matrix.package }}
+        run: pnpm check:vite-consumer
