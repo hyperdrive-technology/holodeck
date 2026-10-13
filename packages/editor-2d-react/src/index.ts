@@ -49,3 +49,24 @@ export { EDGE_TYPES, NODE_TYPES } from './constants';
 // Registry (extension kinds)
 export * from './registry';
 export { createSceneNodeFromPaletteItem, resolvePaletteDrop } from './utils';
+
+// React Flow primitives for node/edge renderers.
+//
+// Hosts that contribute custom `holodeck.flow.nodeType` / `flowEdgeType`
+// components (e.g. Hyperdrive's LD / SFC / FBD language packages) import these
+// from here instead of depending on `@xyflow/react` themselves. That keeps a
+// single React Flow version — the one this editor is built against — so the
+// `<Handle>` inside a contributed node sees the same zustand store/context as
+// the `<ReactFlow>` the editor mounts. Two copies would silently break handles
+// and edges. Add to this list rather than importing `@xyflow/react` downstream.
+export {
+  BaseEdge,
+  EdgeLabelRenderer,
+  Handle,
+  Position,
+  ReactFlowProvider,
+  getBezierPath,
+  getSmoothStepPath,
+  getStraightPath,
+} from '@xyflow/react';
+export type { EdgeProps, HandleProps, HandleType, NodeProps } from '@xyflow/react';
