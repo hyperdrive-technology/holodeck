@@ -8,6 +8,7 @@ Open-source **HMI and scene tooling** for Hyperdrive. **Languages:** browser Typ
 |---------|-----|------|
 | `cli` | `@holodeck/cli` | `holodeck generate`, `dev`, `validate`, `info` |
 | `editor-2d-react` | `@holodeck/editor-2d-react` | Editable 2D diagram editor (React Flow) — **evolved from the original `viewer-2d-react` scaffold** |
+| `editor-2.5d-react` | `@holodeck/editor-2.5d-react` | Orthographic 2.5D process editor (R3F) |
 | `viewer-3d-react` | `@holodeck/viewer-3d-react` | Read-only 3D scene viewer (R3F scaffold) |
 
 ## External extensions (sibling repos)
@@ -26,6 +27,7 @@ holodeck/
 ├── packages/
 │   ├── cli/
 │   ├── editor-2d-react/    # was viewer-2d-react
+│   ├── editor-2.5d-react/
 │   └── viewer-3d-react/
 └── examples/
 ```

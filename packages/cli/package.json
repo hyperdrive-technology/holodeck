@@ -78,10 +78,10 @@
     "@vitest/coverage-v8": "^1.0.0"
   },
   "peerDependencies": {
-    "node": ">=18.0.0"
+    "node": ">=26"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=26"
   },
   "publishConfig": {
     "access": "public"

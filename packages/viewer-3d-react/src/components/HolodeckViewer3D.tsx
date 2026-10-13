@@ -12,6 +12,9 @@ import {
   type ReactNode,
 } from 'react';
 import type { Group } from 'three';
+import type { WebGPURendererParameters } from 'three/webgpu';
+import { useWebGPUSupport, WebGPUMissing } from '../use-webgpu';
+import { createWebGPURenderer } from '../webgpu-renderer';
 import type { HolodeckViewer3DProps } from '../types';
 import { colorToRgb } from '../utils/materials';
 import { AnimationRunner } from './AnimationRunner';
@@ -251,6 +254,7 @@ export function HolodeckViewer3D(props: HolodeckViewer3DProps) {
 
   const camera = scene.scene.camera;
   const background = colorToCss(scene.scene.environment?.background, '#0b1020');
+  const webgpu = useWebGPUSupport();
 
   return (
     <div
@@ -265,10 +269,13 @@ export function HolodeckViewer3D(props: HolodeckViewer3DProps) {
         ...style,
       }}
     >
+      {webgpu === 'missing' ? <WebGPUMissing /> : null}
+      {webgpu === 'ready' ? (
       <Canvas
         shadows
+        flat
         dpr={[1, 2]}
-        gl={{ antialias: true }}
+        gl={(props) => createWebGPURenderer(props as WebGPURendererParameters)}
         camera={{
           position: camera
             ? [camera.position.x, camera.position.y, camera.position.z]
@@ -291,6 +298,7 @@ export function HolodeckViewer3D(props: HolodeckViewer3DProps) {
           onNodeSelect={onNodeSelect}
         />
       </Canvas>
+      ) : null}
     </div>
   );
 }

@@ -2,7 +2,7 @@
  * Type definitions for the 2D React editor
  */
 
-import type { SceneEdge, SceneFile, SceneNode } from '@holodeck/sdk';
+import type { ContributionRegistry, SceneEdge, SceneFile, SceneNode, ScenePaletteItem } from '@holodeck/sdk';
 import type { ComponentType, CSSProperties, ReactNode } from 'react';
 import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
 
@@ -20,6 +20,18 @@ export interface HolodeckEditor2DProps {
   showMinimap?: boolean;
   /** Whether the editor is interactive (drag, connect, undo) */
   interactive?: boolean;
+  /**
+   * Contribution registry. `holodeck.flow.nodeType` / `edgeType` items are
+   * merged over the built-in node; a key also present in `nodeTypes`/`edgeTypes`
+   * props throws. `holodeck.flow.palette` items feed the palette.
+   */
+  registry?: ContributionRegistry;
+  /** Render a palette (from the registry's palette items) beside the canvas. */
+  showPalette?: boolean;
+  /** Extra palette items when no registry is used (or in addition to it). */
+  paletteItems?: ScenePaletteItem[];
+  /** Fired when a palette item is dropped; `node` is the ready-made SceneNode. */
+  onDropPaletteItem?: (item: ScenePaletteItem, position: { x: number; y: number }, node: SceneNode) => void;
   /** Custom node types */
   nodeTypes?: Record<string, ComponentType<any>>;
   /** Custom edge types */

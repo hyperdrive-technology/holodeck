@@ -10,6 +10,8 @@ import {
   MiniMap,
   Position,
   ReactFlow,
+  ReactFlowProvider,
+  useReactFlow,
   type Edge,
   type NodeProps,
   type ReactFlowInstance,
@@ -18,16 +20,40 @@ import '@xyflow/react/dist/style.css';
 import './holodeck-editor.css';
 
 import type { SceneNode } from '@holodeck/sdk';
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type DragEvent } from 'react';
 import { DEFAULT_LAYOUT_CONFIG } from '../constants';
 import type { HolodeckEditor2DProps, ReactFlowNodeData } from '../types';
-import { autoLayoutScene, sceneFileToReactFlow } from '../utils';
+import { mergeFlowComponents } from '../registry/merge';
+import {
+  useFlowEdgeTypeContributions,
+  useFlowNodeTypeContributions,
+  useFlowPaletteContributions,
+  useOptionalFlowRegistry,
+} from '../registry/react';
+import {
+  autoLayoutScene,
+  createSceneNodeFromPaletteItem,
+  resolvePaletteDrop,
+  sceneFileToReactFlow,
+} from '../utils';
+import { HolodeckPalette } from './HolodeckPalette';
 
 const nodeTypes: Record<string, any> = {
   holodeckNode: HolodeckSceneNode,
 };
 
+// useReactFlow() (needed for screenToFlowPosition on drop) requires a provider
+// above the component; the `onInit` instance is async and unavailable until the
+// viewport has measured dimensions, so it is not reliable for drop handling.
 export function HolodeckEditor2D(props: HolodeckEditor2DProps) {
+  return (
+    <ReactFlowProvider>
+      <HolodeckEditor2DInner {...props} />
+    </ReactFlowProvider>
+  );
+}
+
+function HolodeckEditor2DInner(props: HolodeckEditor2DProps) {
   const {
     scene,
     width = '100%',
@@ -37,8 +63,12 @@ export function HolodeckEditor2D(props: HolodeckEditor2DProps) {
     interactive = true,
     className,
     style,
-    nodeTypes: customNodeTypes,
-    edgeTypes: customEdgeTypes,
+    nodeTypes: explicitNodeTypes,
+    edgeTypes: explicitEdgeTypes,
+    registry: registryProp,
+    showPalette = false,
+    paletteItems: paletteItemsProp,
+    onDropPaletteItem,
     onNodeSelect,
     onNodeClick,
     onNodeDoubleClick,
@@ -48,6 +78,24 @@ export function HolodeckEditor2D(props: HolodeckEditor2DProps) {
     layout = 'dagre',
     layoutConfig,
   } = props;
+
+  const contextRegistry = useOptionalFlowRegistry();
+  const registry = registryProp ?? contextRegistry;
+  const nodeContribs = useFlowNodeTypeContributions(registry);
+  const edgeContribs = useFlowEdgeTypeContributions(registry);
+  const registryPalette = useFlowPaletteContributions(registry);
+  const customNodeTypes = useMemo(
+    () => mergeFlowComponents<any>('nodeTypes', {}, nodeContribs, explicitNodeTypes),
+    [nodeContribs, explicitNodeTypes],
+  );
+  const customEdgeTypes = useMemo(
+    () => mergeFlowComponents<any>('edgeTypes', {}, edgeContribs, explicitEdgeTypes),
+    [edgeContribs, explicitEdgeTypes],
+  );
+  const paletteItems = useMemo(
+    () => [...registryPalette, ...(paletteItemsProp ?? [])],
+    [registryPalette, paletteItemsProp],
+  );
 
   const converted = useMemo(() => sceneFileToReactFlow(scene), [scene]);
   const nodes = useMemo(() => {
@@ -62,7 +110,7 @@ export function HolodeckEditor2D(props: HolodeckEditor2DProps) {
     return positioned.map((node) => ({
       ...node,
       type:
-        node.type && customNodeTypes?.[node.type] ? node.type : 'holodeckNode',
+        node.type && (customNodeTypes[node.type] || node.type === 'holodeckNode') ? node.type : 'holodeckNode',
       draggable: interactive,
       data: {
         ...node.data,
@@ -80,7 +128,7 @@ export function HolodeckEditor2D(props: HolodeckEditor2DProps) {
   ]);
   const edges: Edge[] = converted.edges.map((edge) => {
     const customType =
-      edge.type && customEdgeTypes?.[edge.type] ? edge.type : undefined;
+      edge.type && customEdgeTypes[edge.type] ? edge.type : undefined;
     const next: Edge = {
       ...edge,
       type: customType ?? 'smoothstep',
@@ -99,6 +147,22 @@ export function HolodeckEditor2D(props: HolodeckEditor2DProps) {
   type FlowNode = (typeof nodes)[number];
   const flowRef = useRef<ReactFlowInstance<FlowNode, Edge> | null>(null);
 
+  const { screenToFlowPosition } = useReactFlow();
+  const onDragOver = useCallback((event: DragEvent) => {
+    if (!event.dataTransfer?.types.includes('application/holodeck-palette-item')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  }, []);
+  const onDrop = useCallback(
+    (event: DragEvent) => {
+      const hit = resolvePaletteDrop(event, paletteItems, screenToFlowPosition);
+      if (!hit) return;
+      event.preventDefault();
+      onDropPaletteItem?.(hit.item, hit.position, createSceneNodeFromPaletteItem(hit.item, hit.position));
+    },
+    [paletteItems, onDropPaletteItem, screenToFlowPosition],
+  );
+
   useEffect(() => {
     const instance = flowRef.current;
     if (!instance) return;
@@ -113,8 +177,15 @@ export function HolodeckEditor2D(props: HolodeckEditor2DProps) {
   }, [nodes, edges]);
 
   return (
-    <div className={className} style={{ width, height, ...style }}>
+    <div
+      className={[className, showPalette ? 'holodeck-editor-with-palette' : ''].filter(Boolean).join(' ') || undefined}
+      style={{ width, height, ...style }}
+    >
+      {showPalette ? <HolodeckPalette items={paletteItems} /> : null}
+      <div className="holodeck-editor-canvas" style={{ width: '100%', height: '100%' }}>
       <ReactFlow
+        onDragOver={onDragOver}
+        onDrop={onDrop}
         nodes={nodes}
         edges={edges}
         nodeTypes={{ ...nodeTypes, ...customNodeTypes } as any}
@@ -155,6 +226,7 @@ export function HolodeckEditor2D(props: HolodeckEditor2DProps) {
         {showControls ? <Controls showInteractive={interactive} /> : null}
         {showMinimap ? <MiniMap pannable zoomable nodeStrokeWidth={2} /> : null}
       </ReactFlow>
+      </div>
     </div>
   );
 }

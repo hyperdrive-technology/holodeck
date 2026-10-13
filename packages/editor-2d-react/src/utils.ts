@@ -2,7 +2,7 @@
  * Utility functions for the 2D React editor
  */
 
-import type { SceneEdge, SceneFile, SceneNode } from '@holodeck/sdk';
+import type { SceneEdge, SceneFile, SceneNode, ScenePaletteItem } from '@holodeck/sdk';
 import dagre from 'dagre';
 import type { XYPosition } from '@xyflow/react';
 import { DEFAULT_LAYOUT_CONFIG, NODE_COLORS, NODE_SIZES } from './constants';
@@ -366,4 +366,44 @@ export function deepClone<T>(obj: T): T {
   }
 
   return obj;
+}
+
+/** Build a SceneNode from a palette item at a flow-space position. */
+export function createSceneNodeFromPaletteItem(
+  item: ScenePaletteItem,
+  position: { x: number; y: number },
+  id: string = `${item.id}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+): SceneNode {
+  const d = item.defaults ?? {};
+  const base = d.transform ?? {
+    position: { x: 0, y: 0, z: 0 },
+    rotation: { x: 0, y: 0, z: 0 },
+    scale: { x: 1, y: 1, z: 1 },
+  };
+  const node: SceneNode = {
+    id,
+    type: item.nodeType,
+    name: item.label,
+    transform: { ...base, position: { x: position.x, y: position.y, z: base.position.z } },
+  };
+  if (d.geometry) node.geometry = deepClone(d.geometry);
+  if (d.material) node.material = deepClone(d.material);
+  if (d.metadata) node.metadata = deepClone(d.metadata);
+  return node;
+}
+
+/**
+ * Resolve a drop event to `{ item, position }`, or undefined when the drag did
+ * not come from a palette or the item id is unknown.
+ */
+export function resolvePaletteDrop(
+  event: { dataTransfer: Pick<DataTransfer, 'getData'> | null; clientX: number; clientY: number },
+  items: readonly ScenePaletteItem[],
+  screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number },
+): { item: ScenePaletteItem; position: { x: number; y: number } } | undefined {
+  const id = event.dataTransfer?.getData('application/holodeck-palette-item');
+  if (!id) return undefined;
+  const item = items.find((i) => i.id === id);
+  if (!item) return undefined;
+  return { item, position: screenToFlowPosition({ x: event.clientX, y: event.clientY }) };
 }
