@@ -210,3 +210,14 @@ export const HOLODECK_STYLE: HolodeckStyle = {
 
 /** Finish names in a fixed order (tests, tuners, material-name parsing). */
 export const FINISH_NAMES: readonly FinishName[] = ['white', 'shaded', 'vessel', 'flask', 'accent'];
+
+/**
+ * Vertical gap (world units) between stacked ground layers, so a part's
+ * contact edge is never buried in what it stands on. Parts sit at y = 0, the
+ * area slab at -1 gap (AREA_Y), the editor's pick plane at -2 gaps, the floor
+ * grid below that (-0.06). 0.02 is ~1.6 CSS px of screen height at the max
+ * zoom (80) and well above depth-buffer precision for the 0.5..4000 ortho
+ * near/far range. Plain number, not a theme token: themes must not be able
+ * to reorder the ground layers.
+ */
+export const GROUND_CONTACT_EPSILON = 0.02;
