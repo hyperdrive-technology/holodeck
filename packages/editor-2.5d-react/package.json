@@ -7,20 +7,22 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    }
+      "require": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist/**/*",
     "src/**/*",
+    "assets/**/*",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
-    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "build": "tsup",
+    "dev": "tsup --watch",
     "lint": "eslint src/**/*.ts src/**/*.tsx",
     "type-check": "tsc --noEmit",
     "test": "vitest",
@@ -28,7 +30,8 @@
     "parts": "vite src/iso --open /parts.html",
     "parts:build": "node scripts/build-parts.mjs",
     "parts:watch": "node scripts/build-parts.mjs --watch",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "smoke": "node ../../scripts/smoke-dist.mjs ."
   },
   "keywords": [
     "holodeck",
