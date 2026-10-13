@@ -7,7 +7,7 @@ Pure modules in `src/routing/` (no React, no three). The editor wires them in `s
 `buildOccupancy(scene, registry, { exclude, margin })` -> `resolveRouteEnd(scene, registry, cell)` -> `routePipe(from, to, occ, opts)` -> `pathToPlacements(cells, existing, nextId)`.
 
 - Draw-pipe: first click resolves to a part port (or bare cell); the hovered cell is routed live (ghost, once per animation frame); the second click commits pipes + elbows as one undo step and keeps chaining from the end cell.
-- Reroute (`R`, or the "Reroute" button; edit mode, pipe or elbow selected): finds the connected pipe/elbow run, deletes it, routes between its two ends with the run excluded from the obstacles. One undo step.
+- Reroute (`R`, or the "Reroute" button; edit mode, pipe or elbow selected): finds the connected pipe/elbow run, deletes it, routes between its two ends with the run excluded from the obstacles. One undo step. The run (`routing/run.ts`) stops at tees and at single-node parts (valve, cap, any 1x1 part) on a joint, so inline valves stay connected; a vessel centred on a joint is an obstacle, not an end. A part drawn on top of the middle of one pipe is not detected and is left behind by a reroute.
 - No route: the ghost turns red; the click draws the old manhattan L and shows "No clear route — drew a straight L". Half-cell clicks skip the router (not a pipe node) and also draw the L, without the notice.
 
 ## Geometry conventions

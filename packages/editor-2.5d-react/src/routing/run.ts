@@ -3,12 +3,34 @@
  *
  * A run is a chain of pipes joined end to end (elbows sit on the joints). The
  * walk stops at a dead end, at a junction (3+ pipe ends on one node: a tee
- * belongs to more than one run), or at any non-pipe part (valve, tank, cap),
- * because those are the endpoints a reroute must keep attached.
+ * belongs to more than one run), or at an INLINE part (valve, pump, cap)
+ * sitting on a joint, because those are the endpoints a reroute must keep
+ * attached. Before holodeck#10 the walk only looked at pipe adjacency, so two
+ * pipes meeting at an inline valve were one run and a reroute replaced both
+ * with a route around the valve, leaving it disconnected.
+ *
+ * Inline = a single-node part: rotated footprint at most 1x1 (the same line
+ * occupancy.ts draws between 1x1 parts and "vessels"). "On a joint" is exact
+ * position equality with the pipe end; pipes and parts share integer nodes.
+ * A vessel centred on a joint is not a connection (pipes attach to vessels at
+ * edge ports, never the centre): it is an obstacle dropped across the run, and
+ * the reroute should go around it. Floor annotations (`area`, `label`) never
+ * stop the walk.
+ *
+ * Not handled: a part lying strictly inside one pipe's span (tests/scene.json
+ * draws its valves on top of one long pipe) is not a run end, so a reroute
+ * of that pipe still leaves it behind. Geometry alone can't tell such an
+ * inline valve from an obstacle dropped across the pipe, which reroute is
+ * meant to avoid (editor-state.test "replaces the selected run with a route
+ * around a new obstacle"). Fixing it needs an explicit attachment (e.g. a
+ * valve placement naming its pipe) rather than another heuristic here.
  */
 
+import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoPlacement } from '../iso/scene';
+import type { IsoPartDefinition } from '../registry/types';
 import type { GridPoint } from './grid';
+import { NON_OBSTACLE_PARTS, rotatedFootprint } from './occupancy';
 
 export interface PipeRun {
   /** Pipes and interior elbows, in no particular order. */
@@ -22,9 +44,21 @@ const nodeKey = (x: number, y: number) => `${x},${y}`;
 
 const isPipe = (o: IsoPlacement) => o.object === 'pipe' && typeof o.toX === 'number' && typeof o.toY === 'number';
 
-export function findRun(objects: readonly IsoPlacement[], selectedId: string): PipeRun | null {
+/** Single-node parts a run must stop at and stay attached to (not pipes, elbows, floor annotations or vessels). */
+function isInlinePart(o: IsoPlacement, registry: ContributionRegistry): boolean {
+  if (o.object === 'pipe' || o.object === 'elbow' || NON_OBSTACLE_PARTS.has(o.object)) return false;
+  const { w, h } = rotatedFootprint(registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, o.object), o.rotation, o);
+  return w <= 1 && h <= 1;
+}
+
+export function findRun(
+  objects: readonly IsoPlacement[],
+  selectedId: string,
+  registry: ContributionRegistry,
+): PipeRun | null {
   const pipes = objects.filter(isPipe);
   const elbows = objects.filter((o) => o.object === 'elbow');
+  const inlineNodes = new Set(objects.filter((o) => isInlinePart(o, registry)).map((o) => nodeKey(o.x, o.y)));
   const selected = objects.find((o) => o.id === selectedId);
   if (!selected) return null;
 
@@ -46,6 +80,7 @@ export function findRun(objects: readonly IsoPlacement[], selectedId: string): P
     let current = first;
     let node = startNode;
     for (;;) {
+      if (inlineNodes.has(node)) break; // a valve / pump / cap on the joint ends the run here
       const here = endsAt.get(node) ?? [];
       const others = here.filter((p) => p.id !== current.id);
       const next = others[0];

@@ -369,6 +369,33 @@ describe('auto-routed pipes', () => {
       expect(editorReducer(p, { type: 'reroute-selected' })).toBe(p);
     });
 
+    // holodeck#10: rerouting one side of an inline valve must not detach it.
+    it.each(['pipe-a', 'pipe-b'])('keeps an inline valve connected when %s is rerouted around an obstacle', (id) => {
+      const objects = [
+        { id: 'pipe-a', object: 'pipe', x: 0, y: 0, toX: 3, toY: 0 },
+        stamp(registry, 'valve', 3, 0, 'valve-1'),
+        { id: 'pipe-b', object: 'pipe', x: 3, y: 0, toX: 6, toY: 0 },
+        // An obstacle next to the line forces a real reroute on whichever side is selected.
+        stamp(registry, 'tank', id === 'pipe-a' ? 1.5 : 4.5, 0, 'tank-1'),
+      ];
+      let s = createEditorState({ ...emptyScene('doc'), objects }, { registry });
+      s = editorReducer(s, { type: 'select', id });
+      const r = editorReducer(s, { type: 'reroute-selected' });
+      expect(r.revision).toBe(s.revision + 1);
+      const other = id === 'pipe-a' ? 'pipe-b' : 'pipe-a';
+      // The untouched side and the valve are exactly as before.
+      expect(r.scene.objects.find((o) => o.id === other)).toEqual(objects.find((o) => o.id === other));
+      expect(r.scene.objects.find((o) => o.id === 'valve-1')).toEqual(objects[1]);
+      // The rerouted side still has a pipe end on the valve's node, and on its far end.
+      const pipes = r.scene.objects.filter((o) => o.object === 'pipe' && o.id !== other);
+      expect(pipes.some((p) => p.id === id)).toBe(false);
+      const ends = pipes.flatMap((p) => [`${p.x},${p.y}`, `${p.toX},${p.toY}`]);
+      expect(ends).toContain('3,0');
+      expect(ends).toContain(id === 'pipe-a' ? '0,0' : '6,0');
+      // Nothing was routed through the valve node except that one joint.
+      expect(ends.filter((e) => e === '3,0')).toHaveLength(1);
+    });
+
     it('flags the fallback when no route exists', () => {
       const wall = [-1, 0, 1]
         .flatMap((dx) => [-1, 0, 1].map((dy) => stamp(registry, 'valve', 20 + dx, dy, `v${dx}${dy}`)))

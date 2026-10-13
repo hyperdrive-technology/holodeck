@@ -229,7 +229,7 @@ function finishPipe(state: EditorState, click: GridPoint): EditorState {
  * through `resolveRouteEnd` so a run that leaves a tank port keeps leaving it.
  */
 function rerouteSelected(state: EditorState): EditorState {
-  const run = state.selectedId ? findRun(state.scene.objects, state.selectedId) : null;
+  const run = state.selectedId ? findRun(state.scene.objects, state.selectedId, state.registry) : null;
   if (!run) {
     return state;
   }
