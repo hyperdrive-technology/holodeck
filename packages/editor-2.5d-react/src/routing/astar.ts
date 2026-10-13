@@ -33,7 +33,7 @@
 
 import { ELBOW_RADIUS } from '../../assets/process/pipe-math';
 import { GRID_CELL_SIZE } from '../iso/grid';
-import { cellKey, HEADINGS, HEADING_VECTOR, oppositeHeading, type GridPoint, type Heading } from './grid';
+import { cellKey, HEADINGS, HEADING_VECTOR, MAX_CELL_COORD, oppositeHeading, type GridPoint, type Heading } from './grid';
 import type { Occupancy } from './occupancy';
 
 export interface RouteEnd {
@@ -135,6 +135,8 @@ class Heap {
 }
 
 export function routePipe(from: RouteEnd, to: RouteEnd, occ: Occupancy, opts: RouteOptions = {}): RoutePath | null {
+  // An incomplete obstacle grid cannot prove any route clear, even a zero-length one.
+  if (occ.skipped.length > 0) return null;
   const bendPenalty = opts.bendPenalty ?? 4;
   const clearancePenalty = opts.clearancePenalty ?? 2;
   const spacing = Math.max(1, opts.minBendSpacing ?? defaultMinBendSpacing());
@@ -148,10 +150,10 @@ export function routePipe(from: RouteEnd, to: RouteEnd, occ: Occupancy, opts: Ro
   }
 
   const bb = occ.bounds;
-  const minX = Math.min(s.x, t.x, bb?.minX ?? Infinity) - margin;
-  const maxX = Math.max(s.x, t.x, bb?.maxX ?? -Infinity) + margin;
-  const minY = Math.min(s.y, t.y, bb?.minY ?? Infinity) - margin;
-  const maxY = Math.max(s.y, t.y, bb?.maxY ?? -Infinity) + margin;
+  const minX = Math.max(-MAX_CELL_COORD, Math.min(s.x, t.x, bb?.minX ?? Infinity) - margin);
+  const maxX = Math.min(MAX_CELL_COORD, Math.max(s.x, t.x, bb?.maxX ?? -Infinity) + margin);
+  const minY = Math.max(-MAX_CELL_COORD, Math.min(s.y, t.y, bb?.minY ?? Infinity) - margin);
+  const maxY = Math.min(MAX_CELL_COORD, Math.max(s.y, t.y, bb?.maxY ?? -Infinity) + margin);
 
   const startCellKey = cellKey(s.x, s.y);
   const endCellKey = cellKey(t.x, t.y);

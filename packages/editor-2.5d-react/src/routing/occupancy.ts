@@ -27,7 +27,7 @@
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import type { IsoPartDefinition } from '../registry/types';
-import { cellKey, MAX_GRID_COORD, quarterTurns, type GridPoint } from './grid';
+import { cellKey, MAX_CELL_COORD, MAX_GRID_COORD, quarterTurns, type GridPoint } from './grid';
 
 /** Floor annotations: drawn on the ground, pipes may run across them. */
 export const NON_OBSTACLE_PARTS: ReadonlySet<string> = new Set(['area', 'label']);
@@ -48,9 +48,10 @@ export interface Occupancy {
   readonly bounds: Bounds | null;
   /**
    * Ids of placements left out because their geometry is non-finite, beyond
-   * `MAX_GRID_COORD` or bigger than `MAX_FOOTPRINT_CELLS` (see `GeometryRangeError`).
-   * `parseSceneFile` rejects the coordinate cases; part params (`footprintOf`) can
-   * still produce them.
+   * the safe geometry limits or bigger than `MAX_FOOTPRINT_CELLS` (see
+   * `GeometryRangeError`). The parser validates effective footprints too, but
+   * live edits or changed part definitions can still produce invalid geometry.
+   * Routing must fail whenever this list is nonempty.
    */
   readonly skipped: readonly string[];
   isBlocked(x: number, y: number): boolean;
@@ -74,20 +75,20 @@ export const MAX_FOOTPRINT_CELLS = 65_536;
 
 /**
  * Thrown by `footprintCells` / `runCells` for geometry they refuse to
- * enumerate: non-finite, outside +-`MAX_GRID_COORD`, or (footprints) more
- * than `MAX_FOOTPRINT_CELLS` nodes. Without it, `Infinity + 1 === Infinity`
- * kept the cell loops running forever (holodeck#8).
+ * enumerate: non-finite, outside the origin/endpoint or safe cell-key limits,
+ * or (footprints) more than `MAX_FOOTPRINT_CELLS` nodes. Without it,
+ * `Infinity + 1 === Infinity` kept the cell loops running forever (holodeck#8).
  */
 export class GeometryRangeError extends RangeError {
   override name = 'GeometryRangeError';
 }
 
 /** Inclusive integer node range covering [lo, hi]; throws GeometryRangeError when unbounded. */
-function nodeRange(lo: number, hi: number, what: string): [number, number] {
+function nodeRange(lo: number, hi: number, what: string, limit = MAX_GRID_COORD): [number, number] {
   const a = Math.ceil(lo - EPS);
   const b = Math.floor(hi + EPS);
-  if (!Number.isFinite(a) || !Number.isFinite(b) || Math.abs(a) > MAX_GRID_COORD || Math.abs(b) > MAX_GRID_COORD) {
-    throw new GeometryRangeError(`${what} [${lo}, ${hi}] is outside +-${MAX_GRID_COORD} grid cells`);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || Math.abs(a) > limit || Math.abs(b) > limit) {
+    throw new GeometryRangeError(`${what} [${lo}, ${hi}] is outside +-${limit} grid cells`);
   }
   return [a, b];
 }
@@ -113,15 +114,29 @@ export function rotatedFootprint(
   return Math.abs(quarterTurns(rotation)) % 2 === 1 ? { w: h, h: w } : { w, h };
 }
 
-/** Integer nodes of the closed box centred on (cx, cy). Throws GeometryRangeError on unbounded input. */
-export function footprintCells(cx: number, cy: number, w: number, h: number): GridPoint[] {
-  const out: GridPoint[] = [];
-  const [x0, x1] = nodeRange(cx - w / 2, cx + w / 2, 'footprint x');
-  const [y0, y1] = nodeRange(cy - h / 2, cy + h / 2, 'footprint y');
+/** Validate an effective footprint without allocating its nodes (also used by the parser). */
+export function footprintBounds(cx: number, cy: number, w: number, h: number): Bounds {
+  if (![cx, cy].every((v) => Number.isFinite(v) && Math.abs(v) <= MAX_GRID_COORD)) {
+    throw new GeometryRangeError(`footprint centre must be finite and within +-${MAX_GRID_COORD}`);
+  }
+  if (![w, h].every((v) => Number.isFinite(v) && v >= 0)) {
+    throw new GeometryRangeError(`footprint size ${w}x${h} must be finite and nonnegative`);
+  }
+  // A boundary-centred tank still occupies its outer nodes beyond the scene
+  // coordinate limit. Reject only at cellKey's safe limit, not at its origin limit.
+  const [x0, x1] = nodeRange(cx - w / 2, cx + w / 2, 'footprint x', MAX_CELL_COORD);
+  const [y0, y1] = nodeRange(cy - h / 2, cy + h / 2, 'footprint y', MAX_CELL_COORD);
   const count = Math.max(0, x1 - x0 + 1) * Math.max(0, y1 - y0 + 1);
   if (count > MAX_FOOTPRINT_CELLS) {
     throw new GeometryRangeError(`footprint ${w}x${h} covers ${count} nodes (max ${MAX_FOOTPRINT_CELLS})`);
   }
+  return { minX: x0, maxX: x1, minY: y0, maxY: y1 };
+}
+
+/** Integer nodes of the closed box centred on (cx, cy). Throws GeometryRangeError on unbounded input. */
+export function footprintCells(cx: number, cy: number, w: number, h: number): GridPoint[] {
+  const out: GridPoint[] = [];
+  const { minX: x0, maxX: x1, minY: y0, maxY: y1 } = footprintBounds(cx, cy, w, h);
   for (let x = x0; x <= x1; x += 1) {
     for (let y = y0; y <= y1; y += 1) {
       out.push({ x, y });
@@ -218,8 +233,8 @@ export function buildOccupancy(
 
   // Clearance ring: free nodes within `margin` (Chebyshev) of a vessel box.
   for (const b of vesselBoxes) {
-    for (let x = b.x0 - margin; x <= b.x1 + margin; x += 1) {
-      for (let y = b.y0 - margin; y <= b.y1 + margin; y += 1) {
+    for (let x = Math.max(-MAX_CELL_COORD, b.x0 - margin); x <= Math.min(MAX_CELL_COORD, b.x1 + margin); x += 1) {
+      for (let y = Math.max(-MAX_CELL_COORD, b.y0 - margin); y <= Math.min(MAX_CELL_COORD, b.y1 + margin); y += 1) {
         const key = cellKey(x, y);
         if (!blocked.has(key)) near.add(key);
       }

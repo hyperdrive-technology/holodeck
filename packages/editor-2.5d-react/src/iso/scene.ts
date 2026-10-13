@@ -16,6 +16,7 @@ import { getDefaultIsoRegistry } from '../registry/default';
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoPartDefinition } from '../registry/types';
 import { MAX_GRID_COORD } from '../routing/grid';
+import { footprintBounds, GeometryRangeError, NON_OBSTACLE_PARTS, rotatedFootprint } from '../routing/occupancy';
 
 export { GRID_CELL_SIZE, gridToWorld, worldToGrid };
 
@@ -202,7 +203,18 @@ export function parseSceneFile(
         throw new Error(`placement ${obj.id}: ${bag} must be an object`);
       }
     }
-    objects.push(migrateLegacyPlacement(def, obj));
+    const placement = migrateLegacyPlacement(def, obj);
+    const isRun = def.draw === 'run' || (typeof placement.toX === 'number' && typeof placement.toY === 'number');
+    if (!NON_OBSTACLE_PARTS.has(placement.object) && !isRun) {
+      try {
+        const { w, h } = rotatedFootprint(def, placement.rotation, placement);
+        footprintBounds(placement.x, placement.y, w, h);
+      } catch (err) {
+        if (!(err instanceof GeometryRangeError)) throw err;
+        throw new Error(`placement ${placement.id}: ${err.message}`);
+      }
+    }
+    objects.push(placement);
   }
   const ids = objects.map((o) => o.id);
   const dup = ids.filter((id, i) => ids.indexOf(id) !== i);

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { getDefaultIsoRegistry } from '../registry/default';
 import { nextId } from './editor-state';
+import { routePipe } from '../routing/astar';
+import { buildOccupancy } from '../routing/occupancy';
 import { footprint, manhattanRoute, routeToPlacements } from './routing';
 
 const registry = getDefaultIsoRegistry();
@@ -57,6 +59,32 @@ describe('manhattanRoute', () => {
   it('skips the router for half-cell clicks (not noRoute)', () => {
     const out = routeToPlacements({ objects: [] }, registry, { cell: { x: 0, y: 0 } }, { cell: { x: 1.5, y: 1 } }, nextId);
     expect(out).toMatchObject({ fallback: true, noRoute: false });
+  });
+
+  it.each([0, 1.5, 4])('reports skipped obstacles as routing failure even when the destination x=%s', (x) => {
+    const scene = { objects: [{ id: 'bad', object: 'tank', x: Infinity, y: 0 }] };
+    const from = { cell: { x: 0, y: 0 } };
+    const to = { cell: { x, y: 0 } };
+    const occ = buildOccupancy(scene, registry);
+    expect(occ.skipped).toEqual(['bad']);
+    expect(routePipe(from, to, occ)).toBeNull();
+    expect(routeToPlacements(scene, registry, from, to, nextId)).toMatchObject({ fallback: true, noRoute: true });
+  });
+
+  it('does not flag an explicitly excluded invalid placement as a skipped obstacle', () => {
+    const scene = { objects: [{ id: 'bad', object: 'tank', x: Infinity, y: 0 }] };
+    const out = routeToPlacements(scene, registry, { cell: { x: 0, y: 0 } }, { cell: { x: 4, y: 0 } }, nextId,
+      { exclude: new Set(['bad']) });
+    expect(out).toMatchObject({ fallback: false, noRoute: false });
+  });
+
+  it('cannot report success through a valid origin whose effective footprint was skipped', () => {
+    const def = { ...registry.get('holodeck.iso.part', 'tank')!, id: 'oversized', footprint: { w: 256, h: 256 } };
+    const custom = { get: (_kind: string, id: string) => id === 'oversized' ? def : registry.get('holodeck.iso.part', id) } as typeof registry;
+    const scene = { objects: [{ id: 'bad', object: 'oversized', x: 2, y: 0 }] };
+    expect(buildOccupancy(scene, custom).skipped).toEqual(['bad']);
+    expect(routeToPlacements(scene, custom, { cell: { x: 0, y: 0 } }, { cell: { x: 4, y: 0 } }, nextId))
+      .toMatchObject({ fallback: true, noRoute: true });
   });
 });
 

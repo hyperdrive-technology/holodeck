@@ -313,6 +313,15 @@ describe('auto-routed pipes', () => {
     expect(drawPipe(blank(), [0, 0], [4, 3]).notice).toBeNull();
   });
 
+  it('shows the no-route notice when an obstacle was skipped', () => {
+    const base = createEditorState({
+      ...emptyScene('doc'), objects: [{ id: 'bad', object: 'tank', x: Infinity, y: 0 }],
+    }, { registry });
+    const s = drawPipe(base, [0, 0], [4, 3]);
+    expect(s.notice).toBe(NO_ROUTE_NOTICE);
+    expect(s.scene.objects.filter((o) => o.object === 'pipe')).toHaveLength(2);
+  });
+
   describe('reroute-selected', () => {
     it('replaces the selected run with a route around a new obstacle; undo restores it', () => {
       let s = drawPipe(blank(), [0, 0], [10, 0]);

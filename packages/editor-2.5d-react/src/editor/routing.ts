@@ -39,10 +39,11 @@ export interface PlannedRoute extends CollapsedPath {
   points: GridPoint[];
   /**
    * True when the route is the plain manhattan L: either no clear route exists
-   * (`blocked`), or the endpoints are off-grid so the router was not asked.
+   * (`blocked` or incomplete occupancy), or the endpoints are off-grid so the
+   * router was not asked.
    */
   fallback: boolean;
-  /** True only when A* ran and found nothing (drives the "No clear route" notice). */
+  /** A* found nothing or obstacles were skipped (drives the red ghost and "No clear route" notice). */
   noRoute: boolean;
 }
 
@@ -60,8 +61,8 @@ export function planRoute(
   opts: { exclude?: ReadonlySet<string>; route?: RouteOptions } = {},
 ): PlannedRoute {
   const onGrid = [from.cell, to.cell].every((c) => Number.isInteger(c.x) && Number.isInteger(c.y));
+  const occ = buildOccupancy(scene, registry, { exclude: opts.exclude });
   if (onGrid) {
-    const occ = buildOccupancy(scene, registry, { exclude: opts.exclude });
     const path = routePipe(from, to, occ, opts.route);
     if (path) {
       return { ...collapsePath(path.cells), points: path.cells, fallback: false, noRoute: false };
@@ -69,7 +70,7 @@ export function planRoute(
   }
   const { pipes, elbow } = manhattanRoute(from.cell, to.cell);
   const points = pipes.length === 0 ? [] : elbow ? [from.cell, elbow, to.cell] : [from.cell, to.cell];
-  return { ...collapsePath(points), points, fallback: true, noRoute: onGrid };
+  return { ...collapsePath(points), points, fallback: true, noRoute: onGrid || occ.skipped.length > 0 };
 }
 
 /**
