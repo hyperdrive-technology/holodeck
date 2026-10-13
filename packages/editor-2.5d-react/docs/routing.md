@@ -16,6 +16,7 @@ Pure modules in `src/routing/` (no React, no three). The editor wires them in `s
 - `area` and `label` never block. Pipes block every node of their run, ends included; elbows, valves and end caps block their node.
 - Ports (`IsoPartDefinition.ports`) are part-local offsets from the centre plus an outward `dir`; both rotate with the placement. Compass: n = -y, e = +x, s = +y, w = -x. The built-in `tank` and `mixer` have `east` / `west` ports at floor level on the vessel edge; the east one sits in the window, so routing only uses west (see Vessel cutouts).
 - `RouteEnd.heading` is the port's OUTWARD direction: the first step leaves that way; at the end the last step arrives moving the opposite way.
+- At an inline reroute endpoint without a declared port (including built-in valves and caps), `findRun` carries `startHeading` / `endHeading` from the terminal pipe: the direction from the joint towards that pipe's other end. This preserves the connected flange side on either end of the route, including rotated parts and reversed pipe coordinates. The existing connection is used rather than inferring a barrel axis from rotation: single-cell extension parts have no common local axis, and an axis alone cannot identify which side of the part was connected. Declared port headings take precedence. Diagonal or zero-length pipes supply no heading; rerouting preserves valid axis-aligned connections rather than repairing invalid attachments.
 
 ## Elbows (`elbows.ts`)
 

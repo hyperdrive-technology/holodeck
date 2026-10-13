@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { HOLODECK_KINDS } from '@holodeck/sdk';
 import { createIsoRegistryWithBuiltins, getDefaultIsoRegistry } from '../registry/default';
+import { pipeArmsAt } from '../routing/elbows';
+import type { Heading } from '../routing/grid';
 import { NO_ROUTE_NOTICE, committedScene, createEditorState, editorReducer, emptyScene, nextId, stamp } from './editor-state';
 
 const registry = getDefaultIsoRegistry();
@@ -370,30 +372,72 @@ describe('auto-routed pipes', () => {
     });
 
     // holodeck#10: rerouting one side of an inline valve must not detach it.
-    it.each(['pipe-a', 'pipe-b'])('keeps an inline valve connected when %s is rerouted around an obstacle', (id) => {
+    it.each([
+      ['valve', 'pipe-a'], ['valve', 'pipe-b'], ['end-cap', 'pipe-a'], ['end-cap', 'pipe-b'],
+    ])('keeps an inline %s connected when %s is rerouted around an obstacle', (part, id) => {
       const objects = [
-        { id: 'pipe-a', object: 'pipe', x: 0, y: 0, toX: 3, toY: 0 },
-        stamp(registry, 'valve', 3, 0, 'valve-1'),
-        { id: 'pipe-b', object: 'pipe', x: 3, y: 0, toX: 6, toY: 0 },
-        // An obstacle next to the line forces a real reroute on whichever side is selected.
-        stamp(registry, 'tank', id === 'pipe-a' ? 1.5 : 4.5, 0, 'tank-1'),
+        { id: 'pipe-a', object: 'pipe', x: 0, y: 0, toX: 6, toY: 0 },
+        stamp(registry, part, 6, 0, 'inline-1'),
+        { id: 'pipe-b', object: 'pipe', x: 6, y: 0, toX: 12, toY: 0 },
+        // Leave room beside the flange for an axial approach around the tank.
+        stamp(registry, 'tank', id === 'pipe-a' ? 3 : 9, 0, 'tank-1'),
       ];
       let s = createEditorState({ ...emptyScene('doc'), objects }, { registry });
       s = editorReducer(s, { type: 'select', id });
       const r = editorReducer(s, { type: 'reroute-selected' });
       expect(r.revision).toBe(s.revision + 1);
+      expect(r.notice).toBeNull();
       const other = id === 'pipe-a' ? 'pipe-b' : 'pipe-a';
-      // The untouched side and the valve are exactly as before.
+      // The untouched side and the inline part are exactly as before.
       expect(r.scene.objects.find((o) => o.id === other)).toEqual(objects.find((o) => o.id === other));
-      expect(r.scene.objects.find((o) => o.id === 'valve-1')).toEqual(objects[1]);
-      // The rerouted side still has a pipe end on the valve's node, and on its far end.
+      expect(r.scene.objects.find((o) => o.id === 'inline-1')).toEqual(objects[1]);
+      // Preserve the connected flange side as well as the two endpoint nodes.
       const pipes = r.scene.objects.filter((o) => o.object === 'pipe' && o.id !== other);
       expect(pipes.some((p) => p.id === id)).toBe(false);
       const ends = pipes.flatMap((p) => [`${p.x},${p.y}`, `${p.toX},${p.toY}`]);
-      expect(ends).toContain('3,0');
-      expect(ends).toContain(id === 'pipe-a' ? '0,0' : '6,0');
-      // Nothing was routed through the valve node except that one joint.
-      expect(ends.filter((e) => e === '3,0')).toHaveLength(1);
+      expect(ends).toContain('6,0');
+      expect(ends).toContain(id === 'pipe-a' ? '0,0' : '12,0');
+      expect(pipeArmsAt(pipes, { x: 6, y: 0 }).map((arm) => arm.heading)).toEqual([id === 'pipe-a' ? 'w' : 'e']);
+      // Nothing was routed through the inline node except that one joint.
+      expect(ends.filter((e) => e === '6,0')).toHaveLength(1);
+    });
+
+    // PR #21 review repro, plus its opposite side, rotated axis and reversed
+    // pipe storage direction. Check the flange side, not merely the end node.
+    describe.each([false, true])('inline headings (north-south: %s)', (vertical) => {
+      it.each([
+        ['pipe-a', false], ['pipe-b', false], ['pipe-a', true], ['pipe-b', true],
+      ] as const)('preserves the flange heading rerouting %s (reversed: %s)', (id, reversed) => {
+        const point = (distance: number) => vertical ? { x: 0, y: distance } : { x: distance, y: 0 };
+        const makePipe = (pipeId: string, a: number, b: number) => {
+          const from = point(reversed ? b : a);
+          const to = point(reversed ? a : b);
+          return { id: pipeId, object: 'pipe', ...from, toX: to.x, toY: to.y };
+        };
+        const joint = point(6);
+        // Give the right-hand repro the same six-cell detour space as the
+        // left. A tank at 8 would block the only eastward step off the valve.
+        const far = id === 'pipe-a' ? 9 : 12;
+        const obstacle = point(id === 'pipe-a' ? 3 : 9);
+        const valve = { ...stamp(registry, 'valve', joint.x, joint.y, 'valve-1'), rotation: vertical ? Math.PI / 2 : 0 };
+        const objects = [
+          makePipe('pipe-a', 0, 6), valve, makePipe('pipe-b', 6, far),
+          stamp(registry, 'tank', obstacle.x, obstacle.y, 'tank-1'),
+        ];
+        const s = { ...createEditorState({ ...emptyScene('doc'), objects }, { registry }), selectedId: id };
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBeNull(); // A* found a route; no straight-line fallback.
+        expect(r.revision).toBe(s.revision + 1);
+        expect(r.scene.objects.find((o) => o.id === valve.id)).toEqual(valve);
+        const other = id === 'pipe-a' ? 'pipe-b' : 'pipe-a';
+        expect(r.scene.objects.find((o) => o.id === other)).toEqual(objects.find((o) => o.id === other));
+        const rerouted = r.scene.objects.filter((o) => o.object === 'pipe' && o.id !== other);
+        expect(rerouted.length).toBeGreaterThan(1);
+        const expected: Heading = vertical ? (id === 'pipe-a' ? 'n' : 's') : (id === 'pipe-a' ? 'w' : 'e');
+        expect(pipeArmsAt(rerouted, joint).map((arm) => arm.heading)).toEqual([expected]);
+        expect(pipeArmsAt(r.scene.objects, joint).map((arm) => arm.heading).sort()).toEqual(vertical ? ['n', 's'] : ['e', 'w']);
+        expect(pipeArmsAt(rerouted, point(id === 'pipe-a' ? 0 : far))).toHaveLength(1);
+      });
     });
 
     it('flags the fallback when no route exists', () => {

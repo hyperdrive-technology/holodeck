@@ -29,7 +29,9 @@
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoPlacement } from '../iso/scene';
 import type { IsoPartDefinition } from '../registry/types';
-import type { GridPoint } from './grid';
+import type { RouteEnd } from './astar';
+import { headingOf } from './elbows';
+import type { GridPoint, Heading } from './grid';
 import { NON_OBSTACLE_PARTS, rotatedFootprint } from './occupancy';
 
 export interface PipeRun {
@@ -38,6 +40,9 @@ export interface PipeRun {
   /** The two run ends. `start` is the end of the first pipe's `x,y` side. */
   start: GridPoint;
   end: GridPoint;
+  /** Outward directions into the original run at inline joints, if axis-aligned. */
+  startHeading?: Heading;
+  endHeading?: Heading;
 }
 
 const nodeKey = (x: number, y: number) => `${x},${y}`;
@@ -75,8 +80,8 @@ export function findRun(
   if (!seed) return null;
 
   const ids = new Set<string>([seed.id]);
-  /** Walk away from `node` along the chain; returns the node where the run stops. */
-  const walk = (first: IsoPlacement, startNode: string): GridPoint => {
+  /** Walk away from `node` along the chain; retain the connection at the stop. */
+  const walk = (first: IsoPlacement, startNode: string): RouteEnd => {
     let current = first;
     let node = startNode;
     for (;;) {
@@ -91,10 +96,21 @@ export function findRun(
       node = nodeKey(next.x, next.y) === node ? nodeKey(next.toX!, next.toY!) : nodeKey(next.x, next.y);
     }
     const [x, y] = node.split(',').map(Number);
-    return { x: x!, y: y! };
+    const cell = { x: x!, y: y! };
+    if (!inlineNodes.has(node)) return { cell };
+    // Built-in valves have no ports, and extensions need not share their
+    // local barrel axis. Preserve the connected side using the terminal
+    // pipe (not the seed or its storage direction). This also handles yawed
+    // valves and caps without guessing from rotation. Heading is OUTWARD
+    // from the part into this run; A* arrives moving its opposite.
+    const other = nodeKey(current.x, current.y) === node
+      ? { x: current.toX!, y: current.toY! }
+      : { x: current.x, y: current.y };
+    const heading = headingOf(other.x - cell.x, other.y - cell.y);
+    return heading ? { cell, heading } : { cell };
   };
 
   const start = walk(seed, nodeKey(seed.x, seed.y));
   const end = walk(seed, nodeKey(seed.toX!, seed.toY!));
-  return { ids: [...ids], start, end };
+  return { ids: [...ids], start: start.cell, end: end.cell, startHeading: start.heading, endHeading: end.heading };
 }

@@ -227,6 +227,7 @@ function finishPipe(state: EditorState, click: GridPoint): EditorState {
  * Replace the selected run with a fresh route between its two ends. The run is
  * excluded from the obstacles so it does not block itself; its ends re-resolve
  * through `resolveRouteEnd` so a run that leaves a tank port keeps leaving it.
+ * Inline parts without declared ports keep the original pipe's joint heading.
  */
 function rerouteSelected(state: EditorState): EditorState {
   const run = state.selectedId ? findRun(state.scene.objects, state.selectedId, state.registry) : null;
@@ -241,6 +242,8 @@ function rerouteSelected(state: EditorState): EditorState {
   const without = { objects: rest };
   const from = resolveRouteEnd(without, state.registry, run.start);
   const to = resolveRouteEnd(without, state.registry, run.end);
+  from.heading ??= run.startHeading;
+  to.heading ??= run.endHeading;
   const band = state.scene.objects.find((o) => o.id === run.ids[0])?.band;
   const { placements, noRoute } = routeToPlacements(without, state.registry, from, to, nextId, { band });
   return commit(
