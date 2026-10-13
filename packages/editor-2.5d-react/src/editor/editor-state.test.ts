@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { HOLODECK_KINDS } from '@holodeck/sdk';
 import { createIsoRegistryWithBuiltins, getDefaultIsoRegistry } from '../registry/default';
+import type { IsoPlacement } from '../iso/scene';
+import { PROCESS_SCENE } from '../iso/load-process-scene';
+import { positionOnPipe, segOf } from '../routing/inline';
 import { pipeArmsAt } from '../routing/elbows';
 import type { Heading } from '../routing/grid';
 import { NO_ROUTE_NOTICE, committedScene, createEditorState, editorReducer, emptyScene, nextId, stamp } from './editor-state';
@@ -359,6 +362,165 @@ describe('auto-routed pipes', () => {
       const r = editorReducer(s, { type: 'reroute-selected' });
       expect(r.scene.objects).toHaveLength(1);
       expect(r.scene.objects[0]).toMatchObject({ x: 0, y: 0, toX: 5, toY: 0 });
+    });
+
+    // holodeck#22: a part drawn on the middle of ONE long pipe rides along.
+    describe('inline parts hosted on a pipe (onPipe)', () => {
+      const place = (s: ReturnType<typeof blank>, part: string, x: number, y: number) => {
+        s = editorReducer(s, { type: 'place-mode', object: part });
+        return editorReducer(s, { type: 'floor-click', x, y });
+      };
+      const withTankAcross = (s: ReturnType<typeof blank>) => ({
+        ...s,
+        scene: { ...s.scene, objects: [...s.scene.objects, stamp(registry, 'tank', 5, 0, 'tank-1')] },
+      });
+      const onRoute = (objects: readonly IsoPlacement[], v: IsoPlacement) => {
+        const host = objects.find((o) => o.id === v.onPipe);
+        expect(host?.object).toBe('pipe');
+        expect(positionOnPipe(segOf(host!), v.x, v.y)).not.toBeNull();
+      };
+
+      it('placing a valve inside a pipe records the pipe; off a pipe or at a joint it does not', () => {
+        let s = drawPipe(blank(), [0, 0], [10, 0]);
+        s = place(s, 'valve', 2, 0);
+        expect(s.scene.objects.find((o) => o.id === 'valve-1')).toMatchObject({ onPipe: 'pipe-1', at: 0.2 });
+        s = editorReducer(s, { type: 'floor-click', x: 2, y: 3 });
+        expect(s.scene.objects.find((o) => o.id === 'valve-2')).not.toHaveProperty('onPipe');
+        s = editorReducer(s, { type: 'floor-click', x: 10, y: 0 });
+        expect(s.scene.objects.find((o) => o.id === 'valve-3')).not.toHaveProperty('onPipe');
+        // A tank is not an inline part, even dropped on a pipe.
+        s = place(s, 'tank', 6, 0);
+        expect(s.scene.objects.find((o) => o.object === 'tank')).not.toHaveProperty('onPipe');
+      });
+
+      it('dragging a valve along its pipe updates `at`; dragging it off detaches it', () => {
+        let s = drawPipe(blank(), [0, 0], [10, 0]);
+        s = place(s, 'valve', 2, 0);
+        s = editorReducer(s, { type: 'drag-start', id: 'valve-1', x: 2, y: 0 });
+        s = editorReducer(s, { type: 'drag-move', x: 6, y: 0 });
+        expect(s.scene.objects.find((o) => o.id === 'valve-1')).toMatchObject({ onPipe: 'pipe-1', at: 0.6 });
+        s = editorReducer(s, { type: 'drag-move', x: 6, y: 4 });
+        expect(s.scene.objects.find((o) => o.id === 'valve-1')).not.toHaveProperty('onPipe');
+        s = editorReducer(s, { type: 'drag-move', x: 3, y: 0 });
+        expect(s.scene.objects.find((o) => o.id === 'valve-1')).toMatchObject({ onPipe: 'pipe-1', at: 0.3 });
+      });
+
+      it('deleting the pipe detaches its parts', () => {
+        let s = drawPipe(blank(), [0, 0], [10, 0]);
+        s = place(s, 'valve', 2, 0);
+        s = editorReducer(editorReducer(s, { type: 'select', id: 'pipe-1' }), { type: 'delete' });
+        expect(s.scene.objects).toEqual([expect.objectContaining({ id: 'valve-1' })]);
+        expect(s.scene.objects[0]).not.toHaveProperty('onPipe');
+      });
+
+      it('reroute carries the valve onto the new route in ONE undo step; undo restores it', () => {
+        let s = drawPipe(blank(), [0, 0], [10, 0]);
+        s = place(s, 'valve', 2, 0);
+        s = withTankAcross({ ...editorReducer(s, { type: 'select', id: 'pipe-1' }), mode: 'select' });
+        const before = s.scene.objects;
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.past).toHaveLength(s.past.length + 1);
+        const valve = r.scene.objects.find((o) => o.id === 'valve-1')!;
+        expect(r.scene.objects.filter((o) => o.id === 'valve-1')).toHaveLength(1);
+        onRoute(r.scene.objects, valve);
+        // Ids are reused by nextId, so `onPipe` may name 'pipe-1' again: it must be the NEW pipe.
+        expect(r.scene.objects.filter((o) => o.object === 'pipe').length).toBeGreaterThanOrEqual(3);
+        expect(r.scene.objects.find((o) => o.id === 'pipe-1')).not.toMatchObject({ toX: 10, toY: 0 });
+        expect(r.scene.objects.find((o) => o.id === valve.onPipe)).toBeDefined();
+        // Still on the route's first straight, i.e. near the start like before.
+        expect(Math.hypot(valve.x, valve.y)).toBeLessThan(5);
+        expect(editorReducer(r, { type: 'undo' }).scene.objects).toEqual(before);
+      });
+
+      it('the valve does not block its own route', () => {
+        // A 1x1 valve at the only gap would wall in a tight channel; hosted parts are not obstacles.
+        let s = drawPipe(blank(), [0, 0], [4, 0]);
+        s = place(s, 'valve', 2, 0);
+        s = editorReducer(editorReducer(s, { type: 'select', id: 'pipe-1' }), { type: 'reroute-selected' });
+        const pipes = s.scene.objects.filter((o) => o.object === 'pipe');
+        expect(pipes).toHaveLength(1);
+        expect(pipes[0]).toMatchObject({ x: 0, y: 0, toX: 4, toY: 0 });
+        expect(s.scene.objects.find((o) => o.id === 'valve-1')).toMatchObject({ x: 2, y: 0, onPipe: pipes[0]!.id, at: 0.5 });
+      });
+
+      it('carries several valves, keeping their order along the route', () => {
+        let s = drawPipe(blank(), [0, 0], [10, 0]);
+        s = place(s, 'valve', 8, 0);
+        s = place(s, 'valve', 2, 0);
+        s = withTankAcross({ ...editorReducer(s, { type: 'select', id: 'pipe-1' }), mode: 'select' });
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        const [a, b] = ['valve-1', 'valve-2'].map((id) => r.scene.objects.find((o) => o.id === id)!);
+        onRoute(r.scene.objects, a!);
+        onRoute(r.scene.objects, b!);
+        const order = r.scene.objects.filter((o) => o.object === 'pipe').map((o) => o.id);
+        const rank = (v: IsoPlacement) => order.indexOf(v.onPipe!);
+        expect(rank(b!)).toBeLessThanOrEqual(rank(a!)); // valve-2 (x=2) is upstream of valve-1 (x=8)
+      });
+
+      it('carries parts hosted on any pipe of a multi-pipe run', () => {
+        let s = drawPipe(blank(), [0, 0], [6, 4]); // pipe + elbow + pipe
+        s = place(s, 'valve', 3, 0);
+        s = place(s, 'valve', 6, 2);
+        s = editorReducer(editorReducer(s, { type: 'select', id: 'pipe-1' }), { type: 'reroute-selected' });
+        for (const id of ['valve-1', 'valve-2']) onRoute(s.scene.objects, s.scene.objects.find((o) => o.id === id)!);
+      });
+
+      it('leaves behind a part with no attachment (an obstacle dropped on the pipe) and a stale attachment', () => {
+        let s = drawPipe(blank(), [0, 0], [10, 0]);
+        s = place(s, 'valve', 2, 0);
+        s = {
+          ...s,
+          scene: {
+            ...s.scene,
+            objects: [
+              ...s.scene.objects.map((o) => (o.id === 'valve-1' ? { ...o, y: 3 } : o)), // dragged off by an older host
+              { id: 'free', object: 'valve', x: 9, y: 0 },
+            ],
+          },
+          selectedId: 'pipe-1',
+          mode: 'select',
+        };
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.scene.objects.find((o) => o.id === 'valve-1')).toMatchObject({ x: 2, y: 3 }); // stale: not carried
+        expect(r.scene.objects.find((o) => o.id === 'free')).toMatchObject({ x: 9, y: 0 });
+      });
+
+      // The case from the issue: tests/scene.json draws its valves on top of one long pipe.
+      it.each([
+        ['valve-holding-out', 'pipe-holding-mixer-x'],
+        ['valve-packaging', 'pipe-packaging'],
+        ['valve-a-in', 'pipe-a-in'],
+      ])('tests/scene.json: %s is carried when %s is rerouted', (valveId, pipeId) => {
+        let s = createEditorState(PROCESS_SCENE, { registry });
+        s = editorReducer(s, { type: 'select', id: pipeId });
+        const original = s.scene.objects.find((o) => o.id === valveId)!;
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.past).toHaveLength(1);
+        const valve = r.scene.objects.find((o) => o.id === valveId)!;
+        expect(r.scene.objects.filter((o) => o.id === valveId)).toHaveLength(1);
+        onRoute(r.scene.objects, valve);
+        expect(valve.handwheel).toBe(original.handwheel);
+        // Vessels are untouched.
+        for (const o of r.past[0]!.objects.filter((o) => o.object === 'tank' || o.object === 'mixer')) {
+          expect(r.scene.objects.find((n) => n.id === o.id)).toEqual(o);
+        }
+      });
+
+      it('rotates a carried valve onto a perpendicular straight', () => {
+        let s = drawPipe(blank(), [0, 0], [10, 0]);
+        s = place(s, 'valve', 1.5, 0);
+        // Wall the start so the route must leave north/south first.
+        s = withTankAcross({ ...editorReducer(s, { type: 'select', id: 'pipe-1' }), mode: 'select' });
+        s = {
+          ...s,
+          scene: { ...s.scene, objects: [...s.scene.objects, stamp(registry, 'tank', 3, 0, 'tank-2')] },
+        };
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        const valve = r.scene.objects.find((o) => o.id === 'valve-1')!;
+        const host = r.scene.objects.find((o) => o.id === valve.onPipe)!;
+        const vertical = host.x === host.toX;
+        expect(valve.rotation ?? 0).toBeCloseTo(vertical ? Math.PI / 2 : 0);
+      });
     });
 
     it('is a no-op for non-pipe selections, no selection, and run mode', () => {

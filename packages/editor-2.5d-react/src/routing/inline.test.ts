@@ -1,0 +1,171 @@
+import { describe, expect, it } from 'vitest';
+import type { IsoPlacement } from '../iso/scene';
+import { ELBOW_RADIUS } from '../../assets/process/pipe-math';
+import {
+  carryHostedParts,
+  chainFrom,
+  detachFrom,
+  findHostPipe,
+  hostPipeOf,
+  placeOnRoute,
+  positionOnPipe,
+  segOf,
+  withAttachment,
+  type PipeSeg,
+} from './inline';
+import { pipe } from './test-helpers';
+
+const seg = (id: string, x: number, y: number, toX: number, toY: number): PipeSeg => segOf(pipe(id, x, y, toX, toY));
+const valve = (id: string, x: number, y: number, extra: Partial<IsoPlacement> = {}): IsoPlacement => ({ id, object: 'valve', x, y, ...extra });
+
+describe('positionOnPipe', () => {
+  const s = seg('p', 0, 0, 10, 0);
+  it('returns the fraction along the pipe for a point on it', () => {
+    expect(positionOnPipe(s, 4, 0)).toBeCloseTo(0.4);
+    expect(positionOnPipe(seg('r', 10, 0, 0, 0), 4, 0)).toBeCloseTo(0.6); // reversed pipe
+    expect(positionOnPipe(seg('v', 2, 0, 2, 8), 2, 6)).toBeCloseTo(0.75);
+  });
+  it('is null off the pipe, past its ends, and at either joint', () => {
+    expect(positionOnPipe(s, 4, 0.5)).toBeNull();
+    expect(positionOnPipe(s, 11, 0)).toBeNull();
+    expect(positionOnPipe(s, -1, 0)).toBeNull();
+    expect(positionOnPipe(s, 0, 0)).toBeNull();
+    expect(positionOnPipe(s, 10, 0)).toBeNull();
+    expect(positionOnPipe(s, 0.0004, 0)).toBeNull(); // within eps of the joint = at the joint
+  });
+  it('is null for a zero-length pipe', () => {
+    expect(positionOnPipe(seg('z', 3, 3, 3, 3), 3, 3)).toBeNull();
+  });
+  it('tolerates hand-authored 2-decimal coordinates', () => {
+    expect(positionOnPipe(seg('h', 4, -5.42, 4, -9.72), 4, -7.57)).toBeCloseTo(0.5, 2);
+  });
+});
+
+describe('findHostPipe / withAttachment', () => {
+  const objects = [pipe('a', 0, 0, 10, 0), pipe('b', 0, 5, 0, 9), valve('v', 3, 0)];
+  it('finds the pipe a point lies strictly inside', () => {
+    expect(findHostPipe(objects, 3, 0)).toEqual({ onPipe: 'a', at: 0.3 });
+    expect(findHostPipe(objects, 0, 7)).toEqual({ onPipe: 'b', at: 0.5 });
+  });
+  it('ignores joints, free space and the part itself being a pipe', () => {
+    expect(findHostPipe(objects, 0, 5)).toBeNull();
+    expect(findHostPipe(objects, 3, 2)).toBeNull();
+    expect(findHostPipe(objects, 3, 0, 'a')).toBeNull(); // skipId
+  });
+  it('withAttachment sets, refreshes and clears the attachment without mutating', () => {
+    const v = valve('v', 3, 0);
+    const placed = withAttachment(v, objects);
+    expect(placed).toMatchObject({ onPipe: 'a', at: 0.3 });
+    expect(v).not.toHaveProperty('onPipe');
+    const moved = withAttachment({ ...placed, x: 6 }, objects);
+    expect(moved).toMatchObject({ onPipe: 'a', at: 0.6 });
+    const off = withAttachment({ ...placed, y: 4 }, objects);
+    expect(off).not.toHaveProperty('onPipe');
+    expect(off).not.toHaveProperty('at');
+  });
+});
+
+describe('hostPipeOf', () => {
+  const objects = [pipe('a', 0, 0, 10, 0)];
+  it('honours an attachment only while the part is on the pipe', () => {
+    expect(hostPipeOf(valve('v', 5, 0, { onPipe: 'a', at: 0.5 }), objects)?.id).toBe('a');
+    expect(hostPipeOf(valve('v', 5, 3, { onPipe: 'a', at: 0.5 }), objects)).toBeNull(); // dragged away
+    expect(hostPipeOf(valve('v', 5, 0), objects)).toBeNull(); // geometry alone is not enough
+    expect(hostPipeOf(valve('v', 5, 0, { onPipe: 'gone' }), objects)).toBeNull(); // dangling id
+    expect(hostPipeOf(valve('v', 5, 0, { onPipe: 'tank' }), [{ id: 'tank', object: 'tank', x: 5, y: 0 }])).toBeNull(); // not a pipe
+    expect(hostPipeOf(valve('v', 10, 0, { onPipe: 'a', at: 1 }), objects)).toBeNull(); // at a joint
+  });
+});
+
+describe('detachFrom', () => {
+  it('strips onPipe/at from parts hosted on the pipe only', () => {
+    const out = detachFrom([valve('v', 1, 0, { onPipe: 'a', at: 0.1 }), valve('w', 2, 0, { onPipe: 'b', at: 0.2 })], 'a');
+    expect(out[0]).toEqual(valve('v', 1, 0));
+    expect(out[1]).toMatchObject({ onPipe: 'b', at: 0.2 });
+  });
+});
+
+describe('chainFrom', () => {
+  it('orders and orients pipes along travel from the start', () => {
+    const pipes = [seg('c', 3, 4, 3, 8), seg('a', 0, 0, 3, 0), seg('b', 3, 4, 3, 0)];
+    expect(chainFrom(pipes, { x: 0, y: 0 }).map((s) => [s.id, s.from, s.to])).toEqual([
+      ['a', { x: 0, y: 0 }, { x: 3, y: 0 }],
+      ['b', { x: 3, y: 0 }, { x: 3, y: 4 }], // reversed in the scene, oriented here
+      ['c', { x: 3, y: 4 }, { x: 3, y: 8 }],
+    ]);
+  });
+  it('is empty when nothing touches the start', () => {
+    expect(chainFrom([seg('a', 0, 0, 3, 0)], { x: 9, y: 9 })).toEqual([]);
+  });
+});
+
+describe('placeOnRoute', () => {
+  const l = [seg('a', 0, 0, 0, 6), seg('b', 0, 6, 8, 6)]; // total 14
+  it('maps the fraction onto the route by length', () => {
+    expect(placeOnRoute(l, 3 / 14)).toMatchObject({ seg: { id: 'a' }, t: 0.5 });
+    const r = placeOnRoute(l, 10 / 14)!;
+    expect(r.seg.id).toBe('b');
+    expect(r.t).toBeCloseTo(0.5);
+  });
+  it('slides a part off an elbow onto the clear part of the straight', () => {
+    const r = placeOnRoute(l, 6 / 14)!; // exactly on the bend
+    const along = r.t * 6;
+    expect(r.seg.id).toBe('a');
+    expect(along).toBeCloseTo(6 - ELBOW_RADIUS);
+    const r2 = placeOnRoute(l, 6.2 / 14)!; // just past the bend
+    expect(r2.seg.id).toBe('b');
+    expect(r2.t * 8).toBeCloseTo(ELBOW_RADIUS);
+  });
+  it('does not shy away from the route start and end (no bend there)', () => {
+    expect(placeOnRoute(l, 0.01)!.t * 6).toBeGreaterThan(0);
+    expect(placeOnRoute(l, 0.01)!.t * 6).toBeLessThan(ELBOW_RADIUS);
+    const end = placeOnRoute(l, 1)!;
+    expect(end.t).toBeLessThan(1); // strictly inside, so it stays hosted
+    expect(end.t).toBeGreaterThan(0.99);
+  });
+  it('puts a part in the middle of a straight too short to clear its bends', () => {
+    const short = [seg('a', 0, 0, 0, 1), seg('b', 0, 1, 1, 1), seg('c', 1, 1, 1, 2)];
+    expect(placeOnRoute(short, 0.5)).toMatchObject({ seg: { id: 'b' }, t: 0.5 });
+  });
+  it('returns null for an empty or zero-length route', () => {
+    expect(placeOnRoute([], 0.5)).toBeNull();
+    expect(placeOnRoute([seg('z', 1, 1, 1, 1)], 0.5)).toBeNull();
+  });
+  it('clamps out-of-range fractions', () => {
+    expect(placeOnRoute(l, -3)!.seg.id).toBe('a');
+    expect(placeOnRoute(l, 7)!.seg.id).toBe('b');
+  });
+});
+
+describe('carryHostedParts', () => {
+  const old = [seg('old', 0, 0, 10, 0)];
+  it('keeps the same fraction on a straight replacement and stays attached', () => {
+    const [v] = carryHostedParts([valve('v', 4, 0, { onPipe: 'old', at: 0.4 })], old, [seg('new', 0, 0, 20, 0)]);
+    expect(v).toMatchObject({ x: 8, y: 0, onPipe: 'new', at: 0.4 });
+    expect(v).not.toHaveProperty('rotation');
+  });
+  it('turns the part with the pipe axis when it lands on a perpendicular straight', () => {
+    const route = [seg('n1', 0, 0, 0, 5), seg('n2', 0, 5, 5, 5)];
+    const [v] = carryHostedParts([valve('v', 2, 0, { onPipe: 'old', at: 0.2 })], old, route);
+    expect(v).toMatchObject({ x: 0, y: 2, onPipe: 'n1' });
+    expect(v!.rotation).toBeCloseTo(Math.PI / 2);
+    // A yawed part keeps its own offset from the axis.
+    const [w] = carryHostedParts([valve('w', 2, 0, { onPipe: 'old', rotation: Math.PI / 2 })], old, route);
+    expect(w!.rotation).toBeCloseTo(Math.PI);
+  });
+  it('uses the pipe geometry, not a stale `at`', () => {
+    const [v] = carryHostedParts([valve('v', 5, 0, { onPipe: 'old', at: 0.9 })], old, [seg('new', 0, 0, 10, 0)]);
+    expect(v).toMatchObject({ x: 5, at: 0.5 });
+  });
+  it('maps across a multi-pipe run by total length', () => {
+    const chain = [seg('o1', 0, 0, 4, 0), seg('o2', 4, 0, 4, 4)];
+    const [v] = carryHostedParts([valve('v', 4, 2, { onPipe: 'o2', at: 0.5 })], chain, [seg('n', 0, 0, 16, 0)]);
+    expect(v).toMatchObject({ x: 12, y: 0, onPipe: 'n' });
+  });
+  it('leaves a part alone when it is not on the old chain or the route is empty', () => {
+    const v = valve('v', 5, 0, { onPipe: 'zzz' });
+    expect(carryHostedParts([v], old, [seg('n', 0, 0, 5, 0)])).toEqual([v]);
+    const w = valve('w', 5, 0, { onPipe: 'old' });
+    expect(carryHostedParts([w], old, [])).toEqual([w]);
+  });
+});

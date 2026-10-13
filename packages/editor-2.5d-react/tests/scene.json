@@ -42,12 +42,12 @@
     { "id": "elbow-a-in", "object": "elbow", "x": 0.5, "y": -11.72 },
     { "id": "elbow-b-in", "object": "elbow", "x": 6.82, "y": -11.73 },
 
-    { "id": "valve-packaging", "object": "valve", "x": 1, "y": 0.4, "rotation": 1.5707963267948966, "handwheel": "#9b713d" },
-    { "id": "valve-holding-out", "object": "valve", "x": 3, "y": -1, "handwheel": "#9b713d" },
+    { "id": "valve-packaging", "object": "valve", "x": 1, "y": 0.4, "onPipe": "pipe-packaging", "at": 0.267, "rotation": 1.5707963267948966, "handwheel": "#9b713d" },
+    { "id": "valve-holding-out", "object": "valve", "x": 3, "y": -1, "onPipe": "pipe-holding-mixer-x", "at": 0.5, "handwheel": "#9b713d" },
     { "id": "valve-a", "object": "valve", "x": 1.36, "y": -9.4, "handwheel": "#c0392b" },
-    { "id": "valve-b", "object": "valve", "x": 5.72, "y": -9.67, "handwheel": "#c0392b" },
-    { "id": "valve-a-in", "object": "valve", "x": 0.5, "y": -14.55, "rotation": 1.5707963267948966, "handwheel": "#9b713d" },
-    { "id": "valve-b-in", "object": "valve", "x": 6.82, "y": -14.5, "rotation": 1.5707963267948966, "handwheel": "#9b713d" },
+    { "id": "valve-b", "object": "valve", "x": 5.72, "y": -9.67, "onPipe": "pipe-b-h", "at": 0.396, "handwheel": "#c0392b" },
+    { "id": "valve-a-in", "object": "valve", "x": 0.5, "y": -14.55, "onPipe": "pipe-a-in", "at": 0.802, "rotation": 1.5707963267948966, "handwheel": "#9b713d" },
+    { "id": "valve-b-in", "object": "valve", "x": 6.82, "y": -14.5, "onPipe": "pipe-b-in", "at": 0.798, "rotation": 1.5707963267948966, "handwheel": "#9b713d" },
     { "id": "valve-steam", "object": "valve", "x": 8.89, "y": -1.4, "rotation": 1.5707963267948966, "handwheel": "#27ae60" },
     { "id": "cap-steam", "object": "end-cap", "x": 11.72, "y": -0.9 },
 

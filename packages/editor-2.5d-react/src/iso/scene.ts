@@ -30,6 +30,15 @@ export interface IsoPlacement {
   rotation?: number;
   toX?: number;
   toY?: number;
+  /**
+   * Inline parts (valve, pump...) drawn on the middle of a pipe: the id of
+   * that pipe. Optional metadata; the part's own x,y is still what is drawn.
+   * Reroute carries a part with a valid attachment to the new route
+   * (routing/inline.ts). Absent = a free-standing part.
+   */
+  onPipe?: string;
+  /** Position along `onPipe` from its (x, y) end (0) to its (toX, toY) end (1); informational, geometry wins. */
+  at?: number;
   fillColor?: string;
   height?: number;
   width?: number;
@@ -164,6 +173,12 @@ export function parseSceneFile(
     const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, obj.object);
     if (!def) {
       throw new Error(`unknown library object "${obj.object}" on ${obj.id}`);
+    }
+    if (obj.onPipe !== undefined && typeof obj.onPipe !== 'string') {
+      throw new Error(`placement ${obj.id}: onPipe must be a pipe id string`);
+    }
+    if (obj.at !== undefined && (typeof obj.at !== 'number' || !Number.isFinite(obj.at) || obj.at < 0 || obj.at > 1)) {
+      throw new Error(`placement ${obj.id}: at must be a number between 0 and 1`);
     }
     for (const bag of ['params', 'animation', 'extensions'] as const) {
       if (obj[bag] !== undefined && !isRecord(obj[bag])) {

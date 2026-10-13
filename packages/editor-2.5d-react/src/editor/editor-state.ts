@@ -4,7 +4,8 @@ import { getDefaultIsoRegistry } from '../registry/default';
 import type { IsoPartDefinition } from '../registry/types';
 import type { Heading } from '../routing/grid';
 import { resolveRouteEnd } from '../routing/ports';
-import { findRun } from '../routing/run';
+import { carryHostedParts, chainFrom, detachFrom, hostPipeOf, isPipePlacement, segOf, withAttachment } from '../routing/inline';
+import { findRun, isInlinePart } from '../routing/run';
 import { routeToPlacements, type GridPoint } from './routing';
 import { sameCell } from './snap';
 import { snapParamValue } from '../registry/params';
@@ -189,7 +190,9 @@ function placeAt(state: EditorState, x: number, y: number): EditorState {
     return state;
   }
   const id = nextId(state.placing, state.scene.objects);
-  const added = stamp(state.registry, state.placing, x, y, id);
+  const stamped = stamp(state.registry, state.placing, x, y, id);
+  // A single-node part dropped inside a pipe records that pipe (holodeck#22).
+  const added = isInlinePart(stamped, state.registry) ? withAttachment(stamped, state.scene.objects) : stamped;
   return commit(
     state,
     { ...state.scene, objects: [...state.scene.objects, added] },
@@ -243,7 +246,16 @@ function rerouteSelected(state: EditorState): EditorState {
     return state; // closed loop: nothing sensible to route between
   }
   const ids = new Set(run.ids);
-  const rest = state.scene.objects.filter((o) => !ids.has(o.id));
+  // Inline parts drawn on the run's pipes (holodeck#22) ride along: they are
+  // taken out of the obstacles so they do not block the new route, then
+  // re-seated on it at the same fraction of its length.
+  const runPipes = state.scene.objects.filter((o) => ids.has(o.id) && isPipePlacement(o));
+  const hosted = state.scene.objects.filter((o) => {
+    const host = hostPipeOf(o, state.scene.objects);
+    return host !== null && ids.has(host.id) && !ids.has(o.id);
+  });
+  const hostedIds = new Set(hosted.map((o) => o.id));
+  const rest = state.scene.objects.filter((o) => !ids.has(o.id) && !hostedIds.has(o.id));
   const without = { objects: rest };
   const from = resolveRouteEnd(without, state.registry, run.start);
   const to = resolveRouteEnd(without, state.registry, run.end);
@@ -251,9 +263,14 @@ function rerouteSelected(state: EditorState): EditorState {
   to.heading ??= run.endHeading;
   const band = state.scene.objects.find((o) => o.id === run.ids[0])?.band;
   const { placements, noRoute } = routeToPlacements(without, state.registry, from, to, nextId, { band });
+  const carried = carryHostedParts(
+    hosted,
+    chainFrom(runPipes.map(segOf), run.start),
+    placements.filter(isPipePlacement).map(segOf),
+  );
   return commit(
     state,
-    { ...state.scene, objects: [...rest, ...placements] },
+    { ...state.scene, objects: [...rest, ...placements, ...carried] },
     { selectedId: placements[0]?.id ?? null, notice: noRoute ? NO_ROUTE_NOTICE : null },
   );
 }
@@ -358,7 +375,9 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
           fromOrigin.toX = state.drag.origin.x + dtx;
           fromOrigin.toY = state.drag.origin.y + dty;
         }
-        return moveBy(fromOrigin, dx, dy);
+        const moved = moveBy(fromOrigin, dx, dy);
+        // Keep the pipe attachment in step with where the part is dropped.
+        return isInlinePart(moved, state.registry) ? withAttachment(moved, state.scene.objects) : moved;
       });
       return { ...state, cursor: { x: action.x, y: action.y }, scene: { ...state.scene, objects } };
     }
@@ -467,7 +486,7 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
       }
       return commit(
         state,
-        { ...state.scene, objects: state.scene.objects.filter((o) => o.id !== state.selectedId) },
+        { ...state.scene, objects: detachFrom(state.scene.objects, state.selectedId).filter((o) => o.id !== state.selectedId) },
         { selectedId: null },
       );
     }
