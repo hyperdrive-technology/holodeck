@@ -27,7 +27,7 @@
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import type { IsoPartDefinition } from '../registry/types';
-import { cellKey, quarterTurns, type GridPoint } from './grid';
+import { cellKey, MAX_GRID_COORD, quarterTurns, type GridPoint } from './grid';
 
 /** Floor annotations: drawn on the ground, pipes may run across them. */
 export const NON_OBSTACLE_PARTS: ReadonlySet<string> = new Set(['area', 'label']);
@@ -46,6 +46,13 @@ export interface Occupancy {
   readonly near: ReadonlySet<number>;
   /** Bounding box of every blocked node; null when the grid is empty. */
   readonly bounds: Bounds | null;
+  /**
+   * Ids of placements left out because their geometry is non-finite, beyond
+   * `MAX_GRID_COORD` or bigger than `MAX_FOOTPRINT_CELLS` (see `GeometryRangeError`).
+   * `parseSceneFile` rejects the coordinate cases; part params (`footprintOf`) can
+   * still produce them.
+   */
+  readonly skipped: readonly string[];
   isBlocked(x: number, y: number): boolean;
   isNearVessel(x: number, y: number): boolean;
 }
@@ -62,6 +69,39 @@ export interface OccupancyOptions {
 
 const EPS = 1e-6;
 
+/** Most nodes one footprint may cover (256 x 256); anything larger is treated as bad input. */
+export const MAX_FOOTPRINT_CELLS = 65_536;
+
+/**
+ * Thrown by `footprintCells` / `runCells` for geometry they refuse to
+ * enumerate: non-finite, outside +-`MAX_GRID_COORD`, or (footprints) more
+ * than `MAX_FOOTPRINT_CELLS` nodes. Without it, `Infinity + 1 === Infinity`
+ * kept the cell loops running forever (holodeck#8).
+ */
+export class GeometryRangeError extends RangeError {
+  override name = 'GeometryRangeError';
+}
+
+/** Inclusive integer node range covering [lo, hi]; throws GeometryRangeError when unbounded. */
+function nodeRange(lo: number, hi: number, what: string): [number, number] {
+  const a = Math.ceil(lo - EPS);
+  const b = Math.floor(hi + EPS);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || Math.abs(a) > MAX_GRID_COORD || Math.abs(b) > MAX_GRID_COORD) {
+    throw new GeometryRangeError(`${what} [${lo}, ${hi}] is outside +-${MAX_GRID_COORD} grid cells`);
+  }
+  return [a, b];
+}
+
+/** Whether `cell` lies in the closed box centred on (cx, cy). O(1), never enumerates; false for NaN. */
+export function footprintContains(cx: number, cy: number, w: number, h: number, cell: GridPoint): boolean {
+  return (
+    cell.x >= cx - w / 2 - EPS &&
+    cell.x <= cx + w / 2 + EPS &&
+    cell.y >= cy - h / 2 - EPS &&
+    cell.y <= cy + h / 2 + EPS
+  );
+}
+
 /** Rotated footprint size of a placement. */
 export function rotatedFootprint(
   def: Pick<IsoPartDefinition, 'footprint' | 'footprintOf'> | undefined,
@@ -73,13 +113,15 @@ export function rotatedFootprint(
   return Math.abs(quarterTurns(rotation)) % 2 === 1 ? { w: h, h: w } : { w, h };
 }
 
-/** Integer nodes of the closed box centred on (cx, cy). */
+/** Integer nodes of the closed box centred on (cx, cy). Throws GeometryRangeError on unbounded input. */
 export function footprintCells(cx: number, cy: number, w: number, h: number): GridPoint[] {
   const out: GridPoint[] = [];
-  const x0 = Math.ceil(cx - w / 2 - EPS);
-  const x1 = Math.floor(cx + w / 2 + EPS);
-  const y0 = Math.ceil(cy - h / 2 - EPS);
-  const y1 = Math.floor(cy + h / 2 + EPS);
+  const [x0, x1] = nodeRange(cx - w / 2, cx + w / 2, 'footprint x');
+  const [y0, y1] = nodeRange(cy - h / 2, cy + h / 2, 'footprint y');
+  const count = Math.max(0, x1 - x0 + 1) * Math.max(0, y1 - y0 + 1);
+  if (count > MAX_FOOTPRINT_CELLS) {
+    throw new GeometryRangeError(`footprint ${w}x${h} covers ${count} nodes (max ${MAX_FOOTPRINT_CELLS})`);
+  }
   for (let x = x0; x <= x1; x += 1) {
     for (let y = y0; y <= y1; y += 1) {
       out.push({ x, y });
@@ -88,11 +130,16 @@ export function footprintCells(cx: number, cy: number, w: number, h: number): Gr
   return out;
 }
 
-/** Integer nodes along an axis-aligned run (inclusive). Diagonal runs yield only their end nodes. */
+/**
+ * Integer nodes along an axis-aligned run (inclusive). Diagonal runs yield only their end nodes.
+ * Throws GeometryRangeError on unbounded input. A bounded run is at most 2 * MAX_GRID_COORD + 1 nodes.
+ */
 export function runCells(o: Pick<IsoPlacement, 'x' | 'y' | 'toX' | 'toY'>): GridPoint[] {
   const { x, y } = o;
   const toX = o.toX ?? x;
   const toY = o.toY ?? y;
+  const [x0, x1] = nodeRange(Math.min(x, toX), Math.max(x, toX), 'run x');
+  const [y0, y1] = nodeRange(Math.min(y, toY), Math.max(y, toY), 'run y');
   if (x !== toX && y !== toY) {
     return [
       { x: Math.round(x), y: Math.round(y) },
@@ -100,10 +147,6 @@ export function runCells(o: Pick<IsoPlacement, 'x' | 'y' | 'toX' | 'toY'>): Grid
     ];
   }
   const out: GridPoint[] = [];
-  const x0 = Math.ceil(Math.min(x, toX) - EPS);
-  const x1 = Math.floor(Math.max(x, toX) + EPS);
-  const y0 = Math.ceil(Math.min(y, toY) - EPS);
-  const y1 = Math.floor(Math.max(y, toY) + EPS);
   for (let cx = x0; cx <= x1; cx += 1) {
     for (let cy = y0; cy <= y1; cy += 1) {
       out.push({ x: cx, y: cy });
@@ -119,10 +162,14 @@ export function buildOccupancy(
 ): Occupancy {
   const exclude = opts.exclude;
   const margin = opts.margin ?? 1;
+  if (!Number.isInteger(margin) || margin < 0 || margin > MAX_GRID_COORD) {
+    throw new RangeError(`occupancy margin must be an integer in [0, ${MAX_GRID_COORD}], got ${margin}`);
+  }
   const blocked = new Set<number>();
   const near = new Set<number>();
   const vesselBoxes: Array<{ x0: number; x1: number; y0: number; y1: number }> = [];
   let bounds: Bounds | null = null;
+  const skipped: string[] = [];
 
   const block = (x: number, y: number) => {
     blocked.add(cellKey(x, y));
@@ -141,12 +188,26 @@ export function buildOccupancy(
       continue;
     }
     const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, obj.object);
-    if (def?.draw === 'run' || (typeof obj.toX === 'number' && typeof obj.toY === 'number')) {
-      for (const c of runCells(obj)) block(c.x, c.y);
+    const isRun = def?.draw === 'run' || (typeof obj.toX === 'number' && typeof obj.toY === 'number');
+    let cells: GridPoint[];
+    try {
+      if (isRun) {
+        cells = runCells(obj);
+      } else {
+        const { w, h } = rotatedFootprint(def, obj.rotation, obj);
+        cells = footprintCells(obj.x, obj.y, w, h);
+      }
+    } catch (err) {
+      // Bad geometry must not hang or crash the live route ghost: leave the
+      // placement out and report it. Anything else is a real bug: rethrow.
+      if (!(err instanceof GeometryRangeError)) throw err;
+      skipped.push(obj.id);
       continue;
     }
-    const { w, h } = rotatedFootprint(def, obj.rotation, obj);
-    const cells = footprintCells(obj.x, obj.y, w, h);
+    if (isRun) {
+      for (const c of cells) block(c.x, c.y);
+      continue;
+    }
     for (const c of cells) block(c.x, c.y);
     if (cells.length > 1 && margin > 0) {
       const xs = cells.map((c) => c.x);
@@ -169,6 +230,7 @@ export function buildOccupancy(
     blocked,
     near,
     bounds,
+    skipped,
     isBlocked: (x, y) => blocked.has(cellKey(x, y)),
     isNearVessel: (x, y) => near.has(cellKey(x, y)),
   };

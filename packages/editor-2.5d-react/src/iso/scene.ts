@@ -15,6 +15,7 @@ import { GRID_CELL_SIZE, gridToWorld, worldToGrid } from './grid';
 import { getDefaultIsoRegistry } from '../registry/default';
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoPartDefinition } from '../registry/types';
+import { MAX_GRID_COORD } from '../routing/grid';
 
 export { GRID_CELL_SIZE, gridToWorld, worldToGrid };
 
@@ -124,6 +125,19 @@ function migrateLegacyPlacement(def: IsoPartDefinition, raw: Record<string, unkn
   return next as unknown as IsoPlacement;
 }
 
+/**
+ * Grid-space placement fields that must be finite and within +-MAX_GRID_COORD
+ * when present. JSON can't spell Infinity, but `1e400` parses to it, and an
+ * infinite coordinate hung the router's cell loops (holodeck#8).
+ */
+const OPTIONAL_GRID_FIELDS = ['toX', 'toY', 'width', 'height', 'size'] as const;
+/** Other numeric placement fields: only need to be finite when present. */
+const OPTIONAL_FINITE_FIELDS = ['rotation', 'nudgeX', 'nudgeY', 'screenX', 'screenY'] as const;
+
+function isGridNumber(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= MAX_GRID_COORD;
+}
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
@@ -150,6 +164,12 @@ export function parseSceneFile(
   if (file.extensions !== undefined && !isRecord(file.extensions)) {
     throw new Error('scene.extensions must be an object');
   }
+  if (
+    file.gridCellSize !== undefined &&
+    (typeof file.gridCellSize !== 'number' || !Number.isFinite(file.gridCellSize) || file.gridCellSize <= 0)
+  ) {
+    throw new Error(`scene.gridCellSize must be a finite number > 0, got ${String(file.gridCellSize)}`);
+  }
   const objects: IsoPlacement[] = [];
   for (const obj of file.objects) {
     if (!isRecord(obj)) {
@@ -160,6 +180,18 @@ export function parseSceneFile(
     }
     if (typeof obj.x !== 'number' || typeof obj.y !== 'number' || Number.isNaN(obj.x) || Number.isNaN(obj.y)) {
       throw new Error(`placement ${obj.id} missing numeric x,y`);
+    }
+    for (const field of ['x', 'y', ...OPTIONAL_GRID_FIELDS] as const) {
+      const v = obj[field];
+      if ((field === 'x' || field === 'y' || v !== undefined) && !isGridNumber(v)) {
+        throw new Error(`placement ${obj.id}: ${field} must be a finite number within +-${MAX_GRID_COORD}, got ${String(v)}`);
+      }
+    }
+    for (const field of OPTIONAL_FINITE_FIELDS) {
+      const v = obj[field];
+      if (v !== undefined && (typeof v !== 'number' || !Number.isFinite(v))) {
+        throw new Error(`placement ${obj.id}: ${field} must be a finite number, got ${String(v)}`);
+      }
     }
     const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, obj.object);
     if (!def) {

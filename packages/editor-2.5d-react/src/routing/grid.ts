@@ -60,6 +60,15 @@ export function rotateOffset(dx: number, dy: number, rotation = 0): GridPoint {
 
 /** Numeric cell key (cheaper than string keys in the A* hot loop). Valid for |x|, |y| < 32768. */
 const KEY_OFFSET = 32768;
+
+/**
+ * Largest |coordinate| a scene may use, in grid cells. Half of `cellKey`'s
+ * range, so a footprint, a pipe run or the router's search margin around
+ * either never leaves it. `parseSceneFile` rejects anything beyond, and the
+ * occupancy helpers refuse to enumerate past it (holodeck#8: an `Infinity`
+ * coordinate made `footprintCells` loop forever).
+ */
+export const MAX_GRID_COORD = 16_384;
 export function cellKey(x: number, y: number): number {
   return (x + KEY_OFFSET) * 65536 + (y + KEY_OFFSET);
 }

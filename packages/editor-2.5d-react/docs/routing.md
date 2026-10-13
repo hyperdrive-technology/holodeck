@@ -15,6 +15,7 @@ Pure modules in `src/routing/` (no React, no three). The editor wires them in `s
 - A placement's `(x, y)` is the CENTRE of its footprint. A part blocks every grid node in the closed box `[x-w/2, x+w/2] x [y-h/2, y+h/2]`: a 2x2 tank is a 3x3 block of nodes, edge nodes included, so a tube never grazes a vessel wall. 90/270 degree `rotation` swaps w and h.
 - `area` and `label` never block. Pipes block every node of their run, ends included; elbows, valves and end caps block their node.
 - Ports (`IsoPartDefinition.ports`) are part-local offsets from the centre plus an outward `dir`; both rotate with the placement. Compass: n = -y, e = +x, s = +y, w = -x. The built-in `tank` and `mixer` have `east` / `west` ports at floor level on the vessel edge; the east one sits in the window, so routing only uses west (see Vessel cutouts).
+- Bounds: coordinates are limited to +-`MAX_GRID_COORD` (16384, half of `cellKey`'s range). `parseSceneFile` rejects non-finite or out-of-range `x`/`y`/`toX`/`toY`/`width`/`height`/`size`. `footprintCells` / `runCells` throw `GeometryRangeError` rather than enumerate unbounded or over-`MAX_FOOTPRINT_CELLS` (256x256) boxes, and `buildOccupancy` leaves such placements out, listing them in `occ.skipped` (holodeck#8).
 - `RouteEnd.heading` is the port's OUTWARD direction: the first step leaves that way; at the end the last step arrives moving the opposite way.
 
 ## Elbows (`elbows.ts`)
