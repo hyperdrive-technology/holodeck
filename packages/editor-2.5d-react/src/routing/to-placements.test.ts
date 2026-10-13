@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { elbowYawForDirs, trimRun } from '../../assets/process/pipe-math';
+import { trimRun } from '../../assets/process/pipe-math';
+import { elbowRotationForArms, headingOf } from './elbows';
 import { nextId } from '../editor/editor-state';
 import type { IsoPlacement } from '../iso/scene';
 import { routePipe } from './astar';
@@ -15,13 +16,27 @@ describe('collapsePath', () => {
       bends: [],
     });
   });
-  it('splits at bends and yaws the elbow with elbowYawForDirs', () => {
+  it('splits at bends and yaws the elbow from its two arms', () => {
     const c = collapsePath([p(0, 0), p(1, 0), p(2, 0), p(2, 1), p(2, 2)]);
     expect(c.pipes).toEqual([
       { x: 0, y: 0, toX: 2, toY: 0 },
       { x: 2, y: 0, toX: 2, toY: 2 },
     ]);
-    expect(c.bends).toEqual([{ x: 2, y: 0, rotation: elbowYawForDirs(-2, 0, 0, 2) }]);
+    // Arms: back toward (0,0) is w, ahead toward (2,2) is s => s+w = +pi/2.
+    expect(c.bends).toEqual([{ x: 2, y: 0, rotation: Math.PI / 2 }]);
+  });
+  it('yaws every corner of a zig-zag by the arms table (elbows.ts)', () => {
+    const c = collapsePath([p(0, 0), p(2, 0), p(2, 2), p(0, 2), p(0, 4)]);
+    expect(c.bends).toEqual([
+      { x: 2, y: 0, rotation: Math.PI / 2 }, // back w, ahead s
+      { x: 2, y: 2, rotation: 0 }, // back n, ahead w
+      { x: 0, y: 2, rotation: Math.PI }, // back e, ahead s
+    ]);
+  });
+  it('emits no elbow for a U-turn (no 90 degree fitting joins it)', () => {
+    const c = collapsePath([p(0, 0), p(2, 0), p(1, 0)]);
+    expect(c.pipes).toHaveLength(2);
+    expect(c.bends).toEqual([]);
   });
   it('returns nothing for fewer than two distinct points', () => {
     expect(collapsePath([p(1, 1)])).toEqual({ pipes: [], bends: [] });
@@ -54,7 +69,7 @@ describe('pathToPlacements on a routed detour', () => {
           ? [Math.sign(q.toX! - q.x), Math.sign(q.toY! - q.y)]
           : [Math.sign(q.x - q.toX!), Math.sign(q.y - q.toY!)];
       const [a, b] = ends.map(dir) as [number[], number[]];
-      expect(e.rotation).toBe(elbowYawForDirs(a[0]!, a[1]!, b[0]!, b[1]!));
+      expect(e.rotation).toBe(elbowRotationForArms(headingOf(a[0]!, a[1]!)!, headingOf(b[0]!, b[1]!)!));
     }
   });
 

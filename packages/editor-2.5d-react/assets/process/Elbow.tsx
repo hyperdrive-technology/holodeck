@@ -10,6 +10,12 @@ import { useHolodeckStyle } from './style-context';
  * = pipe radius, ELBOW_SWEEP faceted sweep steps, centred (via elbowOffset)
  * so the mouths land where `trimRun` ends the adjoining pipes.
  * Knuckles are pipe-to-tank blobs, not 90° corners.
+ *
+ * `rotationY` is a true yaw about world +Y applied AFTER the torus is laid
+ * flat (yawed group around a flat mesh). Arms per yaw (grid compass,
+ * n = -y): 0 -> n + w, +pi/2 -> s + w, pi -> s + e, -pi/2 -> n + e. The
+ * pooled InstancedElbows use the same pose (`elbowInstancePose`); the table
+ * lives in src/routing/elbows.ts.
  */
 export function Elbow({
   position,

@@ -34,16 +34,17 @@ describe('pipePose', () => {
   });
 });
 
-describe('elbowYawForDirs', () => {
-  it('flips the inner wedge 180° so the quarter sits on the inside of the L', () => {
-    expect(elbowYawForDirs(-1, 0, 0, -1)).toBeCloseTo(0);
-    expect(elbowYawForDirs(1, 0, 0, 1)).toBeCloseTo(Math.PI);
-    expect(elbowYawForDirs(0, 1, -1, 0)).toBeCloseTo(Math.PI / 2);
-    expect(elbowYawForDirs(-1, 0, 0, 1)).toBeCloseTo(Math.PI / 2);
-    // Steam-out at the green valve: riser toward −Y, stub toward +X.
-    // Inner +X/−Y wedge is +π/2; the +π in elbowYawForDirs returns the outer
-    // −π/2 (180° off on overlay-50). Scene.json authors +π/2 for this corner.
+describe('elbowYawForDirs (deprecated; see routing/elbows.ts)', () => {
+  it('returns the true yaw whose arms are the two run directions (rest pose n + w)', () => {
+    expect(elbowYawForDirs(-1, 0, 0, -1)).toBeCloseTo(0); // w + n
+    expect(elbowYawForDirs(1, 0, 0, 1)).toBeCloseTo(Math.PI); // e + s
+    expect(elbowYawForDirs(0, 1, -1, 0)).toBeCloseTo(Math.PI / 2); // s + w
+    expect(elbowYawForDirs(-1, 0, 0, 1)).toBeCloseTo(Math.PI / 2); // w + s
+    // Steam-out at the green valve: riser toward -Y (n), stub toward +X (e).
     expect(elbowYawForDirs(0, -1, 1, 0)).toBeCloseTo(-Math.PI / 2);
+  });
+  it('returns 0 for a straight pair', () => {
+    expect(elbowYawForDirs(1, 0, -1, 0)).toBe(0);
   });
 });
 

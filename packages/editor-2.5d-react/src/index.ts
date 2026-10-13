@@ -23,7 +23,29 @@ export {
   Pipe,
   Shaft,
   Tank,
+  TankAgitator,
+  AGITATOR_ANIM_NODE,
   Valve,
+  DEFAULT_TANK_PARAMS,
+  TANK_BOTTOMS,
+  TANK_SUPPORTS,
+  TANK_TOPS,
+  TANK_WINDOW_DEG,
+  TANK_WINDOW_YAW,
+  mergeTankParams,
+  tankLayout,
+  tankWallSpan,
+  tankWindow,
+  vesselFootprint,
+  vesselPorts,
+  AGITATOR_PRESET,
+  BRITE_TANK_PRESET,
+  FERMENTER_PRESET,
+  HLT_PRESET,
+  KETTLE_PRESET,
+  MASH_TUN_PRESET,
+  TANK_PRESETS,
+  WHIRLPOOL_PRESET,
   HOLODECK_STYLE,
   FINISH_NAMES,
   applyHolodeckStyle,
@@ -34,7 +56,20 @@ export {
   finishForMaterialName,
 } from '../assets/process';
 export { HolodeckStyleProvider, useHolodeckStyle } from '../assets/process/style-context';
-export type { ApplyStyleOverrides, Finish, FinishName, HolodeckStyle } from '../assets/process';
+export type {
+  ApplyStyleOverrides,
+  Finish,
+  FinishName,
+  HolodeckStyle,
+  TankBottom,
+  TankCap,
+  TankNozzle,
+  TankParams,
+  TankPreset,
+  TankPresetId,
+  TankSupport,
+  TankTop,
+} from '../assets/process';
 export {
   ISO_VIEW_DISTANCE,
   initialIsoPose,
@@ -58,6 +93,7 @@ export {
   VISIBLE_ANIMATOR,
 } from './anim/animators';
 export { applyAnimations, planAnimations, useIsoAnimators } from './anim/use-iso-animators';
+export { AnimatedPartRoot } from './anim/AnimatedPartRoot';
 export type { AnimationBinding } from './anim/use-iso-animators';
 // Superset of the static component in assets/process: adds def / params / animation.
 export { HolodeckModel } from './anim/HolodeckModel';
@@ -67,4 +103,37 @@ export { BUILTIN_MODEL_URLS, modelUrl } from '../assets/models';
 // Obstacle-avoiding pipe routing (pure; see docs/routing.md).
 export { buildOccupancy, resolveRouteEnd, routePipe } from './routing';
 export type { Occupancy, OccupancyOptions, ResolvedRouteEnd, RouteEnd, RouteOptions, RoutePath } from './routing';
+// Elbow orientation (`params.bend: "auto"`) and vessel-window pipe clipping.
+export {
+  checkElbows,
+  clipPipeEnd,
+  cutoutFromWindow,
+  elbowArms,
+  elbowRotationForArms,
+  findWindowConnections,
+  inferElbowRotation,
+  isAutoElbow,
+  pipeAxisDistance,
+  resolveAutoElbows,
+  resolvePipeClips,
+  vesselCutout,
+  vesselWall,
+  vesselWallSpan,
+  vesselWalls,
+  DEFAULT_TANK_CUTOUT,
+  ELBOW_BEND_PARAM,
+} from './routing';
+export { resolvePipeRuns, pipeRunSpec, fittingInsideVessel } from './iso/pipe-runs';
+export { PIPE_RADIUS, pipeWorldY } from '../assets/process/pipe-math';
+export type { PipeRunSpec, ScenePipeRuns } from './iso/pipe-runs';
+export type {
+  ElbowIssue,
+  PipeClip,
+  PipeEndClip,
+  PipeEndContact,
+  VesselCutout,
+  VesselWall,
+  WallSpan,
+  WindowConnection,
+} from './routing';
 export type { GridPoint, Heading } from './routing';

@@ -2,14 +2,15 @@
  * Turn a routed cell path into scene placements. Pure.
  *
  * `collapsePath` merges collinear cells into straight runs (pipes) with a
- * bend at every direction change (elbows, yawed by `elbowYawForDirs`).
+ * bend at every direction change (elbows, yawed by `elbowRotationForArms`:
+ * the arms are the directions toward the previous and the next vertex).
  * `pathToPlacements` then allocates ids and emits `pipe` + `elbow` placements.
  * Every elbow sits exactly where two pipe ends meet, which is what the
  * renderer's `bendKeys` / `trimRun` rely on.
  */
 
-import { elbowYawForDirs } from '../../assets/process/pipe-math';
 import type { IsoPlacement } from '../iso/scene';
+import { elbowRotationForArms, headingOf } from './elbows';
 import type { GridPoint } from './grid';
 
 export interface PipeSegment {
@@ -42,8 +43,14 @@ export function collapsePath(points: readonly GridPoint[]): CollapsedPath {
     const b = pts[i]!;
     const c = pts[i + 1]!;
     if (sign(b.x - a.x) !== sign(c.x - b.x) || sign(b.y - a.y) !== sign(c.y - b.y)) {
+      const back = headingOf(a.x - b.x, a.y - b.y);
+      const ahead = headingOf(c.x - b.x, c.y - b.y);
+      const rotation = back && ahead ? elbowRotationForArms(back, ahead) : null;
       vertices.push(b);
-      bends.push({ x: b.x, y: b.y, rotation: elbowYawForDirs(a.x - b.x, a.y - b.y, c.x - b.x, c.y - b.y) });
+      // A U-turn or a diagonal step has no 90 degree elbow: keep the vertex
+      // (the pipes still split there) but emit no fitting rather than a wrong one.
+      // Neither A* (no revisits) nor the manhattan L produces one.
+      if (rotation !== null) bends.push({ x: b.x, y: b.y, rotation });
     }
   }
   vertices.push(pts[pts.length - 1]!);

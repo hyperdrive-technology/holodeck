@@ -1,7 +1,7 @@
 /**
  * Browser check for auto-routing: three tanks in a row, draw a pipe from the
- * first to the last with the real pointer, and assert it goes around the
- * middle tank. Needs local Chromium + WebGPU like the other *-render tests.
+ * first tank's (solid-wall) port to a cell beside the last with the real
+ * pointer, and assert it goes around the middle tank. Needs local Chromium + WebGPU like the other *-render tests.
  */
 import { mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -109,8 +109,11 @@ describe('auto pipe routing in the editor', () => {
         await page.mouse.down();
         await page.mouse.up();
       };
-      await click(2, 0);
-      expect(await root.getAttribute('data-pipe-start')).toBe('2,0');
+      // Click inside tank-1: it snaps to the east port (ties with west resolve in
+      // declaration order). Window ports are valid: the pipe is clipped at the
+      // wall when drawn (routing/vessel-ports.ts clipPipeEnd).
+      await click(0, 0);
+      expect(await root.getAttribute('data-pipe-start')).toBe('1,0');
       await click(10, 0);
       await page.waitForTimeout(200);
 

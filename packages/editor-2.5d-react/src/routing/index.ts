@@ -8,3 +8,43 @@ export { collapsePath, pathToPlacements, DEFAULT_PIPE_BAND } from './to-placemen
 export type { Bend, CollapsedPath, PipeSegment, NextId } from './to-placements';
 export type { GridPoint, Heading } from './grid';
 export { footprint } from './footprint';
+export {
+  checkElbows,
+  elbowArms,
+  elbowRotationForArms,
+  headingOf,
+  inferElbowRotation,
+  isAutoElbow,
+  pipeArmsAt,
+  resolveAutoElbows,
+  ELBOW_BEND_MODES,
+  ELBOW_BEND_PARAM,
+} from './elbows';
+export type { ElbowBendMode, ElbowInference, ElbowInferenceFailure, ElbowIssue, ElbowIssueKind, PipeArm } from './elbows';
+export {
+  clipPipeEnd,
+  cutoutFromWindow,
+  findWindowConnections,
+  overlapsCutout,
+  pipeAxisDistance,
+  pipeHalfAngleDeg,
+  portWallAngleDeg,
+  resolvePipeClips,
+  vesselCutout,
+  vesselRadius,
+  vesselWall,
+  vesselWallSpan,
+  vesselWalls,
+  wallAngleDeg,
+  DEFAULT_TANK_CUTOUT,
+} from './vessel-ports';
+export type {
+  PipeClip,
+  PipeClipOptions,
+  PipeEndClip,
+  PipeEndContact,
+  VesselCutout,
+  VesselWall,
+  WallSpan,
+  WindowConnection,
+} from './vessel-ports';

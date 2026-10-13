@@ -24,6 +24,8 @@ describe('resolveRouteEnd', () => {
   });
 
   it('snaps a click inside a tank to the nearest port and points outward', () => {
+    // The east port sits in the tank's cut-away window; that is allowed (the
+    // pipe is drawn clipped at the wall, vessel-ports.ts clipPipeEnd).
     const east = resolveRouteEnd(scene(tank('t', 0, 0)), registry, { x: 1, y: 1 });
     expect(east).toMatchObject({ cell: { x: 1, y: 0 }, heading: 'e', partId: 't', port: 'east' });
     const west = resolveRouteEnd(scene(tank('t', 0, 0)), registry, { x: -1, y: -1 });
@@ -31,8 +33,9 @@ describe('resolveRouteEnd', () => {
   });
 
   it('rotates ports with the part', () => {
-    const r = resolveRouteEnd(scene(tank('t', 10, 10, Math.PI / 2)), registry, { x: 10, y: 9 });
-    expect(r).toMatchObject({ cell: { x: 10, y: 9 }, heading: 'n', port: 'east' });
+    // At pi the local west port faces world east.
+    const r = resolveRouteEnd(scene(tank('t', 10, 10, Math.PI)), registry, { x: 11, y: 10 });
+    expect(r).toMatchObject({ cell: { x: 11, y: 10 }, heading: 'e', port: 'west' });
   });
 
   it('treats a part without ports as a bare cell', () => {

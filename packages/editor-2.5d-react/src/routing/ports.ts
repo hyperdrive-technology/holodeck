@@ -7,6 +7,11 @@
  * snaps to the nearest port of that part and uses its outward heading, so the
  * pipe leaves the vessel instead of crossing it. A click elsewhere, or on a
  * part with no ports, is the bare cell with no heading.
+ *
+ * Every declared port counts, including ones inside a vessel's cut-away
+ * window: such a pipe is drawn clipped at the wall with a cut-section end
+ * (vessel-ports.ts `clipPipeEnd`, applied by the renderers), so there is no
+ * reason to steer routes away from the window any more.
  */
 
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
@@ -33,14 +38,16 @@ export function resolveRouteEnd(
     const obj = scene.objects[i]!;
     if (opts.exclude?.has(obj.id)) continue;
     const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, obj.object);
-    if (!def?.ports) continue;
-    const { w, h } = rotatedFootprint(def, obj.rotation);
+    if (!def) continue;
+    const ports = def.ports ?? {};
+    if (Object.keys(ports).length === 0) continue;
+    const { w, h } = rotatedFootprint(def, obj.rotation, obj);
     if (!footprintCells(obj.x, obj.y, w, h).some((c) => c.x === cell.x && c.y === cell.y)) continue;
 
     let bestEnd: ResolvedRouteEnd | null = null;
     let bestDist = Infinity;
     // Object.entries keeps declaration order, so ties resolve deterministically.
-    for (const [name, port] of Object.entries(def.ports)) {
+    for (const [name, port] of Object.entries(ports)) {
       const off = rotateOffset(port.x, port.y, obj.rotation);
       const px = Math.round(obj.x + off.x);
       const py = Math.round(obj.y + off.y);

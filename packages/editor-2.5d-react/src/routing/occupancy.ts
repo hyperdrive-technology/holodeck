@@ -64,10 +64,12 @@ const EPS = 1e-6;
 
 /** Rotated footprint size of a placement. */
 export function rotatedFootprint(
-  def: { footprint: { w: number; h: number } } | undefined,
+  def: Pick<IsoPartDefinition, 'footprint' | 'footprintOf'> | undefined,
   rotation: number | undefined,
+  /** When given, a part that sizes itself from a param (`footprintOf`, e.g. a vessel radius) uses that size. */
+  placement?: IsoPlacement,
 ): { w: number; h: number } {
-  const { w, h } = def?.footprint ?? { w: 1, h: 1 };
+  const { w, h } = (placement && def?.footprintOf?.(placement)) ?? def?.footprint ?? { w: 1, h: 1 };
   return Math.abs(quarterTurns(rotation)) % 2 === 1 ? { w: h, h: w } : { w, h };
 }
 
@@ -143,7 +145,7 @@ export function buildOccupancy(
       for (const c of runCells(obj)) block(c.x, c.y);
       continue;
     }
-    const { w, h } = rotatedFootprint(def, obj.rotation);
+    const { w, h } = rotatedFootprint(def, obj.rotation, obj);
     const cells = footprintCells(obj.x, obj.y, w, h);
     for (const c of cells) block(c.x, c.y);
     if (cells.length > 1 && margin > 0) {

@@ -172,57 +172,48 @@ function snapDir(n: number): number {
   return 0;
 }
 
-/** Default quarter torus after Rx(π/2): mouths at grid +X and +Y. Then Ry(yaw). */
-function mouthAfterYaw(gx: number, gy: number, yaw: number): [number, number] {
-  const c = Math.cos(yaw);
-  const s = Math.sin(yaw);
-  return [Math.round(gx * c + gy * s), Math.round(-gx * s + gy * c)];
-}
-
-function sameDirSet(
-  a: readonly [number, number],
-  b: readonly [number, number],
-  x: readonly [number, number],
-  y: readonly [number, number],
-): boolean {
-  return (a[0] === x[0] && a[1] === x[1] && b[0] === y[0] && b[1] === y[1])
-    || (a[0] === y[0] && a[1] === y[1] && b[0] === x[0] && b[1] === x[1]);
-}
-
-function wrapRightAngle(yaw: number): number {
-  const t = ((yaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
-  if (Math.abs(t) < 1e-9) {
-    return 0;
-  }
-  if (Math.abs(t - Math.PI) < 1e-9 || Math.abs(t + Math.PI) < 1e-9) {
-    return Math.PI;
-  }
-  if (Math.abs(t - Math.PI / 2) < 1e-9) {
-    return Math.PI / 2;
-  }
-  if (Math.abs(t + Math.PI / 2) < 1e-9) {
-    return -Math.PI / 2;
-  }
-  return t;
+/**
+ * Pose of one pooled quarter-torus elbow at world (wx, wz) with TRUE yaw `yaw`
+ * (radians about +Y, the convention in src/routing/elbows.ts: at yaw 0 the
+ * arms point to grid w and n; +pi/2 s+w; pi s+e; -pi/2 n+e).
+ *
+ * Euler order matters. three.js order 'XYZ' builds Rx * Ry * Rz, so the yaw
+ * was applied in the torus' own (still vertical) plane BEFORE the lay-down:
+ * yaw +-pi/2 stood the bend up on its end and yaw pi mirrored it out of the
+ * corner (the "wrong angle" bends on the brewhouse HLT / kettle runs).
+ * 'YXZ' builds Ry(yaw) * Rx(pi/2): lay the torus flat, then yaw it, exactly
+ * like Elbow.tsx (yawed group around a flat mesh) and like `pipePose`.
+ * `elbowOffsetShift(yaw)` is that same world yaw applied to the offset.
+ */
+export function elbowInstancePose(
+  wx: number,
+  wz: number,
+  yaw: number,
+  offset = ELBOW_OFFSET,
+  radius = PIPE_RADIUS,
+): { position: Vector3Tuple; rotation: [number, number, number]; rotationOrder: 'YXZ' } {
+  const [dx, dz] = elbowOffsetShift(yaw, offset);
+  return { position: [wx + dx, pipeWorldY(radius), wz + dz], rotation: [Math.PI / 2, yaw, 0], rotationOrder: 'YXZ' };
 }
 
 /**
- * Yaw so the quarter torus meets two axis-aligned runs leaving a corner.
- * Instanced elbows must use Euler XYZ [π/2, yaw, 0] — YXZ was 180° off
- * at ±90°. Then +π: the inner wedge from this formula sat on the
- * outside of each L in the process-line snapshot. Exception: the
- * green-valve steam-out corner (+X/−Y) is 180° off with that +π —
- * author +π/2 in scene.json (inner wedge, no extra π).
+ * @deprecated Use `elbowRotationForArms` (src/routing/elbows.ts), which takes
+ * grid headings and returns null for a straight joint instead of 0.
+ * Yaw of the elbow whose two arms point along (ax, ay) and (bx, by) (grid
+ * vectors from the corner); 0 when they do not form a right angle.
  */
 export function elbowYawForDirs(ax: number, ay: number, bx: number, by: number): number {
-  const a: [number, number] = [snapDir(ax), snapDir(ay)];
-  const b: [number, number] = [snapDir(bx), snapDir(by)];
-  for (const inner of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
-    const m0 = mouthAfterYaw(1, 0, inner);
-    const m1 = mouthAfterYaw(0, 1, inner);
-    if (sameDirSet(m0, m1, a, b)) {
-      return wrapRightAngle(inner + Math.PI);
-    }
+  const key = (x: number, y: number) => `${snapDir(x)},${snapDir(y)}`;
+  const arms = new Set([key(ax, ay), key(bx, by)]);
+  // Arms at each yaw (rest pose n + w, then quarter turns; see elbows.ts).
+  const table: Array<[number, string, string]> = [
+    [0, '0,-1', '-1,0'],
+    [Math.PI / 2, '0,1', '-1,0'],
+    [Math.PI, '0,1', '1,0'],
+    [-Math.PI / 2, '0,-1', '1,0'],
+  ];
+  for (const [yaw, a, b] of table) {
+    if (arms.size === 2 && arms.has(a) && arms.has(b)) return yaw;
   }
   return 0;
 }

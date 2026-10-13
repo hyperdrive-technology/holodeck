@@ -24,6 +24,22 @@ describe('buildOccupancy', () => {
     expect(occ.isBlocked(7, 5)).toBe(false);
   });
 
+  it('sizes a part from its placement when the part declares footprintOf (resized vessel)', () => {
+    const reg = registry;
+    const def = {
+      ...reg.get('holodeck.iso.part', 'tank')!,
+      id: 'sized',
+      footprintOf: (p: IsoPlacement) => {
+        const r = Number(p.params?.radius ?? 1);
+        return { w: 2 * r, h: 2 * r };
+      },
+    };
+    const custom = { get: (_k: string, id: string) => (id === 'sized' ? def : reg.get('holodeck.iso.part', id)) } as typeof reg;
+    const occ = buildOccupancy({ objects: [{ id: 's', object: 'sized', x: 0, y: 0, params: { radius: 2 } }] }, custom);
+    expect(occ.isBlocked(2, 2)).toBe(true);
+    expect(occ.isBlocked(3, 0)).toBe(false);
+  });
+
   it('swaps w and h for 90 and 270 degree rotations', () => {
     const wide: IsoPlacement = { id: 'a', object: 'tank', x: 0, y: 0 };
     // Make a 4x2 part by registering nothing new: use the 8x6 area is a non-obstacle, so
