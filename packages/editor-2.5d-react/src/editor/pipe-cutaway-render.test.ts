@@ -20,6 +20,7 @@ import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { chromium, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CHROMIUM } from '../test-support/chromium';
 import { pipeWorldY } from '../../assets/process/pipe-math';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { resolvePipeRuns } from '../iso/pipe-runs';
@@ -35,10 +36,6 @@ const HAVE_SCENES = SCENES.every((s) => existsSync(path.join(hmiDir, `${s}.iso.j
 const VIEW = { width: 1600, height: 900 };
 const CROP = { width: 420, height: 300 };
 
-const CHROMIUM = path.join(
-  process.env.HOME ?? '',
-  'Library/Caches/ms-playwright/chromium-1193/chrome-mac/Chromium.app/Contents/MacOS/Chromium',
-);
 
 const registry = createCutawayRegistry();
 
@@ -74,7 +71,7 @@ function vesselEnds(scene: IsoSceneFile) {
 let server: ViteDevServer;
 
 beforeAll(async () => {
-  if (!HAVE_SCENES) return;
+  if (!HAVE_SCENES || !CHROMIUM) return;
   server = await createServer({
     root: path.join(pkgRoot, 'src/editor'),
     server: { host: '127.0.0.1', port: 0, strictPort: false },
@@ -99,7 +96,7 @@ async function show(page: Page, base: string, scene: IsoSceneFile, query: string
   expect(errors).toEqual([]);
 }
 
-describe.skipIf(!HAVE_SCENES)('pipe cut-away render', () => {
+describe.skipIf(!HAVE_SCENES || !CHROMIUM)('pipe cut-away render', () => {
   it('both scenes have window entries to look at', () => {
     for (const name of SCENES) {
       const objects = resolveAutoElbows(loadScene(name).objects);

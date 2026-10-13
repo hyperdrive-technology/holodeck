@@ -6,20 +6,18 @@ import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CHROMIUM } from '../test-support/chromium';
 import { PROCESS_SCENE } from '../iso/load-process-scene';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
 const snapDir = path.join(pkgRoot, 'tests/snapshots');
 const oursPath = path.join(snapDir, 'editor.png');
 
-const CHROMIUM = path.join(
-  process.env.HOME ?? '',
-  'Library/Caches/ms-playwright/chromium-1193/chrome-mac/Chromium.app/Contents/MacOS/Chromium',
-);
 
 let server: ViteDevServer;
 
 beforeAll(async () => {
+  if (!CHROMIUM) return;
   server = await createServer({
     root: path.join(pkgRoot, 'src/editor'),
     server: { host: '127.0.0.1', port: 0, strictPort: false },
@@ -33,7 +31,7 @@ afterAll(async () => {
   await server?.close();
 });
 
-describe('process editor', () => {
+describe.skipIf(!CHROMIUM)('process editor', () => {
   it('loads the scene into the editor chrome', async () => {
     const http = server.httpServer;
     if (!http) {

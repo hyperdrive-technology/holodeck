@@ -7,6 +7,7 @@ import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CHROMIUM } from '../test-support/chromium';
 import { PROCESS_SCENE } from './load-process-scene';
 import { REFERENCE_CANVAS } from '../editor/ProcessSceneView';
 
@@ -15,14 +16,11 @@ const scenePath = path.join(pkgRoot, 'tests/scene.json');
 const snapDir = path.join(pkgRoot, 'tests/snapshots');
 const oursPath = path.join(snapDir, 'scene-json.png');
 
-const CHROMIUM = path.join(
-  process.env.HOME ?? '',
-  'Library/Caches/ms-playwright/chromium-1193/chrome-mac/Chromium.app/Contents/MacOS/Chromium',
-);
 
 let server: ViteDevServer;
 
 beforeAll(async () => {
+  if (!CHROMIUM) return;
   server = await createServer({
     root: path.join(pkgRoot, 'src/iso'),
     configFile: path.join(pkgRoot, 'src/iso/vite.config.ts'),
@@ -37,7 +35,7 @@ afterAll(async () => {
   await server?.close();
 });
 
-describe('renders scene.json', () => {
+describe.skipIf(!CHROMIUM)('renders scene.json', () => {
   it('places every library object from the scene file onto a canvas', async () => {
     const onDisk = JSON.parse(readFileSync(scenePath, 'utf8')) as {
       id: string;

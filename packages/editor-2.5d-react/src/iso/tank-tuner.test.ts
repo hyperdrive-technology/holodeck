@@ -2,17 +2,15 @@ import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CHROMIUM } from '../test-support/chromium';
 import { DEFAULT_TANK_PARAMS, LIQUID_THETA_LENGTH, TANK_INNER_RATIO, TANK_BOWL_Y_OFFSET, MIXER_INNER_RATIO, MIXER_WINDOW_DEG, MIXER_SHOULDER_RATIO, MIXER_SHOULDER_TOP, MIXER_OUTER_BOWL, MIXER_HEEL_OVERLAP, MIXER_SHOULDER_OVERLAP, MIXER_DOME_OVERLAP, angleOnArc, bodyShoulder, bodyOuterBowl, flaskBowl, heelOverlap, shoulderOverlap, bowlThetaForLiquid, cylinderThetasEven, cylinderThetasKept, innerCageSpan, liquidCylinderHeight, liquidSurfaceRadius, mergeTankParams, mixerHatLayout, mixerShaftLayout, spherePhiFromCylinderTheta, tankWindow, tunedVesselHeight, windowFillSegments } from '../../assets/process/tank-params';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
-const CHROMIUM = path.join(
-  process.env.HOME ?? '',
-  'Library/Caches/ms-playwright/chromium-1193/chrome-mac/Chromium.app/Contents/MacOS/Chromium',
-);
 
 let server: ViteDevServer;
 
 beforeAll(async () => {
+  if (!CHROMIUM) return; // only the browser test below uses the server
   server = await createServer({
     root: path.join(pkgRoot, 'src/iso'),
     configFile: path.join(pkgRoot, 'src/iso/vite.config.ts'),
@@ -171,7 +169,7 @@ describe('tank tuner', () => {
     expect(hat.neckH).toBeGreaterThan(0.02);
   });
 
-  it('serves sliders for meridians, dome, fill, and shade', async () => {
+  it.skipIf(!CHROMIUM)('serves sliders for meridians, dome, fill, and shade', async () => {
     const http = server.httpServer;
     if (!http) {
       throw new Error('vite did not bind a port');

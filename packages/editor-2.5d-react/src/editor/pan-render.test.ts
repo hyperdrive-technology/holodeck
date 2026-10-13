@@ -10,6 +10,7 @@ import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { chromium, type Browser, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CHROMIUM } from '../test-support/chromium';
 import type { Vector3Tuple } from 'three';
 import type { IsoSceneFile } from '../iso/scene';
 import { panTarget } from '../iso/pan';
@@ -18,16 +19,13 @@ import { initialIsoPose } from '../iso/pose';
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
 const snapDir = path.join(pkgRoot, 'tests/snapshots');
 
-const CHROMIUM = path.join(
-  process.env.HOME ?? '',
-  'Library/Caches/ms-playwright/chromium-1193/chrome-mac/Chromium.app/Contents/MacOS/Chromium',
-);
 
 let server: ViteDevServer;
 let browser: Browser;
 let base = '';
 
 beforeAll(async () => {
+  if (!CHROMIUM) return;
   server = await createServer({
     root: path.join(pkgRoot, 'src/editor'),
     server: { host: '127.0.0.1', port: 0, strictPort: false },
@@ -80,7 +78,7 @@ function expectNear(a: Vector3Tuple, b: Vector3Tuple, tol: number) {
   a.forEach((v, i) => expect(Math.abs(v - b[i]!)).toBeLessThan(tol));
 }
 
-describe('view pan', () => {
+describe.skipIf(!CHROMIUM)('view pan', () => {
   it('Edit mode: left drag on empty canvas pans by the screen-space amount, leaves parts alone, and stops auto-fit', async () => {
     const page = await open('scene=routing');
     try {

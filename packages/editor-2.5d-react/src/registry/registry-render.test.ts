@@ -8,19 +8,16 @@ import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { chromium, type Browser, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CHROMIUM } from '../test-support/chromium';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
-// Same local Chromium the other browser tests use (see vitest.config.ts).
-const CHROMIUM = path.join(
-  process.env.HOME ?? '',
-  'Library/Caches/ms-playwright/chromium-1193/chrome-mac/Chromium.app/Contents/MacOS/Chromium',
-);
 
 let server: ViteDevServer;
 let browser: Browser;
 let base = '';
 
 beforeAll(async () => {
+  if (!CHROMIUM) return;
   server = await createServer({
     root: path.join(pkgRoot, 'src/registry'),
     configFile: path.join(pkgRoot, 'src/iso/vite.config.ts'),
@@ -75,7 +72,7 @@ const whiteBodyColors = (page: Page) =>
     return [...colors];
   });
 
-describe('registry-driven editor in a real canvas', () => {
+describe.skipIf(!CHROMIUM)('registry-driven editor in a real canvas', () => {
   it('animates a GLB part registered by an extension, driven by metrics', async () => {
     const page = await open();
     try {

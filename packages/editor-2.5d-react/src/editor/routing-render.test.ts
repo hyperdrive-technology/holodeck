@@ -8,6 +8,7 @@ import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { chromium, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CHROMIUM } from '../test-support/chromium';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { footprintCells } from '../routing/occupancy';
 import { runCells } from '../routing/occupancy';
@@ -16,14 +17,11 @@ const pkgRoot = path.resolve(import.meta.dirname, '../..');
 const snapDir = path.join(pkgRoot, 'tests/snapshots');
 const shotPath = path.join(snapDir, 'auto-route.png');
 
-const CHROMIUM = path.join(
-  process.env.HOME ?? '',
-  'Library/Caches/ms-playwright/chromium-1193/chrome-mac/Chromium.app/Contents/MacOS/Chromium',
-);
 
 let server: ViteDevServer;
 
 beforeAll(async () => {
+  if (!CHROMIUM) return;
   server = await createServer({
     root: path.join(pkgRoot, 'src/editor'),
     server: { host: '127.0.0.1', port: 0, strictPort: false },
@@ -73,7 +71,7 @@ async function calibrate(page: Page) {
   };
 }
 
-describe('auto pipe routing in the editor', () => {
+describe.skipIf(!CHROMIUM)('auto pipe routing in the editor', () => {
   it('routes a pipe around the middle tank', async () => {
     const address = server.httpServer?.address();
     if (!address || typeof address === 'string') {

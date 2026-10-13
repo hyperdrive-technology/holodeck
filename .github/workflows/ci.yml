@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # packages/cli is not built here: it has an empty package-lock.json, no
+        # src/index.ts (its build entry), and depends on @holodeck/sdk from the npm
+        # registry, which is not published. Add it once it is revived.
+        package: [editor-2.5d-react, editor-2d-react, viewer-3d-react]
+    env:
+      # Render (*-render) tests need a GPU + WebGPU Chromium; hosted runners have
+      # neither. src/test-support/chromium.ts skips them when CI is set and
+      # HOLODECK_CHROMIUM is not. Set explicitly so the intent is visible here.
+      HOLODECK_SKIP_RENDER_TESTS: '1'
+    steps:
+      # The packages depend on the SDK via `file:../../../holodeck-sdk/ts`, so the
+      # SDK must be checked out as a sibling of this repo. Actions can only check
+      # out inside $GITHUB_WORKSPACE, so both repos go into subfolders of it.
+      - name: Checkout holodeck
+        uses: actions/checkout@v4
+        with:
+          path: holodeck
+
+      # Use the SDK branch with the same name as this branch when it exists (so
+      # paired holodeck + SDK PRs are tested together), else the SDK's main.
+      - name: Pick holodeck-sdk ref
+        id: sdk
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          if git ls-remote --exit-code --heads https://github.com/hyperdrive-technology/holodeck-sdk.git "$BRANCH" >/dev/null; then
+            echo "ref=$BRANCH" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout holodeck-sdk (${{ steps.sdk.outputs.ref }})
+        uses: actions/checkout@v4
+        with:
+          repository: hyperdrive-technology/holodeck-sdk
+          ref: ${{ steps.sdk.outputs.ref }}
+          path: holodeck-sdk
+
+      # pnpm 10.26+ understands the SDK's pnpm-workspace.yaml (`allowBuilds`).
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+
+      # Node 26 satisfies every engines field (packages: >=18; the stray root
+      # package.json: >=26.3.1).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: |
+            holodeck-sdk/ts/pnpm-lock.yaml
+            holodeck/packages/${{ matrix.package }}/pnpm-lock.yaml
+
+      # The SDK's package.json points at dist/, so it has to be built before the
+      # `file:` dependency is installed (pnpm copies the folder at install time).
+      - name: Build holodeck-sdk
+        working-directory: holodeck-sdk/ts
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Install
+        working-directory: holodeck/packages/${{ matrix.package }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        working-directory: holodeck/packages/${{ matrix.package }}
+        run: pnpm type-check
+
+      - name: Test
+        working-directory: holodeck/packages/${{ matrix.package }}
+        run: pnpm exec vitest run
+
+      - name: Build
+        working-directory: holodeck/packages/${{ matrix.package }}
+        run: pnpm build

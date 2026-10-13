@@ -16,6 +16,7 @@ import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CHROMIUM } from '../test-support/chromium';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { checkElbows, isAutoElbow, resolveAutoElbows } from '../routing/elbows';
 
@@ -28,10 +29,6 @@ const brewhousePath = path.resolve(
 );
 const HAVE_SCENE = existsSync(brewhousePath);
 
-const CHROMIUM = path.join(
-  process.env.HOME ?? '',
-  'Library/Caches/ms-playwright/chromium-1193/chrome-mac/Chromium.app/Contents/MacOS/Chromium',
-);
 
 /** Brewery parts that are vessels (drawn as a built-in tank); other `brewery:*` parts are dropped. */
 const isBreweryVessel = (o: IsoPlacement) =>
@@ -56,7 +53,7 @@ function builtinBrewhouse(): IsoSceneFile {
 let server: ViteDevServer;
 
 beforeAll(async () => {
-  if (!HAVE_SCENE) return;
+  if (!HAVE_SCENE || !CHROMIUM) return;
   server = await createServer({
     root: path.join(pkgRoot, 'src/editor'),
     server: { host: '127.0.0.1', port: 0, strictPort: false },
@@ -70,7 +67,7 @@ afterAll(async () => {
   await server?.close();
 });
 
-describe.skipIf(!HAVE_SCENE)('brewhouse piping render', () => {
+describe.skipIf(!HAVE_SCENE || !CHROMIUM)('brewhouse piping render', () => {
   it('draws the brewhouse with every bend joining its pipes', async () => {
     const scene = builtinBrewhouse();
     // The bends this snapshot is about resolve from their pipes (params.bend = "auto").
