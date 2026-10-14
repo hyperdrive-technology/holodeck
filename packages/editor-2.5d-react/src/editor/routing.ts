@@ -5,7 +5,7 @@ import { footprint } from '../routing/footprint';
 import { buildOccupancy } from '../routing/occupancy';
 import { collapsePath, pathToPlacements, type CollapsedPath, type NextId } from '../routing/to-placements';
 import { sameCell } from './snap';
-import type { GridPoint } from '../routing/grid';
+import { MAX_GRID_COORD, type GridPoint } from '../routing/grid';
 
 export type { GridPoint };
 export { footprint };
@@ -43,7 +43,7 @@ export interface PlannedRoute extends CollapsedPath {
    * router was not asked.
    */
   fallback: boolean;
-  /** A* found nothing or obstacles were skipped (drives the red ghost and "No clear route" notice). */
+  /** A* found nothing, endpoints were invalid or obstacles were skipped (drives the red ghost and "No clear route" notice). */
   noRoute: boolean;
 }
 
@@ -60,6 +60,12 @@ export function planRoute(
   to: RouteEnd,
   opts: { exclude?: ReadonlySet<string>; route?: RouteOptions } = {},
 ): PlannedRoute {
+  // The fallback also becomes persisted geometry, including for half-cell
+  // clicks. Invalid endpoints must fail without producing an out-of-bounds L.
+  if (![from.cell.x, from.cell.y, to.cell.x, to.cell.y]
+    .every((v) => Number.isFinite(v) && Math.abs(v) <= MAX_GRID_COORD)) {
+    return { ...collapsePath([]), points: [], fallback: true, noRoute: true };
+  }
   const onGrid = [from.cell, to.cell].every((c) => Number.isInteger(c.x) && Number.isInteger(c.y));
   const occ = buildOccupancy(scene, registry, { exclude: opts.exclude });
   if (onGrid) {

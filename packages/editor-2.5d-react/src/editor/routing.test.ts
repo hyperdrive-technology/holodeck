@@ -3,6 +3,8 @@ import { getDefaultIsoRegistry } from '../registry/default';
 import { nextId } from './editor-state';
 import { routePipe } from '../routing/astar';
 import { buildOccupancy } from '../routing/occupancy';
+import { MAX_GRID_COORD } from '../routing/grid';
+import { parseSceneFile } from '../iso/scene';
 import { footprint, manhattanRoute, routeToPlacements } from './routing';
 
 const registry = getDefaultIsoRegistry();
@@ -43,6 +45,61 @@ describe('manhattanRoute', () => {
     expect(fallback).toBe(false);
     expect(placed.map((p) => p.object)).toEqual(['pipe', 'pipe', 'elbow']);
     expect(placed.map((p) => p.id)).toEqual(['pipe-1', 'pipe-2', 'elbow-1']);
+  });
+
+  it.each([
+    [16384, 0, 16384, -2, 16384, 2],
+    [-16384, 0, -16384, -2, -16384, 2],
+    [0, 16384, -2, 16384, 2, 16384],
+    [0, -16384, -2, -16384, 2, -16384],
+  ])('keeps routes around a boundary tank at (%s, %s) reopenable', (x, y, fromX, fromY, toX, toY) => {
+    const scene = parseSceneFile({
+      id: 'boundary', name: 'Boundary tank', gridCellSize: 1,
+      objects: [{ id: 'tank-1', object: 'tank', x, y }],
+    });
+    const from = { cell: { x: fromX, y: fromY } };
+    const to = { cell: { x: toX, y: toY } };
+    const occ = buildOccupancy(scene, registry);
+    expect(occ.skipped).toEqual([]);
+    expect(occ.isBlocked(x + Math.sign(x), y + Math.sign(y))).toBe(true);
+    const path = routePipe(from, to, occ)!;
+    expect(path).not.toBeNull();
+    expect(path.cells.every((c) => Math.abs(c.x) <= MAX_GRID_COORD && Math.abs(c.y) <= MAX_GRID_COORD)).toBe(true);
+    expect(path.cells.some((c) => occ.isBlocked(c.x, c.y))).toBe(false);
+    const out = routeToPlacements(scene, registry, from, to, nextId);
+    expect(out).toMatchObject({ fallback: false, noRoute: false });
+    expect(out.placements.some((p) => p.object === 'pipe')).toBe(true);
+    expect(out.placements.some((p) => p.object === 'elbow')).toBe(true);
+    const routed = { ...scene, objects: [...scene.objects, ...out.placements] };
+    expect(parseSceneFile(JSON.parse(JSON.stringify(routed)))).toEqual(routed);
+  });
+
+  it('reports failure when the only escape around a boundary tank would leave the scene', () => {
+    const scene = parseSceneFile({
+      id: 'trapped', name: 'Trapped boundary route', gridCellSize: 1,
+      objects: [
+        { id: 'tank-1', object: 'tank', x: 16384, y: 0 },
+        { id: 'valve-1', object: 'valve', x: 16383, y: -2 },
+        { id: 'valve-2', object: 'valve', x: 16384, y: -3 },
+      ],
+    });
+    const from = { cell: { x: 16384, y: -2 } };
+    const to = { cell: { x: 16384, y: 2 } };
+    expect(routePipe(from, to, buildOccupancy(scene, registry))).toBeNull();
+    const out = routeToPlacements(scene, registry, from, to, nextId);
+    expect(out).toMatchObject({ fallback: true, noRoute: true });
+    const routed = { ...scene, objects: [...scene.objects, ...out.placements] };
+    expect(parseSceneFile(JSON.parse(JSON.stringify(routed)))).toEqual(routed);
+  });
+
+  it.each([16385, -16385, 16384.5, Infinity, NaN])('emits no placements for an invalid endpoint x=%s', (x) => {
+    const scene = { objects: [] };
+    const valid = { cell: { x: 0, y: 0 } };
+    const invalid = { cell: { x, y: 0 } };
+    for (const [from, to] of [[valid, invalid], [invalid, valid], [invalid, invalid]] as const) {
+      expect(routeToPlacements(scene, registry, from, to, nextId))
+        .toEqual({ placements: [], fallback: true, noRoute: true });
+    }
   });
 
   it('falls back to the manhattan L (flagged) when walled in', () => {

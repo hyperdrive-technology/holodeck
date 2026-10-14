@@ -66,8 +66,9 @@ export const MAX_CELL_COORD = KEY_OFFSET - 1;
 /**
  * Largest |coordinate| a scene may use, in grid cells. Half of `cellKey`'s
  * range. Placement origins and run endpoints stay inside this limit;
- * footprint nodes may extend to MAX_CELL_COORD. Clearance and search margins
- * are clipped to that safe key range. Geometry enumeration is also capped
+ * footprint nodes may extend to MAX_CELL_COORD. Clearance is clipped to that
+ * safe key range; route search stays within MAX_GRID_COORD so its output can
+ * be persisted and reopened. Geometry enumeration is also capped
  * (holodeck#8: an `Infinity` coordinate made `footprintCells` loop forever).
  */
 export const MAX_GRID_COORD = 16_384;

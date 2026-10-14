@@ -42,13 +42,15 @@ describe('parseSceneFile geometry bounds', () => {
     for (let dx = -1; dx <= 1; dx += 1) {
       for (let dy = -1; dy <= 1; dy += 1) expect(occ.isBlocked(x + dx, y + dy)).toBe(true);
     }
-    const from = { cell: { x, y: y - 2 } };
-    const to = { cell: { x, y: y + 2 } };
+    // Route along each boundary so both endpoints are persistable too.
+    const from = { cell: x === 0 ? { x: x - 2, y } : { x, y: y - 2 } };
+    const to = { cell: x === 0 ? { x: x + 2, y } : { x, y: y + 2 } };
     const plan = planRoute(parsed, registry, from, to);
     expect(plan).toMatchObject({ fallback: false, noRoute: false });
     expect(plan.points[0]).toEqual(from.cell);
     expect(plan.points[plan.points.length - 1]).toEqual(to.cell);
     expect(plan.points.every((c) => !occ.isBlocked(c.x, c.y))).toBe(true);
+    expect(plan.points.every((c) => Math.abs(c.x) <= MAX_GRID_COORD && Math.abs(c.y) <= MAX_GRID_COORD)).toBe(true);
   });
 
   it.each([Infinity, NaN, -1, 256])('rejects an effective footprint size of %s', (size) => {

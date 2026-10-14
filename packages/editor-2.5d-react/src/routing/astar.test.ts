@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultMinBendSpacing, routePipe, type RoutePath } from './astar';
-import { HEADING_VECTOR, type GridPoint } from './grid';
+import { HEADING_VECTOR, MAX_GRID_COORD, type GridPoint } from './grid';
 import { last, occOf, pipe, tank } from './test-helpers';
 import { ELBOW_RADIUS } from '../../assets/process/pipe-math';
 
@@ -50,6 +50,20 @@ describe('routePipe', () => {
 
   it('handles start === end', () => {
     expect(routePipe(at(2, 2), at(2, 2), occOf([]))).toMatchObject({ cells: [{ x: 2, y: 2 }], bends: 0, cost: 0 });
+  });
+
+  it.each([
+    [MAX_GRID_COORD + 1, 0], [-MAX_GRID_COORD - 1, 0],
+    [0, MAX_GRID_COORD + 1], [0, -MAX_GRID_COORD - 1],
+    [Infinity, 0], [0, NaN], [0.5, 0],
+  ])('rejects invalid start and goal nodes at (%s, %s), including zero-length routes', (x, y) => {
+    const invalid = at(x, y);
+    const valid = at(Math.max(-MAX_GRID_COORD, Math.min(MAX_GRID_COORD, Math.round(x) || 0)),
+      Math.max(-MAX_GRID_COORD, Math.min(MAX_GRID_COORD, Math.round(y) || 0)));
+    const occ = occOf([]);
+    expect(routePipe(invalid, valid, occ)).toBeNull();
+    expect(routePipe(valid, invalid, occ)).toBeNull();
+    expect(routePipe(invalid, invalid, occ)).toBeNull();
   });
 
   it('detours around a 2x2 tank in the way', () => {
