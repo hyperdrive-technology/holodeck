@@ -103,6 +103,10 @@ jobs:
             chrome=$(command -v google-chrome || command -v google-chrome-stable)
             "$chrome" --version
             echo "HOLODECK_CHROMIUM=$chrome" >> "$GITHUB_ENV"
+            # The scene/vessel render tests crop their screenshots with ImageMagick
+            # (not preinstalled on the runner image; apt gives v6's `convert`).
+            command -v magick >/dev/null || command -v convert >/dev/null \
+              || { sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick; }
           else
             echo "HOLODECK_SKIP_RENDER_TESTS=1" >> "$GITHUB_ENV"
           fi
