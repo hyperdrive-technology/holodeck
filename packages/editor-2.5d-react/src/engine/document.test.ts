@@ -186,7 +186,7 @@ describe('loadIsoDocument: envelope checks', () => {
     ]);
     expect(problemsOf(() => loadIsoDocument(envelope({ engineVersion: '0.9.0' })))).toHaveLength(1);
     expect(loadIsoDocument(envelope({ engineVersion: '1.4.2' })).document.engineVersion).toBe('1.4.2');
-    expect(loadIsoDocument(envelope({ engineVersion: undefined })).scene.id).toBe('brewhouse');
+    expect(loadIsoDocument(envelope({ engineVersion: undefined })).scene.id).toBe('doc-1');
   });
 
   it('lists every envelope problem at once', () => {
@@ -330,8 +330,9 @@ describe('loadIsoDocument: theme, id and name', () => {
   it('a body without id/name takes the envelope ones (PACKAGING.md writes bodies as { objects })', () => {
     const { scene: loaded } = loadIsoDocument(envelope({ body: { objects: [tank()] } }));
     expect(loaded).toMatchObject({ id: 'doc-1', name: 'Doc one' });
-    // A body that has its own keeps them.
-    expect(loadIsoDocument(envelope()).scene).toMatchObject({ id: 'brewhouse', name: 'Brewhouse' });
+    // The envelope id always wins (it is the history-reset identity, see
+    // document-identity.test.ts); a body keeps its own name.
+    expect(loadIsoDocument(envelope()).scene).toMatchObject({ id: 'doc-1', name: 'Brewhouse' });
   });
 
   it('keeps unknown envelope fields (the SDK envelope is open)', () => {

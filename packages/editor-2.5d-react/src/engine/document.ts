@@ -59,13 +59,16 @@ export class IsoDocumentError extends Error {
  * `theme` mirrors `scene.theme` so hosts can read it without the body.
  */
 export function toIsoDocument(scene: IsoSceneFile, options: IsoDocumentOptions = {}): IsoDocument {
+  const id = options.id ?? scene.id;
   const document: IsoDocument = {
     format: HOLODECK_DOCUMENT_FORMAT,
-    id: options.id ?? scene.id,
+    id,
     name: options.name ?? scene.name,
     engine: ISO_ENGINE_ID,
     engineVersion: ISO_ENGINE_API_VERSION,
-    body: scene,
+    // The body carries the document's identity: ProcessEditor resets undo
+    // history on `scene.id` (holodeck#20), so two documents must never share it.
+    body: id === scene.id ? scene : { ...scene, id },
   };
   if (scene.theme !== undefined) document.theme = scene.theme;
   if (options.requires !== undefined) document.requires = options.requires;
@@ -131,7 +134,11 @@ function loadEnvelope(raw: Record<string, unknown>, registry: ContributionRegist
 
   const scene: IsoSceneFile = { ...body.scene };
   if (typeof raw.theme === 'string') scene.theme = raw.theme;
-  if (scene.id === undefined) scene.id = raw.id as string;
+  // The envelope id is the document identity. ProcessEditor resets undo/redo
+  // when `scene.id` changes (holodeck#20), so a body id that disagrees (two
+  // documents saved from one scene) must not leak through: undo would cross
+  // documents.
+  scene.id = raw.id as string;
   if (scene.name === undefined) scene.name = raw.name as string;
   const document = { ...raw, body: scene } as unknown as IsoDocument;
   if (scene.theme !== undefined) document.theme = scene.theme;

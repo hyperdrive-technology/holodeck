@@ -77,7 +77,9 @@ registry directly. Use one or the other in a registry: together they collide on 
 envelope or a bare legacy `IsoSceneFile`, and returns `{ document, scene }`. It throws one
 `IsoDocumentError` whose `problems` list every problem: envelope fields, engine and major
 version, the body, and bindings to connections the document does not have. The envelope
-`theme` wins over `body.theme`.
+`theme` wins over `body.theme`, and the envelope `id` is always the loaded `scene.id`
+(`toIsoDocument(scene, { id })` writes it into the body too). `ProcessEditor` resets undo/redo
+on `scene.id`, so two documents saved from one scene must never share it.
 
 **Live values.** One `ProviderHub` per open document; its metrics are already the editor's
 `metrics` shape (placement id → param → value):
