@@ -574,6 +574,58 @@ describe('auto-routed pipes', () => {
         expect(editorReducer(editorReducer(r, { type: 'undo' }), { type: 'redo' }).scene).toEqual(r.scene);
       });
 
+      describe.each([
+        [0, 4.5, 0],
+        [90, 4, -0.5],
+        [180, 3.5, 0],
+        [270, 4, 0.5],
+      ])('retained declared-port connections at %s degrees', (degrees, portX, portY) => {
+        it.each(['start', 'end', 'interior'])('pins a hosted extension valve with a branch touching the port at its %s', (connection) => {
+          const reg = createIsoRegistryWithBuiltins();
+          reg.install({ id: 'test.port-valve', version: '1', contributions: { [HOLODECK_KINDS.isoPart]: [{
+            id: 'test:port-valve', label: 'Port valve', footprint: { w: 1, h: 1 },
+            ports: {
+              unused: { x: -0.5, y: 0, dir: 'w' },
+              branch: { x: 0.5, y: 0, dir: 'e' },
+            },
+            params: {}, component: () => null,
+          } as Record<string, unknown> & { id: string }] } });
+          // Keep the branch off the centre so only the declared port pins it.
+          const dy = portY < 0 ? -5 : 5;
+          const branch: IsoPlacement = { id: 'branch', object: 'pipe', x: portX, y: portY, toX: portX, toY: portY + dy };
+          if (connection === 'end') Object.assign(branch, { y: portY + dy, toY: portY });
+          if (connection === 'interior') {
+            if (portY === 0) branch.y = portY - dy;
+            else Object.assign(branch, { x: portX - 5, toX: portX + 5, toY: portY });
+          }
+          const original: IsoPlacement = {
+            id: 'valve', object: 'test:port-valve', x: 4, y: 0,
+            rotation: degrees * Math.PI / 180, onPipe: 'main', at: 0.4,
+          };
+          const s = { ...createEditorState({ ...emptyScene(), objects: [
+            { id: 'main', object: 'pipe', x: 0, y: 0, toX: 10, toY: 0 },
+            original, branch, stamp(reg, 'tank', 7, 0, 'tank'),
+          ] }, { registry: reg }), selectedId: 'main' };
+          const r = editorReducer(s, { type: 'reroute-selected' });
+          expect(r.notice).toBeNull();
+          expect(r.revision).toBe(s.revision + 1);
+          const valve = r.scene.objects.find((o) => o.id === original.id)!;
+          expect(valve).toEqual({ id: original.id, object: original.object, x: 4, y: 0, rotation: original.rotation });
+          const retained = r.scene.objects.find((o) => o.id === 'branch')!;
+          expect(retained).toEqual(branch);
+          const rotation = valve.rotation ?? 0;
+          const port = { x: valve.x + 0.5 * Math.cos(rotation), y: valve.y - 0.5 * Math.sin(rotation) };
+          if (connection === 'interior') expect(positionOnPipe(segOf(retained), port.x, port.y)).not.toBeNull();
+          else expect(pipeArmsAt([retained], port)).toHaveLength(1);
+          const main = r.scene.objects.filter((o) => o.object === 'pipe' && o.id !== 'branch');
+          expect(pipeArmsAt(main, valve).map((arm) => arm.heading).sort()).toEqual(['e', 'w']);
+          expect(pipeArmsAt(main, { x: 0, y: 0 })).toHaveLength(1);
+          expect(pipeArmsAt(main, { x: 10, y: 0 })).toHaveLength(1);
+          expect(main.some((o) => o.y !== 0 || o.toY !== 0)).toBe(true);
+          expect(editorReducer(r, { type: 'undo' }).scene).toEqual(s.scene);
+        });
+      });
+
       const endpointRun = (end = 6, positions = [1]): ReturnType<typeof blank> => createEditorState({
         ...emptyScene('endpoint-clearance'), objects: [
           { id: 'a', object: 'pipe', x: 0, y: 0, toX: 2, toY: 0 },

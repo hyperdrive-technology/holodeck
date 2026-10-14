@@ -2,7 +2,7 @@ import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { getDefaultIsoRegistry } from '../registry/default';
 import type { IsoPartDefinition } from '../registry/types';
-import type { Heading } from '../routing/grid';
+import { rotateOffset, type Heading } from '../routing/grid';
 import { resolveRouteEnd } from '../routing/ports';
 import { carryHostedParts, chainFrom, detachFrom, hostPipeOf, INLINE_PART_LENGTH, isPipePlacement, positionOnPipe, segOf, splitChainAtParts, withAttachment } from '../routing/inline';
 import { headingOf, pipeArmsAt } from '../routing/elbows';
@@ -264,8 +264,17 @@ function rerouteSelected(state: EditorState): EditorState {
   // An onPipe attachment does not imply that this is the part's only
   // connection. Retained branches (including a second pipe passing through
   // the part) pin it in place; split the old chain there before routing.
-  const fixed = hosted.filter((part) => pipeArmsAt(retainedPipes, part).length > 0
-    || retainedPipes.some((pipe) => positionOnPipe(segOf(pipe), part.x, part.y) !== null));
+  // Check the centre AND every declared port in world space. Keep exact
+  // offsets: rounding a half-cell port would miss its retained branch.
+  const fixed = hosted.filter((part) => {
+    const def = state.registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, part.object);
+    const connections = [part, ...Object.values(def?.ports ?? {}).map((port) => {
+      const off = rotateOffset(port.x, port.y, part.rotation);
+      return { x: part.x + off.x, y: part.y + off.y };
+    })];
+    return connections.some((point) => pipeArmsAt(retainedPipes, point).length > 0
+      || retainedPipes.some((pipe) => positionOnPipe(segOf(pipe), point.x, point.y) !== null));
+  });
   const fixedIds = new Set(fixed.map((o) => o.id));
   const movable = hosted.filter((o) => !fixedIds.has(o.id));
   const movableIds = new Set(movable.map((o) => o.id));
