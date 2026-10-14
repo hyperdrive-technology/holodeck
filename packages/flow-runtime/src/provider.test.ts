@@ -77,6 +77,8 @@ describe('descriptor', () => {
   it('validates its options eagerly and reads them once', () => {
     expect(() => createLocalFlowProvider({ scanMs: 1 })).toThrow(RangeError);
     expect(() => createLocalFlowProvider({ writeRetryMs: -1 })).toThrow(RangeError);
+    expect(() => createLocalFlowProvider({ writeTimeoutMs: 0 })).toThrow(RangeError);
+    expect(() => createLocalFlowProvider({ writeTimeoutMs: Number.NaN })).toThrow(RangeError);
     expect(() => createLocalFlowProvider({ schedule: 3 as never })).toThrow(TypeError);
     expect(() => createLocalFlowProvider({ signals: 'x' as never })).toThrow(TypeError);
     expect(() => createLocalFlowProvider(null as never)).toThrow(TypeError);
@@ -458,6 +460,65 @@ describe('writes', () => {
     expect((await session.read!(['flow:out.$fault']))[0]?.value).toBeNull();
   });
 
+  it('clears the fault when the value returns to the last good write (review P2)', async () => {
+    const bridge = createMemorySignalBridge({
+      write: (_c, _s, value) => {
+        if (value === 2) throw new Error('rejected 2');
+      },
+    });
+    const { session, manual } = await connect({ signals: bridge, writeRetryMs: 0 });
+    const doc = flowDoc(
+      graph([node('i', 'signal.in', { connection: 'plc', source: 'a' }), node('o', 'signal.out', { connection: 'plc', source: 'b' })], [wire('w', 'i.value', 'o.value')]),
+      [plc],
+    );
+    bridge.set('plc', 'a', 1);
+    await session.deploy!(doc);
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    for (const v of [2, 1]) {
+      bridge.set('plc', 'a', v);
+      manual.tick();
+      await settle();
+      manual.tick();
+      await settle();
+    }
+    for (let i = 0; i < 3; i++) {
+      manual.tick();
+      await settle();
+    }
+    expect((await session.read!(['flow:o.$fault']))[0]?.value).toBeNull();
+    const values = bridge.writes.map((w) => w.value);
+    expect(values[0]).toBe(1);
+    expect(values.slice(1).every((v) => v === 2)).toBe(true); // 1 is never re-sent: the target still holds it
+  });
+
+  it('a write with no answer times out, faults the node, retries, and ignores the late answer', async () => {
+    const pending: Array<{ value: FlowValue; resolve: () => void }> = [];
+    const bridge = createMemorySignalBridge({ write: (_c, _s, value) => new Promise<void>((resolve) => pending.push({ value, resolve })) });
+    const { session, manual, time } = await connect({ signals: bridge, writeTimeoutMs: 5000, writeRetryMs: 1000 });
+    await session.deploy!(flowDoc(signalBody(), [plc]));
+    expect(pending).toHaveLength(1);
+    time.advance(4999);
+    manual.tick();
+    expect((await session.read!(['flow:out.$fault']))[0]?.value).toBeNull();
+    time.advance(1);
+    manual.tick(); // timed out: faulted, retry waits writeRetryMs
+    expect(pending).toHaveLength(1);
+    manual.tick();
+    expect((await session.read!(['flow:out.$fault']))[0]?.value).toMatch(/no answer within 5000 ms/);
+    time.advance(1000);
+    manual.tick(); // retry
+    expect(pending).toHaveLength(2);
+    pending[0]!.resolve(); // the timed-out write answers late: ignored
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    manual.tick();
+    expect((await session.read!(['flow:out.$fault']))[0]?.value).toMatch(/no answer/);
+    pending[1]!.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    manual.tick();
+    manual.tick();
+    expect((await session.read!(['flow:out.$fault']))[0]?.value).toBeNull();
+  });
+
   it('a write that throws synchronously is a failure, not an exception', async () => {
     const bridge: SignalBridge = {
       subscribe: () => () => {},
@@ -555,6 +616,25 @@ describe('hazards', () => {
       sources[0] = 'flow:d.out';
       manual.tick();
       expect(new Set(seen)).toEqual(new Set(['flow:add.sum']));
+    });
+
+    it('subscribe validates and uses one copy of the sources (no iterator or getter tricks)', async () => {
+      const { session } = await connect();
+      await session.deploy!(flowDoc(counterBody()));
+      const tricky = ['flow:add.sum'];
+      Object.defineProperty(tricky, Symbol.iterator, {
+        value: function* () {
+          yield 42;
+        },
+      });
+      const seen: unknown[] = [];
+      session.subscribe(tricky, (samples) => samples.forEach((sample) => seen.push(sample.source)));
+      let reads = 0;
+      const flipping: string[] = [];
+      Object.defineProperty(flipping, 0, { enumerable: true, get: () => (reads++ === 0 ? 'flow:d.out' : (42 as never)) });
+      session.subscribe(flipping, (samples) => samples.forEach((sample) => seen.push(sample.source)));
+      expect(seen).toEqual(['flow:add.sum', 'flow:d.out']);
+      expect(reads).toBe(1);
     });
 
     it('editing the provider options afterwards changes nothing', async () => {
@@ -655,6 +735,54 @@ describe('hazards', () => {
       expect((await session.read!(['flow:add.sum']))[0]?.value).toBe(2);
     });
 
+    it('a bridge write that deploys an invalid flow during the first scan does not supersede the deploy (review P1)', async () => {
+      let session!: ProviderSession;
+      let inner: Promise<{ ok: boolean }> | undefined;
+      const bridge = createMemorySignalBridge({
+        write: () => {
+          inner ??= session.deploy!(flowDoc({ nodes: 'x' }));
+        },
+      });
+      const harness = await connect({ signals: bridge });
+      session = harness.session;
+      const body = graph(
+        [node('k', 'flow.const', { value: 5 }), node('o', 'signal.out', { connection: 'plc', source: 'x' }), node('c', 'test.counter')],
+        [wire('w', 'k.value', 'o.value')],
+      );
+      const outer = await session.deploy!(flowDoc(body, [plc]));
+      expect(outer).toMatchObject({ ok: true, diagnostics: [] });
+      expect(await inner).toMatchObject({ ok: false });
+      for (let i = 0; i < 5; i++) harness.manual.tick();
+      expect((await session.read!(['flow:c.count']))[0]?.value).toBe(6);
+      expect(session.status().message).toBe('running "Test flow"');
+    });
+
+    it('SCHEDULE_FAILED never tears down a deployment that replaced it meanwhile (review P1)', async () => {
+      const manual = createManualSchedule();
+      let session!: ProviderSession;
+      let calls = 0;
+      // First run: ticks at once (its scan's subscriber redeploys), then throws. Later runs: normal.
+      const schedule = (tick: () => void, ms: number) => {
+        if (++calls > 1) return manual.schedule(tick, ms);
+        tick();
+        throw new Error('no timers for the first run');
+      };
+      const harness = await connect({ schedule });
+      session = harness.session;
+      let redeployed = false;
+      session.subscribe(['flow:add.sum'], (samples) => {
+        if (!redeployed && samples[0]?.value === 2) {
+          redeployed = true;
+          void session.deploy!(flowDoc(graph([node('k', 'flow.const', { value: 9 })]), [], { name: 'second' }));
+        }
+      });
+      const outer = await session.deploy!(flowDoc(counterBody(), [], { name: 'first' }));
+      expect(outer.diagnostics.map((d) => d.code)).toEqual(['SCHEDULE_FAILED']);
+      expect(session.status()).toMatchObject({ state: 'live', message: 'running "second"' });
+      expect(manual.active).toBe(1);
+      expect((await session.read!(['flow:k.value']))[0]?.value).toBe(9);
+    });
+
     it('a bridge that closes the session while subscribing → SUPERSEDED, its subscription released', async () => {
       const unsubscribe = vi.fn();
       let session!: ProviderSession;
@@ -722,6 +850,38 @@ describe('hazards', () => {
       second.mockClear();
       manual.tick();
       expect(second).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('(d) a throwing host logger (review P2)', () => {
+    it('never breaks writes, deploy or close', async () => {
+      const failing = createMemorySignalBridge({
+        write: () => {
+          throw new Error('backend down');
+        },
+      });
+      const dispose = vi.fn();
+      const throwingLog = () => {
+        throw new Error('logger exploded');
+      };
+      const { session, manual } = await connect({ signals: () => ({ ...failing, dispose }) }, {}, { log: throwingLog });
+      const listener = vi.fn(() => {
+        throw new Error('listener');
+      });
+      session.onStatus(listener);
+      session.subscribe(['flow:out.value'], () => {
+        throw new Error('subscriber');
+      });
+      const result = await session.deploy!(flowDoc(signalBody(), [plc]));
+      expect(result.ok).toBe(true); // resolved, not rejected, although listener + logger threw
+      await new Promise((resolve) => setTimeout(resolve, 0)); // the failed write's handler ran
+      manual.tick();
+      expect((await session.read!(['flow:out.$fault']))[0]?.value).toMatch(/backend down/);
+      await expect(session.close()).resolves.toBeUndefined();
+      expect(dispose).toHaveBeenCalledTimes(1); // close ran to the end
+      listener.mockClear();
+      expect(session.status().state).toBe('disconnected');
+      // afterEach asserts that no promise rejection went unhandled.
     });
   });
 

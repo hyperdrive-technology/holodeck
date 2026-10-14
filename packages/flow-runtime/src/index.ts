@@ -85,7 +85,7 @@ export type {
   SignalBridge,
 } from './bridge';
 
-export { DEFAULT_WRITE_RETRY_MS, LOCAL_FLOW_CONFIG_SCHEMA, LOCAL_FLOW_PROVIDER_ID, createLocalFlowProvider } from './provider';
+export { DEFAULT_WRITE_RETRY_MS, DEFAULT_WRITE_TIMEOUT_MS, LOCAL_FLOW_CONFIG_SCHEMA, LOCAL_FLOW_PROVIDER_ID, createLocalFlowProvider } from './provider';
 export type { FlowDeployCode, LocalFlowProviderOptions } from './provider';
 
 export {

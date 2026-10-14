@@ -243,27 +243,28 @@ describe('state', () => {
     }
   });
 
-  it('faults a node whose initialState throws, until a scan succeeds', () => {
-    let fail = true;
+  it('a node whose initialState throws is faulted from the first scan and never evaluated (review P2)', () => {
+    const evaluate = vi.fn(({ state }: { state: unknown }) => ({ outputs: { out: state === null ? -1 : 1 } }));
     const block: FlowBlockDefinition = {
       id: 'test.init',
       label: 'I',
       category: 'T',
       inputs: [],
-      outputs: [{ name: 'q', type: 'number' }],
+      outputs: [{ name: 'out', type: 'number' }],
       initialState: () => {
-        throw new Error('no init');
+        throw new Error('init boom');
       },
-      evaluate: ({ state }) => {
-        if (fail) throw new Error('still broken');
-        return { outputs: { q: state === null ? 1 : 2 } };
-      },
+      evaluate,
     };
-    const run = runOf(graph([node('i', 'test.init')]), [block]);
-    expect(run.step().faults).toEqual([{ node: 'i', message: 'still broken' }]);
-    fail = false;
-    expect(run.step().faults).toEqual([]);
-    expect(value(run, 'flow:i.q')).toBe(1);
+    const run = runOf(graph([node('i', 'test.init'), node('c', 'test.counter')]), [block]);
+    for (let i = 0; i < 3; i++) {
+      const scan = run.step();
+      expect(scan.faults).toEqual([{ node: 'i', message: 'initialState failed: init boom' }]);
+    }
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(run.read('flow:i.out')).toEqual({ value: 0, quality: 'bad' }); // never -1: no run with a null state
+    expect(run.read('flow:i.$fault')?.value).toBe('initialState failed: init boom');
+    expect(value(run, 'flow:c.count')).toBe(3); // the rest kept running
   });
 
   it('snapshotState copies __proto__ keys as data and bounds size and depth', () => {
@@ -637,6 +638,24 @@ describe('scheduling', () => {
     const bad = runOf(graph([]), [], { schedule: () => undefined as never });
     expect(() => bad.start()).toThrow(/cancel function/);
     expect(bad.state).toBe('idle');
+  });
+
+  it('a tick registered by a schedule that then throws or returns no cancel function stays inert (review P3)', () => {
+    for (const ending of ['throw', 'no-cancel'] as const) {
+      let tick: () => void = () => {};
+      const run = runOf(graph([node('c', 'test.counter')]), [], {
+        schedule: (t) => {
+          tick = t;
+          if (ending === 'throw') throw new Error('half-registered');
+          return 42 as never;
+        },
+      });
+      expect(() => run.start()).toThrow();
+      tick();
+      tick();
+      expect(run.scans, ending).toBe(0);
+      expect(run.state).toBe('idle');
+    }
   });
 
   it('runs scans with the real setInterval by default', async () => {

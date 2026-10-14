@@ -80,10 +80,12 @@ const safeCall = (fn: unknown, log: ProviderContext['log'], what: string): void 
  * listeners, so the bridge cannot tell its sessions are gone.
  */
 export function createHubSignalBridge(hub: ProviderHub, options: HubSignalBridgeOptions = {}): HubSignalBridge {
-  const now = options.now ?? Date.now;
+  // Read the options once; later edits to the caller's object change nothing.
+  const { now: nowOption, log: logOption } = options;
+  const now = typeof nowOption === 'function' ? nowOption : Date.now;
   const log: ProviderContext['log'] = (level, message, data) => {
     try {
-      options.log?.(level, message, data);
+      if (typeof logOption === 'function') logOption(level, message, data);
     } catch {
       // logging must never break the bridge
     }

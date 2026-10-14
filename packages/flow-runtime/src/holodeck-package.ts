@@ -47,11 +47,17 @@ export function createFlowRuntimeExtension(options: LocalFlowProviderOptions = {
   };
 }
 
-/** A package module whose provider uses `options` (e.g. a `signals` bridge). */
+/**
+ * A package module whose provider uses `options` (e.g. a `signals` bridge).
+ * The options are copied (and checked) now; later edits to the caller's
+ * object do not reach extensions created afterwards.
+ */
 export function createFlowRuntimePackage(options: LocalFlowProviderOptions = {}): HolodeckPackageModule {
+  const snapshot: LocalFlowProviderOptions = Object.freeze({ ...options });
+  createLocalFlowProvider(snapshot); // throws now for bad options, not at install time
   return defineHolodeckPackage({
     manifest: FLOW_RUNTIME_PACKAGE_MANIFEST,
-    createExtension: () => createFlowRuntimeExtension(options),
+    createExtension: () => createFlowRuntimeExtension(snapshot),
   });
 }
 

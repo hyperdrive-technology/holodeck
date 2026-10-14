@@ -168,13 +168,15 @@ export interface AnalyzedGraph {
 
 class Problems {
   readonly items: FlowProblem[] = [];
-  private dropped = 0;
+  private droppedErrors = 0;
+  private droppedWarnings = 0;
   errors = 0;
 
   add(severity: FlowProblem['severity'], code: FlowProblemCode, message: string, extra: Partial<Pick<FlowProblem, 'node' | 'wire' | 'path'>> = {}): void {
     if (severity === 'error') this.errors++;
     if (this.items.length >= FLOW_LIMITS.maxProblems) {
-      this.dropped++;
+      if (severity === 'error') this.droppedErrors++;
+      else this.droppedWarnings++;
       return;
     }
     const problem: { -readonly [K in keyof FlowProblem]: FlowProblem[K] } = { severity, code, message };
@@ -189,12 +191,15 @@ class Problems {
   }
 
   finish(): readonly FlowProblem[] {
-    if (this.dropped) {
+    const dropped = this.droppedErrors + this.droppedWarnings;
+    if (dropped) {
+      // As severe as the worst problem it stands for: overflowing warnings
+      // alone must not make a graph undeployable.
       this.items.push(
         Object.freeze({
-          severity: 'error' as const,
+          severity: this.droppedErrors ? ('error' as const) : ('warning' as const),
           code: 'TOO_MANY_PROBLEMS' as const,
-          message: `${this.dropped} more problem(s) not listed (limit ${FLOW_LIMITS.maxProblems})`,
+          message: `${dropped} more problem(s) not listed (limit ${FLOW_LIMITS.maxProblems}; ${this.droppedErrors} error(s), ${this.droppedWarnings} warning(s))`,
         }),
       );
     }

@@ -59,7 +59,7 @@ export const ton: FlowBlockDefinition<{ elapsed: number }> = {
 | input `variadic`, `min`, `max` | See below. Inputs only. |
 | `params` | `name → spec`: `{ type: 'bool' | 'number' | 'string' | 'any', default?, required?, label?, description? }`. Numbers may add `min`, `max`, `integer`, `step`, `unit`; strings may add `options` and `maxLength`. A param without a `default` whose type default fails its own spec is invalid unless `required`. |
 | `checkParams(params)` | Optional cross-param check. Returns problem strings. |
-| `initialState(params)` | Optional. The first state of a node. Default `null`. |
+| `initialState(params)` | Optional. The first state of a node. Default `null`. If it throws, the node is never evaluated and stays faulted (`initialState failed: …`) until the next deploy. |
 | `evaluate(args)` | Required. See below. |
 
 **`evaluate({ inputs, params, state, dtMs, nowMs }) → { outputs, state? }`** must be pure apart from the state it
@@ -131,7 +131,7 @@ problem as `{ severity, code, message, node?, wire?, path? }` and never throws:
 | `UNKNOWN_PARAM`, `MISSING_PARAM`, `INVALID_PARAM` | A param is unknown, missing, or fails its spec or `checkParams` |
 | `CYCLE_WITHOUT_DELAY` | A loop that does not pass through `flow.delay`. `path` lists the loop (`a → b → c → a`) |
 | `DUPLICATE_SIGNAL_TARGET` | *Warning:* two `signal.out` nodes write the same signal |
-| `TOO_MANY_PROBLEMS` | Only the first 1000 problems are listed; this entry counts the rest |
+| `TOO_MANY_PROBLEMS` | Only the first 1000 problems are listed; this entry counts the rest. It is an error only if it stands for an error, so an overflow of warnings alone does not block a deploy |
 
 The body is read exactly once into a private snapshot, so the graph that validation sees is the graph that the
 compiler builds. Ids such as `__proto__` are plain data: every dictionary has a null prototype, and composite keys
@@ -207,6 +207,10 @@ subscriber or bridge) deploys again or closes the session, the outer deploy stop
 - **close()** stops the run and every bridge subscription, and disposes a bridge that the session created itself.
   Aborting `ctx.signal` closes the session too.
 - **Config** is `{ scanMs? }`, an integer from 10 to 3 600 000. Unknown fields are refused.
+- **Provider options** are `signals`, `scanMs`, `schedule`, `now`, `writeRetryMs` and `writeTimeoutMs`. Both
+  `createLocalFlowProvider(options)` and `createFlowRuntimePackage(options)` read them once, so later edits to the
+  object change nothing.
+- **Logging** goes through `ctx.log`. A logger that throws is ignored and never breaks a scan, deploy or close.
 
 Block definitions are captured when you deploy. Installing or uninstalling a block package does not change a
 running flow until the next deploy.
@@ -227,13 +231,15 @@ so a flow and the diagram next to it share one session per connection. It handle
   connection was re-added), the bridge moves the subscription to the new session.
 - **While a connection is down** (no session, or a status of `connecting`, `disconnected` or `error`), `signal.in`
   holds its last value with quality `uncertain`. Writes reject with `ProviderHubError` `NOT_CONNECTED`. The
-  `signal.out` node is faulted and retries its latest value at most once per `writeRetryMs` (default 1 s).
+  `signal.out` node is faulted and retries its latest value at most once per `writeRetryMs` (default 1 s). A
+  write with no answer after `writeTimeoutMs` (default 10 s) counts as failed, and its late answer is ignored.
 - When the connection is up again, the bridge subscribes afresh, so the provider's first delivery brings back the
   current value.
 - Dispose the bridge before, or together with, the hub.
 
 `signal.out` keeps at most one write in flight. The newest value wins, and a value equal to the last successful
-write is not sent again. One bridge subscription serves every `signal.in` that reads the same signal. Without a
+write is not sent again. If the value returns to the last successful write after a failed one, the fault clears
+without a write, because the failed value never landed. One bridge subscription serves every `signal.in` that reads the same signal. Without a
 bridge, `signal.in` reads `null`/`bad`, `signal.out` is faulted, and deploy warns `NO_SIGNAL_BRIDGE`.
 
 The bridge depends on a document's hub, but the provider is installed per host, so a host passes a factory. The

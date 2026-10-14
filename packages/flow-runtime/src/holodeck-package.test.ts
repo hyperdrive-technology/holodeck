@@ -75,6 +75,25 @@ describe('entry module', () => {
     expect(host.registry.list(HOLODECK_KINDS.flowBlock)).toHaveLength(4);
   });
 
+  it('createFlowRuntimePackage snapshots and checks its options (review P3)', async () => {
+    const manual = createManualSchedule();
+    const options: Parameters<typeof createFlowRuntimePackage>[0] = { schedule: manual.schedule };
+    const module = createFlowRuntimePackage(options);
+    options!.schedule = () => {
+      throw new Error('swapped after creation');
+    };
+    const host = new HolodeckHost({ name: 'test' });
+    host.registerEngine(standInFlowEngine);
+    await host.installPackage(manifestJson, module);
+    const hub = host.createProviderHub();
+    hub.setConnections([{ id: 'flow', provider: 'holodeck.flow.local' }]);
+    await hub.settled();
+    expect((await hub.session('flow')!.deploy!(flowDoc(graph([node('k', 'flow.const')])))).ok).toBe(true);
+    expect(manual.active).toBe(1); // the original schedule is used
+    await hub.dispose();
+    expect(() => createFlowRuntimePackage({ scanMs: 1 })).toThrow(RangeError);
+  });
+
   it('createFlowRuntimePackage passes options (a signal bridge) to the provider', async () => {
     const manual = createManualSchedule();
     const bridge = createMemorySignalBridge();

@@ -55,6 +55,24 @@ export const LOCAL_FLOW_PROVIDER_ID = 'holodeck.flow.local';
 /** Default wait before retrying a failed `signal.out` write (ms). */
 export const DEFAULT_WRITE_RETRY_MS = 1000;
 
+/** Default time after which an unanswered `signal.out` write counts as failed (ms). */
+export const DEFAULT_WRITE_TIMEOUT_MS = 10_000;
+
+/**
+ * A host logger that throws must never break the runtime (an exception in a
+ * write handler would become an unhandled rejection; one in setStatus would
+ * make deploy() or close() reject halfway). Read the function once.
+ */
+function safeLog(log: unknown): ProviderContext['log'] {
+  return (level, message, data) => {
+    try {
+      if (typeof log === 'function') log(level, message, data);
+    } catch {
+      // nowhere left to report to
+    }
+  };
+}
+
 /** Budget for copying a document before validation (JSON values) and its nesting depth. */
 const MAX_DOCUMENT_VALUES = 1_000_000;
 const MAX_DOCUMENT_DEPTH = 64;
@@ -74,6 +92,8 @@ export interface LocalFlowProviderOptions {
   now?: () => number;
   /** Wait before retrying a failed write (ms, default 1000). */
   writeRetryMs?: number;
+  /** A write with no answer after this long (ms, default 10 000) counts as failed. */
+  writeTimeoutMs?: number;
 }
 
 /** Codes on `DeployResult.diagnostics`: every `FlowProblemCode`, plus the deploy-level ones. */
@@ -175,16 +195,23 @@ interface Deployment {
 }
 
 /**
- * Forwards one `signal.out` node's value to the bridge: at most one write in
- * flight, the newest value wins (intermediate values are skipped), a value
- * equal to the last successful write is not sent again, and after a failure
- * the node is faulted and the latest value is retried no sooner than
- * `retryMs` later (checked every scan).
+ * Forwards one `signal.out` node's value to the bridge:
+ * - at most one write in flight; the newest value wins (intermediate values are skipped);
+ * - a value equal to the last successful write is not sent again, and if the
+ *   node was faulted by a failed write of some other value, the fault clears
+ *   (that value never landed, so the target already holds this one);
+ * - after a failure the node is faulted and the latest value is retried no
+ *   sooner than `retryMs` later;
+ * - a write with no answer after `timeoutMs` counts as failed (its late
+ *   answer is ignored), so a hung backend cannot block the node for good.
+ * Time is the provider's clock and every check runs on a request or a scan.
  */
 class SignalWriter {
   private desired: FlowValue | undefined;
   private written: FlowValue | undefined;
-  private inFlight = false;
+  /** The write in flight: its token (late answers of older ones are ignored) and start time. */
+  private attempt: { token: number; startedAt: number } | undefined;
+  private tokens = 0;
   private failedAt: number | undefined;
   private retired = false;
 
@@ -194,6 +221,7 @@ class SignalWriter {
     private readonly run: FlowRun,
     private readonly now: () => number,
     private readonly retryMs: number,
+    private readonly timeoutMs: number,
     private readonly log: ProviderContext['log'],
   ) {}
 
@@ -202,12 +230,22 @@ class SignalWriter {
     this.pump();
   }
 
+  /** Called on every request and once per scan. */
   pump(): void {
-    if (this.retired || this.inFlight || this.desired === undefined) return;
-    if (this.written !== undefined && Object.is(this.desired, this.written)) return;
+    if (this.retired || this.desired === undefined) return;
+    if (this.attempt) {
+      if (this.now() - this.attempt.startedAt < this.timeoutMs) return;
+      this.attempt = undefined;
+      this.fail(new Error(`no answer within ${this.timeoutMs} ms`));
+    }
+    if (this.written !== undefined && Object.is(this.desired, this.written)) {
+      this.clearFault();
+      return;
+    }
     if (this.failedAt !== undefined && this.now() - this.failedAt < this.retryMs) return;
     const value = this.desired;
-    this.inFlight = true;
+    const token = ++this.tokens;
+    this.attempt = { token, startedAt: this.now() };
     let writing: Promise<void>;
     try {
       writing = Promise.resolve(this.bridge.write(this.ref.connection, this.ref.source, value));
@@ -216,8 +254,8 @@ class SignalWriter {
     }
     writing
       .then(
-        () => this.settle(value, undefined),
-        (error: unknown) => this.settle(value, error ?? new Error('write failed')),
+        () => this.settle(token, value, undefined),
+        (error: unknown) => this.settle(token, value, error ?? new Error('write failed')),
       )
       // settle() does not throw; this only guards against a bug becoming an unhandled rejection.
       .catch((error: unknown) => this.log('error', `signal.out ${quote(this.ref.node)}: write handler failed`, error));
@@ -227,21 +265,29 @@ class SignalWriter {
     this.retired = true;
   }
 
-  private settle(value: FlowValue, error: unknown): void {
-    this.inFlight = false;
-    if (this.retired) return;
-    if (error === undefined) {
-      this.written = value;
-      if (this.failedAt !== undefined) {
-        this.failedAt = undefined;
-        this.run.reportFault(this.ref.node, null);
-      }
-      this.pump();
+  private settle(token: number, value: FlowValue, error: unknown): void {
+    // Retired, timed out, or superseded: this answer no longer matters.
+    if (this.retired || this.attempt?.token !== token) return;
+    this.attempt = undefined;
+    if (error !== undefined) {
+      this.fail(error);
       return;
     }
+    this.written = value;
+    this.clearFault();
+    this.pump();
+  }
+
+  private fail(error: unknown): void {
     this.failedAt = this.now();
     this.run.reportFault(this.ref.node, `write to ${quote(this.ref.source)} on ${quote(this.ref.connection)} failed: ${errorMessage(error)}`);
     this.log('warn', `signal.out ${quote(this.ref.node)}: write failed`, error);
+  }
+
+  private clearFault(): void {
+    if (this.failedAt === undefined) return;
+    this.failedAt = undefined;
+    this.run.reportFault(this.ref.node, null);
   }
 }
 
@@ -253,6 +299,7 @@ class LocalFlowSession implements ProviderSession {
   private current: ProviderStatus;
   private readonly statusListeners = new Set<(status: ProviderStatus) => void>();
   private readonly subscribers = new Set<Subscriber>();
+  private readonly log: ProviderContext['log'];
 
   constructor(
     private readonly ctx: ProviderContext,
@@ -262,7 +309,9 @@ class LocalFlowSession implements ProviderSession {
     private readonly schedule: FlowSchedule | undefined,
     private readonly now: () => number,
     private readonly retryMs: number,
+    private readonly timeoutMs: number,
   ) {
+    this.log = safeLog(ctx.log);
     this.current = Object.freeze({ state: 'live', since: this.clock(), message: 'no flow deployed' });
   }
 
@@ -339,7 +388,7 @@ class LocalFlowSession implements ProviderSession {
         try {
           dispose.call(this.bridge);
         } catch (error) {
-          this.ctx.log('warn', 'holodeck.flow.local: disposing the signal bridge failed', error);
+          this.log('warn', 'holodeck.flow.local: disposing the signal bridge failed', error);
         }
       }
     }
@@ -396,7 +445,7 @@ class LocalFlowSession implements ProviderSession {
       scanMs: this.scanMs,
       now: this.now,
       schedule: this.schedule,
-      onError: (error) => this.ctx.log('warn', 'holodeck.flow.local: scan error', error),
+      onError: (error) => this.log('warn', 'holodeck.flow.local: scan error', error),
     });
     const name = record?.name;
     const deployment: Deployment = {
@@ -459,7 +508,7 @@ class LocalFlowSession implements ProviderSession {
       return;
     }
     for (const ref of plan.signalsOut) {
-      deployment.writers.set(ref.node, new SignalWriter(ref, bridge, run, () => this.clock(), this.retryMs, this.ctx.log));
+      deployment.writers.set(ref.node, new SignalWriter(ref, bridge, run, () => this.clock(), this.retryMs, this.timeoutMs, this.log));
     }
     // One bridge subscription per distinct signal, fanned out to its nodes.
     const groups = new Map<string, { connection: string; source: string; nodes: string[] }>();
@@ -560,17 +609,19 @@ class LocalFlowSession implements ProviderSession {
   }
 
   private sourceList(sources: readonly string[]): readonly string[] {
-    if (!Array.isArray(sources) || !sources.every((s) => typeof s === 'string')) {
-      throw new TypeError('sources must be an array of strings');
-    }
-    return Object.freeze([...new Set(sources)]);
+    if (!Array.isArray(sources)) throw new TypeError('sources must be an array of strings');
+    // Copy by index once and validate the copy: what is checked is what is used
+    // (a custom Symbol.iterator or a getter cannot slip a non-string through).
+    const copy: unknown[] = Array.prototype.slice.call(sources);
+    if (!copy.every((s) => typeof s === 'string')) throw new TypeError('sources must be an array of strings');
+    return Object.freeze([...new Set(copy as string[])]);
   }
 
   private deliver(sub: Subscriber, samples: readonly Sample[]): void {
     try {
       sub.onSamples(Object.freeze(samples));
     } catch (error) {
-      this.ctx.log('warn', 'holodeck.flow.local: subscriber threw', error);
+      this.log('warn', 'holodeck.flow.local: subscriber threw', error);
     }
   }
 
@@ -580,7 +631,7 @@ class LocalFlowSession implements ProviderSession {
       try {
         listener(this.current);
       } catch (error) {
-        this.ctx.log('warn', 'holodeck.flow.local: status listener threw', error);
+        this.log('warn', 'holodeck.flow.local: status listener threw', error);
       }
     }
   }
@@ -598,7 +649,7 @@ class LocalFlowSession implements ProviderSession {
     try {
       fn();
     } catch (error) {
-      this.ctx.log('warn', `holodeck.flow.local: ${what}`, error);
+      this.log('warn', `holodeck.flow.local: ${what}`, error);
     }
   }
 }
@@ -614,6 +665,8 @@ export function createLocalFlowProvider(options: LocalFlowProviderOptions = {}):
   const scanMs = checkScanMs(options.scanMs);
   const retryMs = options.writeRetryMs ?? DEFAULT_WRITE_RETRY_MS;
   if (!Number.isFinite(retryMs) || retryMs < 0) throw new RangeError('writeRetryMs must be a finite number ≥ 0');
+  const timeoutMs = options.writeTimeoutMs ?? DEFAULT_WRITE_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new RangeError('writeTimeoutMs must be a finite number > 0');
   if (signals !== undefined && typeof signals !== 'function' && (typeof signals !== 'object' || signals === null)) {
     throw new TypeError('signals must be a SignalBridge or a function returning one');
   }
@@ -636,10 +689,10 @@ export function createLocalFlowProvider(options: LocalFlowProviderOptions = {}):
           bridge = signals(ctx);
           owns = true;
         } catch (error) {
-          ctx.log('warn', 'holodeck.flow.local: creating the signal bridge failed', error);
+          safeLog(ctx.log)('warn', 'holodeck.flow.local: creating the signal bridge failed', error);
         }
       } else bridge = signals;
-      const session = new LocalFlowSession(ctx, bridge, owns, sessionScanMs, schedule, now ?? (() => ctx.now()), retryMs);
+      const session = new LocalFlowSession(ctx, bridge, owns, sessionScanMs, schedule, now ?? (() => ctx.now()), retryMs, timeoutMs);
       if (ctx.signal.aborted) void session.close();
       else ctx.signal.addEventListener('abort', () => void session.close(), { once: true });
       return session;

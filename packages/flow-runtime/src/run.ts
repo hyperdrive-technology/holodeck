@@ -241,8 +241,13 @@ class Run implements FlowRun {
   private readonly values: FlowValue[];
   private readonly quality: SignalQuality[];
   private readonly states: FlowState[];
-  /** Fault from `evaluate` (or `initialState`), per node. */
+  /** Fault from `evaluate`, per node. */
   private readonly faults: (string | null)[];
+  /**
+   * `initialState` threw: the node has no valid state, so it is never
+   * evaluated and stays faulted with this message until the next deployment.
+   */
+  private readonly initFaults: (string | null)[];
   /** Fault reported with `reportFault`, per node. */
   private readonly external: (string | null)[];
   /** `$fault` value published by the last scan, per node. */
@@ -283,6 +288,7 @@ class Run implements FlowRun {
     this.quality = new Array<SignalQuality>(program.slotCount).fill('uncertain');
     this.states = new Array<FlowState>(n).fill(null);
     this.faults = new Array<string | null>(n).fill(null);
+    this.initFaults = new Array<string | null>(n).fill(null);
     this.external = new Array<string | null>(n).fill(null);
     this.published = new Array<string | null>(n).fill(null);
     this.signalQuality = new Array<SignalQuality>(n).fill('uncertain');
@@ -296,7 +302,7 @@ class Run implements FlowRun {
         try {
           this.states[node.index] = snapshotState(node.info.initialState(node.plan.params));
         } catch (error) {
-          this.faults[node.index] = `initialState failed: ${errorMessage(error)}`;
+          this.initFaults[node.index] = `initialState failed: ${errorMessage(error)}`;
         }
       }
     }
@@ -325,11 +331,14 @@ class Run implements FlowRun {
         if (generation === this.startGeneration && this.running && !this.disposed) this.tick();
       }, this.scanMs);
     } catch (error) {
+      // The schedule may have registered the tick before it threw; there is no
+      // handle to cancel it, but the generation bump makes every later tick inert.
       this.running = false;
       this.startGeneration++;
       throw error;
     }
     if (typeof cancel !== 'function') {
+      // Same: a registered tick without a cancel function stays inert.
       this.running = false;
       this.startGeneration++;
       throw new TypeError('schedule must return a cancel function');
@@ -489,6 +498,8 @@ class Run implements FlowRun {
   }
 
   private evaluate(node: ProgramNode, dtMs: number, nowMs: number): Evaluated {
+    const initFault = this.initFaults[node.index];
+    if (initFault) return { node, fault: initFault };
     const inputs = dict<FlowValue | readonly FlowValue[]>();
     for (const input of node.inputs) {
       inputs[input.name] = input.variadic ? Object.freeze(input.slots.map((slot) => this.read1(slot))) : this.read1(input.slots[0]!);

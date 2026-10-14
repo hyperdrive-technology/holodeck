@@ -308,6 +308,21 @@ describe('createHubSignalBridge with a controllable provider', () => {
     expect(log).toHaveBeenCalledWith('warn', expect.stringMatching(/subscriber for "x" threw/), expect.any(Error));
   });
 
+  it('reads its options once: swapping the logger afterwards changes nothing (review P3)', async () => {
+    const { sessions, hub } = await ctlSetup();
+    const first = vi.fn();
+    const options: { log?: (...args: unknown[]) => void } = { log: first };
+    const bridge = track(createHubSignalBridge(hub, options as never));
+    const second = vi.fn();
+    options.log = second;
+    bridge.subscribe('c', 'x', () => {
+      throw new Error('cb');
+    });
+    sessions[0]!.deliver([{ source: 'x', value: 1 }]);
+    expect(first).toHaveBeenCalled();
+    expect(second).not.toHaveBeenCalled();
+  });
+
   it('a session whose subscribe throws reports bad quality and retries on the next session', async () => {
     const bad: HolodeckProvider = {
       id: 'test.bad',

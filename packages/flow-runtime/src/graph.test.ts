@@ -297,6 +297,22 @@ describe('hostile input', () => {
     expect(problems.at(-1)).toMatchObject({ code: 'TOO_MANY_PROBLEMS', message: expect.stringMatching(/^500 more/) });
   });
 
+  it('an overflow of warnings only is a warning, so the graph stays deployable (review P3)', () => {
+    const nodes = Array.from({ length: 1002 }, (_, i) => node(`o${i}`, 'signal.out', { connection: 'plc', source: 'x' }));
+    const problems = validateFlowGraph(graph(nodes), registry);
+    expect(problems).toHaveLength(FLOW_LIMITS.maxProblems + 1);
+    expect(problems.at(-1)).toMatchObject({ severity: 'warning', code: 'TOO_MANY_PROBLEMS', message: expect.stringMatching(/^1 more .*0 error\(s\), 1 warning\(s\)/) });
+    expect(isDeployable(problems)).toBe(true);
+    // A listed error still blocks; the overflow only stands for what it hides (warnings here).
+    const mixed = validateFlowGraph(graph([...nodes, node('bad', 'acme.missing')]), registry);
+    expect(mixed[0]).toMatchObject({ severity: 'error', code: 'UNKNOWN_BLOCK' });
+    expect(mixed.at(-1)).toMatchObject({ severity: 'warning', code: 'TOO_MANY_PROBLEMS' });
+    expect(isDeployable(mixed)).toBe(false);
+    // An overflow that hides errors is an error.
+    const errors = validateFlowGraph(graph(Array.from({ length: 1001 }, (_, i) => node(`n${i}`, 'acme.missing'))), registry);
+    expect(errors.at(-1)).toMatchObject({ severity: 'error', code: 'TOO_MANY_PROBLEMS' });
+  });
+
   it('never throws on Proxies and throwing getters', () => {
     const trap = new Proxy(
       {},
