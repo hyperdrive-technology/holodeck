@@ -152,6 +152,15 @@ export function parseSceneFile(
   raw: unknown,
   registry: ContributionRegistry = getDefaultIsoRegistry(),
 ): IsoSceneFile {
+  return validateSceneFile(raw, registry);
+}
+
+/**
+ * Shared persisted-scene validation for parsing and editor mutations. Checks
+ * numeric fields and effective (rotated, param-sized) footprints without
+ * enumerating cells. The editor rejects edits that fail these same limits.
+ */
+export function validateSceneFile(raw: unknown, registry: ContributionRegistry): IsoSceneFile {
   if (!isRecord(raw)) {
     throw new Error('scene must be an object');
   }

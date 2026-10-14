@@ -1,5 +1,5 @@
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
-import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
+import { validateSceneFile, type IsoPlacement, type IsoSceneFile } from '../iso/scene';
 import { getDefaultIsoRegistry } from '../registry/default';
 import type { IsoPartDefinition } from '../registry/types';
 import type { Heading } from '../routing/grid';
@@ -14,6 +14,8 @@ export type ResizeHandle = 'radius' | 'height';
 
 /** Shown when A* finds no clear route and the manhattan L was drawn instead. */
 export const NO_ROUTE_NOTICE = 'No clear route — drew a straight L';
+export const ROUTE_FAILED_NOTICE = 'No route drawn — no replacement geometry';
+export const REROUTE_FAILED_NOTICE = 'Could not reroute — original run kept';
 
 /** `run` = view only; `edit` = place / drag / delete. Set by the host via `ProcessEditor`'s `mode`. */
 export type EditorHostMode = 'run' | 'edit';
@@ -209,6 +211,9 @@ function finishPipe(state: EditorState, click: GridPoint): EditorState {
     end,
     nextId,
   );
+  if (placements.length === 0) {
+    return { ...state, notice: ROUTE_FAILED_NOTICE };
+  }
   // Chaining continues from the end cell with no required heading: a port's
   // outward heading points back out of the pipe we just drew into it.
   return commit(
@@ -234,7 +239,7 @@ function rerouteSelected(state: EditorState): EditorState {
     return state;
   }
   if (sameCell(run.start, run.end)) {
-    return state; // closed loop: nothing sensible to route between
+    return { ...state, notice: REROUTE_FAILED_NOTICE }; // closed loop: no replacement
   }
   const ids = new Set(run.ids);
   const rest = state.scene.objects.filter((o) => !ids.has(o.id));
@@ -243,10 +248,15 @@ function rerouteSelected(state: EditorState): EditorState {
   const to = resolveRouteEnd(without, state.registry, run.end);
   const band = state.scene.objects.find((o) => o.id === run.ids[0])?.band;
   const { placements, noRoute } = routeToPlacements(without, state.registry, from, to, nextId, { band });
+  // A failed plan (even if it offers an obstructed L) must not replace a
+  // working run. Invalid resolved ports can also produce no geometry at all.
+  if (noRoute || placements.length === 0) {
+    return { ...state, notice: REROUTE_FAILED_NOTICE };
+  }
   return commit(
     state,
     { ...state.scene, objects: [...rest, ...placements] },
-    { selectedId: placements[0]?.id ?? null, notice: noRoute ? NO_ROUTE_NOTICE : null },
+    { selectedId: placements[0]?.id ?? null, notice: null },
   );
 }
 
@@ -263,8 +273,8 @@ function isRunPart(state: EditorState, partId: string): boolean {
   return state.registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, partId)?.draw === 'run';
 }
 
-/** Actions that may set a notice; every other non-pointer action dismisses it. */
-const NOTICE_KEEPERS: ReadonlySet<EditorAction['type']> = new Set(['cursor', 'drag-move', 'resize-move', 'load', 'set-read-only']);
+/** Pointer/release actions keep notices visible; other actions dismiss old notices. */
+const NOTICE_KEEPERS: ReadonlySet<EditorAction['type']> = new Set(['cursor', 'drag-move', 'drag-end', 'resize-move', 'resize-end', 'load', 'set-read-only']);
 
 /** The number-param spec a resize handle edits, or null when the part is not resizable that way. */
 function resizeParam(state: EditorState, partId: string, handle: ResizeHandle): { param: string; spec: IsoPartDefinition['params'][string] } | null {
@@ -284,10 +294,21 @@ function numberParam(obj: IsoPlacement, param: string, fallback: unknown): numbe
 
 export function editorReducer(state: EditorState, action: EditorAction): EditorState {
   let next = reduce(state, action);
+  // Reject the whole edit, preserving scene, selection, history and revision.
+  // Validate live drag/resize frames as well as commits: transient geometry
+  // is rendered/routed and can be committed by a subsequent inspector edit.
+  // This gate also covers pipes, host patches, params, load, undo and redo.
+  if (next.scene !== state.scene || next.revision !== state.revision) {
+    try {
+      validateSceneFile(next.scene, state.registry);
+    } catch (error) {
+      return { ...state, notice: `Edit rejected: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  }
   if (next.pipeStart === null && next.pipeStartHeading !== null) {
     next = { ...next, pipeStartHeading: null };
   }
-  const setsNotice = action.type === 'floor-click' || action.type === 'reroute-selected';
+  const setsNotice = next.notice !== state.notice || action.type === 'floor-click' || action.type === 'reroute-selected';
   return next.notice && !setsNotice && !NOTICE_KEEPERS.has(action.type) ? { ...next, notice: null } : next;
 }
 
@@ -411,8 +432,11 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
     }
     case 'resize-move': {
       const resize = state.resize;
-      if (!resize || !Number.isFinite(action.value)) {
+      if (!resize) {
         return state;
+      }
+      if (!Number.isFinite(action.value)) {
+        return { ...state, notice: 'Edit rejected: resize value must be finite' };
       }
       const objects = state.scene.objects.map((o) => {
         if (o.id !== resize.id) {
