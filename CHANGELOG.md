@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`@holodeck/editor-2.5d-react`**: deterministic rendered signal (holodeck#34). `ProcessEditor` and `IsoCanvas` expose `data-holodeck-revision`, `data-holodeck-rendered` and `data-render-state` (`pending` / `ready` / `unsupported`) plus an `onRendered(revision)` callback, fired after a presented frame shows the current revision with every GLB part loaded, no camera animation running and (editor) the scene fitted.
+
+### Fixed
+
+- **`@holodeck/editor-2.5d-react`**: `ProcessEditor` no longer grows past the box its host gives it (palette / inspector / canvas content no longer sets its intrinsic height), so the scene is fitted to the visible pane in any embedding (core#69). Palette section headings are 12 px.
+
 ## [0.1.0] - 2026-09-22
 
 First tagged Holodeck monorepo release (formerly Starfleet).

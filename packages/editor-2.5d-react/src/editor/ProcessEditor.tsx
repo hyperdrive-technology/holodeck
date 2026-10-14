@@ -4,10 +4,12 @@ import { initialIsoPose, rotatePose, toggleTopDown } from '../iso/pose';
 import type { IsoSceneFile } from '../iso/scene';
 import type { Vector3Tuple } from 'three';
 import { getDefaultIsoRegistry } from '../registry/default';
-import { IsoRegistryProvider, useIsoParts } from '../registry/react';
+import { IsoRegistryProvider, useIsoParts, useIsoRegistryVersion } from '../registry/react';
 import type { IsoInspectorSlot, IsoMetrics, IsoPartDefinition } from '../registry/types';
 import { EditorLayer } from './EditorLayer';
 import { clampZoom, WHEEL_ZOOM_STEP } from '../iso/pan';
+import { renderState, useRevision } from '../iso/render-signal';
+import { useWebGPUSupport } from '../iso/use-webgpu';
 import { fitView, sceneWorldBox } from './fit';
 import {
   committedScene,
@@ -17,7 +19,7 @@ import {
   type EditorHostMode,
   type EditorMode,
 } from './editor-state';
-import { ACCENT, BAR, FONT, MUTED, RAIL, SIDEBAR, SIDEBAR_TEXT } from './editor-styles';
+import { ACCENT, BAR, FONT, MUTED, PANEL, RAIL, SIDEBAR, SIDEBAR_TEXT } from './editor-styles';
 import { InspectorPanel } from './InspectorPanel';
 import { Palette } from './Palette';
 import { ProcessSceneView, sceneTarget } from './ProcessSceneView';
@@ -41,6 +43,18 @@ export interface ProcessEditorProps {
   onSelect?: (id: string | null) => void;
   /** Extra inspector content for the selection (edit mode), e.g. a host tag-binding panel. */
   inspector?: IsoInspectorSlot;
+  /**
+   * Called with the render revision once a presented frame shows it: the scene fitted
+   * to the canvas (first load), every GLB part loaded, no camera animation running.
+   * The same state is on the root element for tests and screenshot loops:
+   * `data-holodeck-revision` (current), `data-holodeck-rendered` (last presented) and
+   * `data-render-state` (`pending` | `ready` | `unsupported` when WebGPU is missing).
+   * Wait for `[data-testid="process-editor"][data-render-state="ready"]`, never a sleep.
+   * The revision increases on any change to the picture (scene, selection/drag state,
+   * metrics, zoom, look-at, pose, canvas size, registry contents), so a reported revision can already be
+   * stale: compare it with `data-holodeck-revision` when that matters.
+   */
+  onRendered?: (revision: number) => void;
 }
 
 export function ProcessEditor({
@@ -52,8 +66,10 @@ export function ProcessEditor({
   selectedId,
   onSelect,
   inspector,
+  onRendered,
 }: ProcessEditorProps) {
   const registry = registryProp ?? getDefaultIsoRegistry();
+  const registryVersion = useIsoRegistryVersion(registry);
   const readOnly = mode === 'run';
   const home = useMemo(() => initialIsoPose(18), []);
   const [state, dispatch] = useReducer(
@@ -105,11 +121,15 @@ export function ProcessEditor({
   // After that, re-fit on canvas resizes (e.g. Run -> Edit adds two side panels
   // and would otherwise leave the plant clipped) only while the user has not
   // zoomed, panned or rotated: their view wins. The "fit" button resets that.
-  // Scene edits never re-fit.
+  // Scene edits never re-fit, except the first placement in an empty document.
   const fittedSceneId = useRef<string | null>(null);
+  // Mirrors fittedSceneId as state so the render hold below re-evaluates when a
+  // fit lands even if it changed neither zoom nor target.
+  const [fittedId, setFittedId] = useState<string | null>(null);
   const userMovedView = useRef(false);
   const sceneForFit = useRef(scene);
   sceneForFit.current = scene;
+  const hasObjects = scene.objects.length > 0;
   useEffect(() => {
     const scene = sceneForFit.current;
     const sceneChanged = fittedSceneId.current !== scene.id;
@@ -118,10 +138,25 @@ export function ProcessEditor({
     if (!fit) return;
     if (sceneChanged) userMovedView.current = false;
     fittedSceneId.current = scene.id;
+    setFittedId(scene.id);
     setZoom(fit.zoom);
     setTarget(fit.target);
     if (sceneChanged) setPose(home);
-  }, [scene.id, fitScene, home]);
+  }, [scene.id, hasObjects, fitScene, home]);
+
+  // Rendered signal (holodeck#34, render-signal.tsx). Held until the canvas is
+  // measured and, for a non-empty scene, fitted: the first "ready" frame is the
+  // fitted one, whatever size the host gives the editor.
+  const holdRender = view === null || (scene.objects.length > 0 && fittedId !== scene.id);
+  const revision = useRevision([scene, state, metrics, registry, registryVersion, readOnly, zoom, target, pose, view, holdRender]);
+  const [renderedRevision, setRenderedRevision] = useState<number | null>(null);
+  const onRenderedRef = useRef(onRendered);
+  onRenderedRef.current = onRendered;
+  const reportRendered = useCallback((rev: number) => {
+    setRenderedRevision(rev);
+    onRenderedRef.current?.(rev);
+  }, []);
+  const webgpu = useWebGPUSupport();
 
   // Host callbacks via refs so effects below depend only on what they watch.
   const onChangeRef = useRef(onChange);
@@ -267,12 +302,25 @@ export function ProcessEditor({
         data-object-count={String(state.scene.objects.length)}
         data-zoom={zoom.toFixed(1)}
         data-target={target.map((v) => v.toFixed(3)).join(',')}
+        data-holodeck-revision={revision}
+        data-holodeck-rendered={renderedRevision ?? ''}
+        data-render-state={renderState(revision, renderedRevision, webgpu !== 'missing')}
         style={{
           display: 'flex',
           flexDirection: 'column',
           width: '100%',
           height: '100%',
           minHeight: 0,
+          minWidth: 0,
+          // Never grow past the host's box. Without this, a host that lays the
+          // editor out as a flex/grid item (min-height: auto) let the palette's
+          // full content height stretch the editor past its pane (core#69:
+          // 1136 px editor in a 900 px viewport, scene fitted to the overflow).
+          // overflow: hidden makes the automatic minimum size 0; the palette and
+          // inspector scroll inside instead.
+          overflow: 'hidden',
+          position: 'relative',
+          boxSizing: 'border-box',
           background: '#fff',
           font: FONT,
           color: '#222',
@@ -290,21 +338,22 @@ export function ProcessEditor({
               />
               <aside
                 style={{
-                  width: 280,
+                  width: PANEL,
                   flex: 'none',
                   background: SIDEBAR,
                   color: SIDEBAR_TEXT,
-                  display: 'flex',
-                  flexDirection: 'column',
+                  position: 'relative',
                   minHeight: 0,
                 }}
               >
-                <Palette
-                  registry={registry}
-                  placing={state.placing}
-                  drawing={state.mode === 'draw-pipe'}
-                  onPick={(id) => dispatch({ type: 'place-mode', object: id })}
-                />
+                <div style={FILL}>
+                  <Palette
+                    registry={registry}
+                    placing={state.placing}
+                    drawing={state.mode === 'draw-pipe'}
+                    onPick={(id) => dispatch({ type: 'place-mode', object: id })}
+                  />
+                </div>
               </aside>
             </>
           )}
@@ -331,6 +380,7 @@ export function ProcessEditor({
                 {state.notice}
               </div>
             ) : null}
+            <div style={FILL}>
             <ProcessSceneView
               scene={state.scene}
               zoom={zoom}
@@ -346,6 +396,9 @@ export function ProcessEditor({
               showControls={false}
               cursor={cursor}
               registry={registry}
+              revision={revision}
+              holdRender={holdRender}
+              onRendered={reportRendered}
             >
               <EditorLayer
                 state={state}
@@ -364,18 +417,23 @@ export function ProcessEditor({
                 onHoverObject={setOverObject}
               />
             </ProcessSceneView>
+            </div>
           </div>
           {readOnly ? null : (
-            <InspectorPanel
-              registry={registry}
-              def={selectedDef}
-              selected={selected}
-              slot={inspector}
-              onParam={(param, value) => dispatch({ type: 'set-param', param, value })}
-              onPatch={(patch) => dispatch({ type: 'patch-selected', patch })}
-              onRotate={(direction) => dispatch({ type: 'rotate-selected', direction })}
-              onDelete={() => dispatch({ type: 'delete' })}
-            />
+            <div style={{ width: PANEL, flex: 'none', position: 'relative', minHeight: 0 }}>
+              <div style={FILL}>
+                <InspectorPanel
+                  registry={registry}
+                  def={selectedDef}
+                  selected={selected}
+                  slot={inspector}
+                  onParam={(param, value) => dispatch({ type: 'set-param', param, value })}
+                  onPatch={(patch) => dispatch({ type: 'patch-selected', patch })}
+                  onRotate={(direction) => dispatch({ type: 'rotate-selected', direction })}
+                  onDelete={() => dispatch({ type: 'delete' })}
+                />
+              </div>
+            </div>
           )}
         </div>
         <BottomBar
@@ -395,6 +453,10 @@ export function ProcessEditor({
           onFit={() => {
             userMovedView.current = false;
             const fit = fitScene(state.scene);
+            if (fit) {
+              fittedSceneId.current = state.scene.id;
+              setFittedId(state.scene.id);
+            }
             setZoom(fit?.zoom ?? 20);
             setTarget(fit?.target ?? sceneTarget(state.scene, registry));
             setPose(home);
@@ -412,6 +474,14 @@ export function ProcessEditor({
     </IsoRegistryProvider>
   );
 }
+
+/**
+ * Fills a `position: relative` parent without contributing to its intrinsic
+ * size: the palette list, inspector and canvas then never push the editor
+ * taller than the box its host gave it (core#69). Row flex so a single child
+ * stretches to the full height and scrolls inside.
+ */
+const FILL = { position: 'absolute', inset: 0, display: 'flex' } as const;
 
 function Rail({
   mode,
