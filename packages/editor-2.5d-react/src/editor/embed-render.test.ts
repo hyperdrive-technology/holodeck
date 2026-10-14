@@ -104,6 +104,41 @@ const EMBEDS = [
 ] as const;
 
 describe.skipIf(!CHROMIUM)('ProcessEditor embedded in a host', () => {
+  it('waits for a direct public HolodeckModel inside a null Suspense fallback', async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      const logs = collectPageLog(page);
+      let requested!: () => void;
+      const glbRequested = new Promise<void>((resolve) => { requested = resolve; });
+      await page.route((url) => url.pathname.endsWith('/pump.glb') && !url.search.includes('import'), async (route) => {
+        requested();
+        await released;
+        await route.continue();
+      });
+      await page.goto(`${harness.origin}/embed.html?layout=box&canvas&directModel`);
+      const canvas = page.locator('[data-render-state]');
+      await canvas.waitFor();
+      await glbRequested;
+      await page.waitForSelector('canvas');
+      await animationFrames(page, 30);
+      expect(await canvas.getAttribute('data-render-state'), logs.join('\n')).toBe('pending');
+      expect(await page.evaluate(() => (window as any).__embed.rendered)).toEqual([]);
+      expect(await page.evaluate(() => (window as any).__embed.modelReady)).toBe(false);
+
+      release();
+      const rendered = await waitForRendered(canvas);
+      expect(rendered).toBe(Number(await canvas.getAttribute('data-holodeck-revision')));
+      expect(await page.evaluate(() => (window as any).__embed.modelReady)).toBe(true);
+      expect(await page.evaluate(() => (window as any).__embed.renderedBeforeModel)).toBe(false);
+      expect(await page.evaluate(() => (window as any).__embed.rendered)).toEqual([rendered]);
+    } finally {
+      release();
+      await page.close();
+    }
+  }, 90_000);
+
   it('fits the first placement in an initially empty document and reaches ready', async () => {
     const { page, editor } = await open('layout=flex&mode=edit&empty', { width: 1440, height: 900 });
     try {

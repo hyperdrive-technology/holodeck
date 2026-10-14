@@ -169,8 +169,10 @@ export interface IsoCanvasProps {
   /** Holds the rendered signal (e.g. while the host has not fitted the view yet). */
   holdRender?: boolean;
   /**
-   * Called after a presented frame shows `revision` with every GLB loaded and no
-   * camera animation running. Also mirrored as `data-holodeck-rendered` and
+   * Called after a presented frame shows `revision` with every HolodeckModel
+   * GLB loaded (including direct children in `Suspense fallback={null}`) and no
+   * camera animation running. Hosts with custom loaders must keep `holdRender`
+   * true until those models mount. Also mirrored as `data-holodeck-rendered` and
    * `data-render-state` on the canvas container.
    */
   onRendered?: (revision: number) => void;
