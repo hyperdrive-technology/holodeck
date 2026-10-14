@@ -5,7 +5,7 @@
  *
  * No sleeps: every wait is on `data-render-state` or on a frame count.
  */
-import type { Browser, Page, Route } from 'playwright';
+import type { Browser, Locator, Page, Route } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
 import {
@@ -78,6 +78,24 @@ async function open(query: string, viewport: { width: number; height: number }) 
   return { page, editor, logs };
 }
 
+/** Observe commits, including pending states too brief for a Playwright poll. */
+async function recordStates(root: Locator) {
+  await root.evaluate((el) => {
+    const states: Array<{ state: string | null; revision: number; rendered: number }> = [];
+    (window as any).__renderStates = states;
+    new MutationObserver(() => states.push({
+      state: el.getAttribute('data-render-state'),
+      revision: Number(el.getAttribute('data-holodeck-revision')),
+      rendered: Number(el.getAttribute('data-holodeck-rendered')),
+    })).observe(el, { attributes: true, attributeFilter: ['data-render-state', 'data-holodeck-revision'] });
+  });
+}
+
+async function expectPendingRevision(page: Page, first: number) {
+  const states = await page.evaluate(() => (window as any).__renderStates as Array<{ state: string; revision: number; rendered: number }>);
+  expect(states.some((s) => s.state === 'pending' && s.revision > first && s.rendered !== s.revision), JSON.stringify(states)).toBe(true);
+}
+
 const EMBEDS = [
   { name: 'app shell, 1440x900, edit', query: 'layout=flex&mode=edit', viewport: { width: 1440, height: 900 } },
   { name: 'app shell, 1024x600, edit', query: 'layout=flex&mode=edit', viewport: { width: 1024, height: 600 } },
@@ -86,6 +104,110 @@ const EMBEDS = [
 ] as const;
 
 describe.skipIf(!CHROMIUM)('ProcessEditor embedded in a host', () => {
+  it('fits the first placement in an initially empty document and reaches ready', async () => {
+    const { page, editor } = await open('layout=flex&mode=edit&empty', { width: 1440, height: 900 });
+    try {
+      const first = await waitForRendered(editor);
+      expect(await editor.getAttribute('data-object-count')).toBe('0');
+      await page.getByRole('button', { name: /2×2 vessel/ }).click();
+      const canvas = page.locator('[data-testid="process-editor"] canvas');
+      const box = (await canvas.boundingBox())!;
+      await canvas.click({ position: { x: box.width / 2, y: box.height / 2 } });
+      const rendered = await waitForRendered(editor);
+      expect(await editor.getAttribute('data-object-count')).toBe('1');
+      expect(rendered).toBeGreaterThan(first);
+      expect(await editor.getAttribute('data-zoom')).not.toBe('20.0');
+      // Every successful fit, including the toolbar, keeps the fitted marker valid.
+      await page.getByRole('button', { name: 'fit', exact: true }).click();
+      await waitForRendered(editor);
+    } finally {
+      await page.close();
+    }
+  }, 90_000);
+
+  it('invalidates a ready standalone canvas when its host resizes', async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+    try {
+      await page.goto(`${harness.origin}/embed.html?layout=box&canvas`);
+      const root = page.locator('[data-holodeck-revision]');
+      const first = await waitForRendered(root);
+      await recordStates(root);
+      await page.getByTestId('pane').evaluate((el) => {
+        el.style.width = '800px';
+        el.style.height = '480px';
+      });
+      await page.waitForFunction((rev) => Number(document.querySelector('[data-holodeck-revision]')!.getAttribute('data-holodeck-revision')) > rev, first);
+      const second = await waitForRendered(root);
+      expect(second).toBeGreaterThan(first);
+      await expectPendingRevision(page, first);
+      const box = (await page.locator('canvas').boundingBox())!;
+      expect(box.width).toBe(800);
+      expect(box.height).toBe(480);
+    } finally {
+      await page.close();
+    }
+  }, 90_000);
+
+  it('invalidates ready when a late pack resolves an unknown placement, until its GLB loads', async () => {
+    const { page, editor } = await open('layout=flex&mode=run&latePack', { width: 1280, height: 720 });
+    let release = () => {};
+    try {
+      const first = await waitForRendered(editor);
+      await recordStates(editor);
+      let requested!: () => void;
+      const glbRequested = new Promise<void>((resolve) => { requested = resolve; });
+      const released = new Promise<void>((resolve) => { release = resolve; });
+      await page.route((url) => url.pathname.endsWith('/pump.glb') && !url.search.includes('import'), async (route) => {
+        requested();
+        await released;
+        await route.continue();
+      });
+      await page.evaluate(() => (window as any).__embed.installPump());
+      await glbRequested;
+      await animationFrames(page, 30);
+      expect(await editor.getAttribute('data-render-state')).toBe('pending');
+      expect(await page.evaluate(() => (window as any).__embed.rendered)).toEqual([first]);
+      await expectPendingRevision(page, first);
+      release();
+      const second = await waitForRendered(editor);
+      expect(second).toBeGreaterThan(first);
+      expect(second).toBe(Number(await editor.getAttribute('data-holodeck-revision')));
+      expect(await page.evaluate(() => (window as any).__embed.rendered)).toEqual([first, second]);
+    } finally {
+      release();
+      await page.close();
+    }
+  }, 90_000);
+
+  it('keeps all selected-part inspector controls within the wrapper without a CSS reset', async () => {
+    const { page, editor } = await open('layout=flex&mode=edit&selected=holding', { width: 1440, height: 900 });
+    try {
+      await waitForRendered(editor);
+      const inspector = page.getByTestId('inspector');
+      const bounds = await inspector.evaluate((el) => {
+        const panel = el.getBoundingClientRect();
+        const wrapper = el.parentElement!.parentElement!.getBoundingClientRect();
+        return {
+          width: panel.width,
+          wrapperWidth: wrapper.width,
+          clipped: [...el.querySelectorAll('input, select, button')].filter((control) => {
+            const r = control.getBoundingClientRect();
+            return r.left < wrapper.left - 0.5 || r.right > wrapper.right + 0.5;
+          }).map((control) => control.outerHTML),
+          controls: el.querySelectorAll('input, select, button').length,
+          defaultBoxSizing: getComputedStyle(document.body).boxSizing,
+        };
+      });
+      expect(bounds.defaultBoxSizing).toBe('content-box');
+      expect(bounds.wrapperWidth).toBe(280);
+      expect(bounds.width).toBe(bounds.wrapperWidth);
+      expect(bounds.controls).toBeGreaterThan(3);
+      expect(bounds.clipped).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 90_000);
+
   for (const embed of EMBEDS) {
     it(`stays inside its pane and fits the scene on load: ${embed.name}`, async () => {
       const { page, editor, logs } = await open(embed.query, embed.viewport);

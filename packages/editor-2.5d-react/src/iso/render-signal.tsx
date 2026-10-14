@@ -150,23 +150,34 @@ export function RenderSignal({
   hold = false,
   settleFrames = 2,
   onRendered,
+  dimensions,
+  onDimensions,
 }: {
   revision: number;
   /** Host-side hold (e.g. the fit-to-scene has not been applied yet). */
   hold?: boolean;
   settleFrames?: number;
   onRendered: (revision: number) => void;
+  /** Host readiness must use the same dimensions as the R3F drawing tree. */
+  dimensions?: string;
+  onDimensions?: (dimensions: string) => void;
 }) {
   const tracker = useContext(RenderTrackerContext);
   const [gate] = useState(() => new RenderGate(settleFrames));
   const size = useThree((s) => s.size);
   const dpr = useThree((s) => s.viewport.dpr);
-  useRenderHold(hold);
+  const sizeKey = `${size.width}x${size.height}@${dpr}`;
+  // R3F has its own root. Keep the gate held until its measured size has been
+  // incorporated into the host's identity, so resize cannot report an old one.
+  useRenderHold(hold || (dimensions !== undefined && dimensions !== sizeKey));
+  useLayoutEffect(() => {
+    onDimensions?.(sizeKey);
+  }, [onDimensions, sizeKey]);
   // Layout effect: runs in the same commit that put `revision` into this tree,
   // so the gate never pairs a revision with an older tree.
   useLayoutEffect(() => {
-    gate.commit(revision, `${size.width}x${size.height}@${dpr}`);
-  }, [gate, revision, size.width, size.height, dpr]);
+    gate.commit(revision, sizeKey);
+  }, [gate, revision, sizeKey]);
   const onRenderedRef = useRef(onRendered);
   onRenderedRef.current = onRendered;
   useFrame(() => {
