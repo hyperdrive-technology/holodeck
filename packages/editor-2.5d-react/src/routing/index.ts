@@ -12,6 +12,8 @@ export {
 } from './occupancy';
 export { MAX_GRID_COORD } from './grid';
 export type { Occupancy, OccupancyOptions, Bounds } from './occupancy';
+export { carryHostedParts, chainFrom, detachFrom, findHostPipe, hostPipeOf, placeOnRoute, positionOnPipe, withAttachment } from './inline';
+export type { PipeAttachment, PipeSeg } from './inline';
 export { resolveRouteEnd } from './ports';
 export type { ResolvedRouteEnd } from './ports';
 export { collapsePath, pathToPlacements, DEFAULT_PIPE_BAND } from './to-placements';

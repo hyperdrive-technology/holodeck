@@ -2,9 +2,11 @@ import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import { validatePlacementGeometry, validatePlacementPart, validateSceneGeometry, type IsoPlacement, type IsoSceneFile } from '../iso/scene';
 import { getDefaultIsoRegistry } from '../registry/default';
 import type { IsoPartDefinition } from '../registry/types';
-import type { Heading } from '../routing/grid';
+import { rotateOffset, type Heading } from '../routing/grid';
 import { resolveRouteEnd } from '../routing/ports';
-import { findRun } from '../routing/run';
+import { carryHostedParts, chainFrom, detachFrom, hostPipeOf, INLINE_PART_LENGTH, isPipePlacement, positionOnPipe, segOf, splitChainAtParts, withAttachment } from '../routing/inline';
+import { headingOf, pipeArmsAt } from '../routing/elbows';
+import { findRun, isInlinePart } from '../routing/run';
 import { routeToPlacements, type GridPoint } from './routing';
 import { sameCell } from './snap';
 import { snapParamValue } from '../registry/params';
@@ -16,6 +18,11 @@ export type ResizeHandle = 'radius' | 'height';
 export const NO_ROUTE_NOTICE = 'No clear route — drew a straight L';
 export const ROUTE_FAILED_NOTICE = 'No route drawn — no replacement geometry';
 export const REROUTE_FAILED_NOTICE = 'Could not reroute — original run kept';
+
+/** Rerouting is atomic when the carried parts cannot fit on the new run. */
+export const INLINE_PARTS_NO_ROUTE_NOTICE = 'No clear route — inline parts do not fit';
+
+export const RETAINED_CONNECTIONS_NO_ROUTE_NOTICE = 'Reroute rejected — could not verify retained connections';
 
 /** `run` = view only; `edit` = place / drag / delete. Set by the host via `ProcessEditor`'s `mode`. */
 export type EditorHostMode = 'run' | 'edit';
@@ -35,7 +42,7 @@ export interface EditorState {
   /** One-line inline message (e.g. the routing fallback). Cleared by the next non-pointer action. */
   notice: string | null;
   cursor: GridPoint | null;
-  drag: { id: string; origin: GridPoint; grab: GridPoint } | null;
+  drag: { id: string; origin: IsoPlacement; grab: GridPoint; /** Single-node part, computed once so drag-move frames stay O(1) in footprint calls. */ inline: boolean } | null;
   /**
    * Live resize drag (radius / height handle). `param` is the number param
    * the handle edits, `origin` its value when the handle was grabbed, so a
@@ -191,7 +198,9 @@ function placeAt(state: EditorState, x: number, y: number): EditorState {
     return state;
   }
   const id = nextId(state.placing, state.scene.objects);
-  const added = stamp(state.registry, state.placing, x, y, id);
+  const stamped = stamp(state.registry, state.placing, x, y, id);
+  // A single-node part dropped inside a pipe records that pipe (holodeck#22).
+  const added = isInlinePart(stamped, state.registry) ? withAttachment(stamped, state.scene.objects) : stamped;
   return commit(
     state,
     { ...state.scene, objects: [...state.scene.objects, added] },
@@ -248,22 +257,89 @@ function rerouteSelected(state: EditorState): EditorState {
     return { ...state, notice: REROUTE_FAILED_NOTICE }; // closed loop: no replacement
   }
   const ids = new Set(run.ids);
-  const rest = state.scene.objects.filter((o) => !ids.has(o.id));
-  const without = { objects: rest };
-  const from = resolveRouteEnd(without, state.registry, run.start);
-  const to = resolveRouteEnd(without, state.registry, run.end);
-  from.heading ??= run.startHeading;
-  to.heading ??= run.endHeading;
+  // Inline parts drawn on the run's pipes (holodeck#22) ride along unless a
+  // retained pipe pins them in place. Movable parts are excluded as obstacles
+  // and re-seated near the same fraction, with room for every carried body.
+  const runPipes = state.scene.objects.filter((o) => ids.has(o.id) && isPipePlacement(o));
+  const hosted = state.scene.objects.filter((o) => {
+    const host = hostPipeOf(o, state.scene.objects);
+    return host !== null && ids.has(host.id) && !ids.has(o.id);
+  });
+  const retainedPipes = state.scene.objects.filter((o) => !ids.has(o.id) && isPipePlacement(o));
+  // An onPipe attachment does not imply that this is the part's only
+  // connection. Retained branches (including a second pipe passing through
+  // the part) pin it in place; split the old chain there before routing.
+  // Check the centre AND every declared port in world space. Keep exact
+  // offsets: rounding a half-cell port would miss its retained branch.
+  const fixed = hosted.filter((part) => {
+    const def = state.registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, part.object);
+    const connections = [part, ...Object.values(def?.ports ?? {}).map((port) => {
+      const off = rotateOffset(port.x, port.y, part.rotation);
+      return { x: part.x + off.x, y: part.y + off.y };
+    })];
+    return connections.some((point) => pipeArmsAt(retainedPipes, point).length > 0
+      || retainedPipes.some((pipe) => positionOnPipe(segOf(pipe), point.x, point.y) !== null));
+  });
+  const fixedIds = new Set(fixed.map((o) => o.id));
+  const movable = hosted.filter((o) => !fixedIds.has(o.id));
+  const movableIds = new Set(movable.map((o) => o.id));
+  const rest = state.scene.objects.filter((o) => !ids.has(o.id) && !movableIds.has(o.id)).map((o) => {
+    if (!fixedIds.has(o.id)) return o;
+    // The fixed part becomes a joint between new pipes, rather than being
+    // hosted strictly inside one. Do not leave an attachment to the old ID.
+    const { onPipe: _onPipe, at: _at, ...joint } = o;
+    return joint;
+  });
+  const sections = splitChainAtParts(chainFrom(runPipes.map(segOf), run.start), fixed);
   const band = state.scene.objects.find((o) => o.id === run.ids[0])?.band;
-  const { placements, noRoute } = routeToPlacements(without, state.registry, from, to, nextId, { band });
-  // A failed plan (even if it offers an obstructed L) must not replace a
-  // working run. Invalid resolved ports can also produce no geometry at all.
-  if (noRoute || placements.length === 0) {
-    return { ...state, notice: REROUTE_FAILED_NOTICE };
+  // Obstacle exclusion must not release IDs belonging to carried parts.
+  const reservedObjects = state.scene.objects.filter((o) => !ids.has(o.id));
+  const placements: IsoPlacement[] = [];
+  const carried: IsoPlacement[] = [];
+  for (const [i, section] of sections.entries()) {
+    const first = section[0]!;
+    const last = section[section.length - 1]!;
+    const without = { objects: [...rest, ...placements] };
+    const from = i === 0 ? resolveRouteEnd(without, state.registry, run.start) : {
+      cell: first.from,
+      heading: headingOf(first.to.x - first.from.x, first.to.y - first.from.y) ?? undefined,
+    };
+    const to = i === sections.length - 1 ? resolveRouteEnd(without, state.registry, run.end) : {
+      cell: last.to,
+      heading: headingOf(last.from.x - last.to.x, last.from.y - last.to.y) ?? undefined,
+    };
+    if (i === 0) from.heading ??= run.startHeading;
+    if (i === sections.length - 1) to.heading ??= run.endHeading;
+    const route = routeToPlacements(without, state.registry, from, to, nextId, {
+      band, reservedObjects: [...reservedObjects, ...placements],
+    });
+    // Both blocked and off-grid fallbacks skip heading/obstacle guarantees:
+    // half-cell endpoints set fallback=true but noRoute=false. Conservatively
+    // reject them for fixed sections and retained endpoint ports/flanges;
+    // staged placements must never partially replace the original run.
+    if (route.placements.length === 0) return { ...state, notice: REROUTE_FAILED_NOTICE };
+    if (route.fallback && (fixed.length > 0 || from.heading !== undefined || to.heading !== undefined)) {
+      return { ...state, notice: RETAINED_CONNECTIONS_NO_ROUTE_NOTICE };
+    }
+    const endpointLength = (cell: GridPoint) => rest.some((o) => sameCell(o, cell) && isInlinePart(o, state.registry))
+      ? INLINE_PART_LENGTH : 0;
+    const parts = carryHostedParts(
+      movable.filter((part) => section.some((seg) => seg.id === part.onPipe && positionOnPipe(seg, part.x, part.y) !== null)),
+      section,
+      route.placements.filter(isPipePlacement).map(segOf),
+      { start: endpointLength(from.cell), end: endpointLength(to.cell) },
+    );
+    // A failed plan (even one offering an obstructed L) must not replace a
+    // working run; invalid resolved ports can also produce no geometry.
+    if (route.noRoute) return { ...state, notice: REROUTE_FAILED_NOTICE };
+    if (parts === null) return { ...state, notice: INLINE_PARTS_NO_ROUTE_NOTICE };
+    placements.push(...route.placements);
+    carried.push(...parts);
   }
+  if (carried.length !== movable.length) return { ...state, notice: INLINE_PARTS_NO_ROUTE_NOTICE };
   return commit(
     state,
-    { ...state.scene, objects: [...rest, ...placements] },
+    { ...state.scene, objects: [...rest, ...placements, ...carried] },
     { selectedId: placements[0]?.id ?? null, notice: null },
   );
 }
@@ -378,7 +454,7 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
         mode: 'select',
         placing: null,
         pipeStart: null,
-        drag: { id: action.id, origin: { x: obj.x, y: obj.y }, grab: { x: action.x, y: action.y } },
+        drag: { id: action.id, origin: structuredClone(obj), grab: { x: action.x, y: action.y }, inline: isInlinePart(obj, state.registry) },
       };
     }
     case 'drag-move': {
@@ -391,14 +467,9 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
         if (o.id !== state.drag?.id) {
           return o;
         }
-        const fromOrigin = { ...o, x: state.drag.origin.x, y: state.drag.origin.y };
-        if (typeof o.toX === 'number' && typeof o.toY === 'number') {
-          const dtx = o.toX - o.x;
-          const dty = o.toY - o.y;
-          fromOrigin.toX = state.drag.origin.x + dtx;
-          fromOrigin.toY = state.drag.origin.y + dty;
-        }
-        return moveBy(fromOrigin, dx, dy);
+        const moved = moveBy(state.drag.origin, dx, dy);
+        // Keep the pipe attachment in step with where the part is dropped.
+        return state.drag.inline ? withAttachment(moved, state.scene.objects) : moved;
       });
       return { ...state, cursor: { x: action.x, y: action.y }, scene: { ...state.scene, objects } };
     }
@@ -409,21 +480,19 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
       const current = state.scene.objects.find((o) => o.id === state.drag?.id);
       const moved = current && (current.x !== state.drag.origin.x || current.y !== state.drag.origin.y);
       if (!moved) {
-        return { ...state, drag: null };
+        // A drag out and back is a no-op, including attachment metadata.
+        const origin = state.drag.origin;
+        if (current && JSON.stringify(current) === JSON.stringify(origin)) return { ...state, drag: null };
+        const objects = state.scene.objects.map((o) => o.id === origin.id ? { ...origin } : o);
+        return { ...state, scene: { ...state.scene, objects }, drag: null };
       }
       const before = cloneScene(state.scene);
       before.objects = before.objects.map((o) => {
         if (o.id !== state.drag?.id) {
           return o;
         }
-        const restored = { ...o, x: state.drag.origin.x, y: state.drag.origin.y };
-        if (typeof o.toX === 'number' && typeof o.toY === 'number') {
-          const dtx = o.toX - o.x;
-          const dty = o.toY - o.y;
-          restored.toX = state.drag.origin.x + dtx;
-          restored.toY = state.drag.origin.y + dty;
-        }
-        return restored;
+        // Coordinates alone lose onPipe/at after withAttachment detaches it.
+        return { ...state.drag.origin };
       });
       return {
         ...state,
@@ -510,7 +579,7 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
       }
       return commit(
         state,
-        { ...state.scene, objects: state.scene.objects.filter((o) => o.id !== state.selectedId) },
+        { ...state.scene, objects: detachFrom(state.scene.objects, state.selectedId).filter((o) => o.id !== state.selectedId) },
         { selectedId: null },
       );
     }

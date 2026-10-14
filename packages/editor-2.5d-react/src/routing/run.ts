@@ -17,13 +17,13 @@
  * the reroute should go around it. Floor annotations (`area`, `label`) never
  * stop the walk.
  *
- * Not handled: a part lying strictly inside one pipe's span (tests/scene.json
- * draws its valves on top of one long pipe) is not a run end, so a reroute
- * of that pipe still leaves it behind. Geometry alone can't tell such an
- * inline valve from an obstacle dropped across the pipe, which reroute is
- * meant to avoid (editor-state.test "replaces the selected run with a route
- * around a new obstacle"). Fixing it needs an explicit attachment (e.g. a
- * valve placement naming its pipe) rather than another heuristic here.
+ * A part lying strictly inside one pipe's span (tests/scene.json draws its
+ * valves on top of one long pipe) is not a run end. Geometry alone can't tell
+ * it from an obstacle dropped across the pipe, which reroute is meant to avoid
+ * (editor-state.test "replaces the selected run with a route around a new
+ * obstacle"), so such a part carries an explicit `onPipe` attachment
+ * (routing/inline.ts, holodeck#22) and the reroute re-seats it on the new
+ * route instead of leaving it behind.
  */
 
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
@@ -50,7 +50,7 @@ const nodeKey = (x: number, y: number) => `${x},${y}`;
 const isPipe = (o: IsoPlacement) => o.object === 'pipe' && typeof o.toX === 'number' && typeof o.toY === 'number';
 
 /** Single-node parts a run must stop at and stay attached to (not pipes, elbows, floor annotations or vessels). */
-function isInlinePart(o: IsoPlacement, registry: ContributionRegistry): boolean {
+export function isInlinePart(o: IsoPlacement, registry: ContributionRegistry): boolean {
   if (o.object === 'pipe' || o.object === 'elbow' || NON_OBSTACLE_PARTS.has(o.object)) return false;
   const { w, h } = rotatedFootprint(registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, o.object), o.rotation, o);
   return w <= 1 && h <= 1;
