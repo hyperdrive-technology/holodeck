@@ -98,6 +98,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 
 const panelStyle: CSSProperties = {
   width: PANEL,
+  boxSizing: 'border-box',
   flex: 'none',
   background: SIDEBAR,
   color: SIDEBAR_TEXT,

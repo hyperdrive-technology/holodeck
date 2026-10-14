@@ -19,7 +19,7 @@ import type { WebGPURendererParameters } from 'three/webgpu';
 import type { ContributionRegistry } from '@holodeck/sdk';
 import { HolodeckStyleProvider } from '../../assets/process/style-context';
 import type { HolodeckStyle } from '../../assets/process/style';
-import { IsoRegistryProvider, useIsoRegistry } from '../registry/react';
+import { IsoRegistryProvider, useIsoRegistry, useIsoRegistryVersion } from '../registry/react';
 import { FloorGrid } from './FloorGrid';
 import { useWebGPUSupport, WebGPUMissing } from './use-webgpu';
 import { createWebGPURenderer } from './webgpu-renderer';
@@ -160,8 +160,10 @@ export interface IsoCanvasProps {
    * Content revision for the rendered signal (render-signal.tsx). Bump it whenever
    * anything that changes the picture changes; `ProcessEditor` does. When omitted,
    * IsoCanvas derives one from its own inputs (zoom, target, pose, style, grid,
-   * registry and `children` identity), so a re-render with new children counts
+   * registry contents, canvas dimensions and `children` identity), so a re-render with new children counts
    * as a new revision.
+   * A supplied revision covers content; readiness also waits for the current
+   * canvas dimensions and registry version, even if that revision stays fixed.
    */
   revision?: number;
   /** Holds the rendered signal (e.g. while the host has not fitted the view yet). */
@@ -195,6 +197,7 @@ export function IsoCanvas({
 }: IsoCanvasProps) {
   const contextRegistry = useIsoRegistry();
   const registry = registryProp ?? contextRegistry;
+  const registryVersion = useIsoRegistryVersion(registry);
   const home = useMemo(() => initialIsoPose(VIEW_DISTANCE), []);
   const [poseInternal, setPoseInternal] = useState<IsoPose>(home);
   const pose = poseProp ?? poseInternal;
@@ -205,15 +208,21 @@ export function IsoCanvas({
   const container = useRef<HTMLDivElement>(null);
   const [tracker] = useState(createRenderTracker);
   const targetKey = target.join(',');
-  const autoRevision = useRevision([zoom, targetKey, pose, children, holodeckStyle, showGrid, registry]);
-  const revision = revisionProp ?? autoRevision;
+  const [dimensions, setDimensions] = useState('');
+  // Even a host-supplied content revision needs a local identity for canvas
+  // size and live registry changes. With a controlled revision, children are
+  // covered by that revision (their JSX identity changes on host reports too).
+  const identity = useRevision([revisionProp ?? children, zoom, targetKey, pose, holodeckStyle, showGrid, registry, registryVersion, dimensions, holdRender]);
+  const revision = revisionProp ?? identity;
   const [renderedRevision, setRenderedRevision] = useState<number | null>(null);
+  const [renderedIdentity, setRenderedIdentity] = useState<number | null>(null);
   const onRenderedRef = useRef(onRendered);
   onRenderedRef.current = onRendered;
-  const reportRendered = useCallback((rev: number) => {
-    setRenderedRevision(rev);
-    onRenderedRef.current?.(rev);
-  }, []);
+  const reportRendered = useCallback((done: number) => {
+    setRenderedIdentity(done);
+    setRenderedRevision(revision);
+    onRenderedRef.current?.(revision);
+  }, [revision]);
   const { onPointerDown, panning } = useViewPan(container, {
     zoom,
     target,
@@ -231,7 +240,7 @@ export function IsoCanvas({
       data-panning={panning ? 'true' : 'false'}
       data-holodeck-revision={revision}
       data-holodeck-rendered={renderedRevision ?? ''}
-      data-render-state={webgpu === 'pending' ? 'pending' : renderState(revision, renderedRevision, webgpu === 'ready')}
+      data-render-state={webgpu === 'pending' ? 'pending' : renderState(identity, renderedIdentity, webgpu === 'ready')}
       style={{
         position: 'relative',
         width: '100%',
@@ -256,7 +265,7 @@ export function IsoCanvas({
         <color attach="background" args={['#ffffff']} />
         <OrthographicCamera makeDefault near={0.5} far={4000} position={[ox + target[0], oy + target[1], oz + target[2]]} zoom={zoom} />
         <RenderTrackerContext.Provider value={tracker}>
-        <RenderSignal revision={revision} hold={holdRender} onRendered={reportRendered} />
+        <RenderSignal revision={identity} hold={holdRender} dimensions={dimensions} onDimensions={setDimensions} onRendered={reportRendered} />
         <IsoRig pose={pose} zoom={zoom} target={target} />
         {/* Key from the camera-right so the leftmost tank segment is
             darkest, the right is a bit lighter, and the interior back
