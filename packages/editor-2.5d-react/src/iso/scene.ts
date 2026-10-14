@@ -15,6 +15,9 @@ import { GRID_CELL_SIZE, gridToWorld, worldToGrid } from './grid';
 import { getDefaultIsoRegistry } from '../registry/default';
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoPartDefinition } from '../registry/types';
+import { isRunPlacement } from '../registry/geometry';
+import { MAX_GRID_COORD } from '../routing/grid';
+import { footprintBounds, GeometryRangeError, NON_OBSTACLE_PARTS, rotatedFootprint } from '../routing/occupancy';
 
 export { GRID_CELL_SIZE, gridToWorld, worldToGrid };
 
@@ -67,7 +70,10 @@ export type SceneFile = IsoSceneFile;
 /** @deprecated use `IsoPlacement` */
 export type ScenePlacement = IsoPlacement;
 
-export function sceneBounds(objects: readonly IsoPlacement[]): {
+export function sceneBounds(
+  objects: readonly IsoPlacement[],
+  registry: ContributionRegistry = getDefaultIsoRegistry(),
+): {
   minX: number;
   minY: number;
   maxX: number;
@@ -82,13 +88,16 @@ export function sceneBounds(objects: readonly IsoPlacement[]): {
     minY = Math.min(minY, obj.y);
     maxX = Math.max(maxX, obj.x);
     maxY = Math.max(maxY, obj.y);
-    if (typeof obj.toX === 'number') {
-      minX = Math.min(minX, obj.toX);
-      maxX = Math.max(maxX, obj.toX);
-    }
-    if (typeof obj.toY === 'number') {
-      minY = Math.min(minY, obj.toY);
-      maxY = Math.max(maxY, obj.toY);
+    const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, obj.object);
+    if (isRunPlacement(obj, def)) {
+      if (typeof obj.toX === 'number') {
+        minX = Math.min(minX, obj.toX);
+        maxX = Math.max(maxX, obj.toX);
+      }
+      if (typeof obj.toY === 'number') {
+        minY = Math.min(minY, obj.toY);
+        maxY = Math.max(maxY, obj.toY);
+      }
     }
     if (typeof obj.width === 'number') {
       minX = Math.min(minX, obj.x - obj.width / 2);
@@ -124,6 +133,19 @@ function migrateLegacyPlacement(def: IsoPartDefinition, raw: Record<string, unkn
   return next as unknown as IsoPlacement;
 }
 
+/**
+ * Grid-space placement fields that must be finite and within +-MAX_GRID_COORD
+ * when present. JSON can't spell Infinity, but `1e400` parses to it, and an
+ * infinite coordinate hung the router's cell loops (holodeck#8).
+ */
+const OPTIONAL_GRID_FIELDS = ['toX', 'toY', 'width', 'height', 'size'] as const;
+/** Other numeric placement fields: only need to be finite when present. */
+const OPTIONAL_FINITE_FIELDS = ['rotation', 'nudgeX', 'nudgeY', 'screenX', 'screenY'] as const;
+
+function isGridNumber(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= MAX_GRID_COORD;
+}
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
@@ -137,6 +159,67 @@ export function parseSceneFile(
   raw: unknown,
   registry: ContributionRegistry = getDefaultIsoRegistry(),
 ): IsoSceneFile {
+  return validateSceneFile(raw, registry);
+}
+
+/** Strict registry validation belongs at import and when introducing a part. */
+export function validatePlacementPart(placement: IsoPlacement, registry: ContributionRegistry): IsoPartDefinition {
+  const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, placement.object);
+  if (!def) {
+    throw new Error(`unknown library object "${placement.object}" on ${placement.id}`);
+  }
+  return def;
+}
+
+/**
+ * Validate one placement without enumerating cells. Missing parts use the
+ * same 1x1 footprint as routing so uninstalling a pack still permits cleanup.
+ * Registry membership is checked separately by validatePlacementPart.
+ */
+export function validatePlacementGeometry(raw: unknown, registry: ContributionRegistry): IsoPlacement {
+  if (!isRecord(raw)) {
+    throw new Error('scene.objects entries must be records');
+  }
+  if (typeof raw.id !== 'string' || typeof raw.object !== 'string') {
+    throw new Error(`placement missing id/object: ${JSON.stringify(raw)}`);
+  }
+  if (typeof raw.x !== 'number' || typeof raw.y !== 'number' || Number.isNaN(raw.x) || Number.isNaN(raw.y)) {
+    throw new Error(`placement ${raw.id} missing numeric x,y`);
+  }
+  for (const field of ['x', 'y', ...OPTIONAL_GRID_FIELDS] as const) {
+    const v = raw[field];
+    if ((field === 'x' || field === 'y' || v !== undefined) && !isGridNumber(v)) {
+      throw new Error(`placement ${raw.id}: ${field} must be a finite number within +-${MAX_GRID_COORD}, got ${String(v)}`);
+    }
+  }
+  for (const field of OPTIONAL_FINITE_FIELDS) {
+    const v = raw[field];
+    if (v !== undefined && (typeof v !== 'number' || !Number.isFinite(v))) {
+      throw new Error(`placement ${raw.id}: ${field} must be a finite number, got ${String(v)}`);
+    }
+  }
+  for (const bag of ['params', 'animation', 'extensions'] as const) {
+    if (raw[bag] !== undefined && !isRecord(raw[bag])) {
+      throw new Error(`placement ${raw.id}: ${bag} must be an object`);
+    }
+  }
+  const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, raw.object);
+  const placement = def ? migrateLegacyPlacement(def, raw) : raw as unknown as IsoPlacement;
+  const isRun = isRunPlacement(placement, def);
+  if (!NON_OBSTACLE_PARTS.has(placement.object) && !isRun) {
+    try {
+      const { w, h } = rotatedFootprint(def, placement.rotation, placement);
+      footprintBounds(placement.x, placement.y, w, h);
+    } catch (err) {
+      if (!(err instanceof GeometryRangeError)) throw err;
+      throw new Error(`placement ${placement.id}: ${err.message}`);
+    }
+  }
+  return placement;
+}
+
+/** Full structural/geometry validation for commits, without requiring installed parts. */
+export function validateSceneGeometry(raw: unknown, registry: ContributionRegistry): IsoSceneFile {
   if (!isRecord(raw)) {
     throw new Error('scene must be an object');
   }
@@ -150,32 +233,30 @@ export function parseSceneFile(
   if (file.extensions !== undefined && !isRecord(file.extensions)) {
     throw new Error('scene.extensions must be an object');
   }
-  const objects: IsoPlacement[] = [];
-  for (const obj of file.objects) {
-    if (!isRecord(obj)) {
-      throw new Error('scene.objects entries must be records');
-    }
-    if (typeof obj.id !== 'string' || typeof obj.object !== 'string') {
-      throw new Error(`placement missing id/object: ${JSON.stringify(obj)}`);
-    }
-    if (typeof obj.x !== 'number' || typeof obj.y !== 'number' || Number.isNaN(obj.x) || Number.isNaN(obj.y)) {
-      throw new Error(`placement ${obj.id} missing numeric x,y`);
-    }
-    const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, obj.object);
-    if (!def) {
-      throw new Error(`unknown library object "${obj.object}" on ${obj.id}`);
-    }
-    for (const bag of ['params', 'animation', 'extensions'] as const) {
-      if (obj[bag] !== undefined && !isRecord(obj[bag])) {
-        throw new Error(`placement ${obj.id}: ${bag} must be an object`);
-      }
-    }
-    objects.push(migrateLegacyPlacement(def, obj));
+  if (
+    file.gridCellSize !== undefined &&
+    (typeof file.gridCellSize !== 'number' || !Number.isFinite(file.gridCellSize) || file.gridCellSize <= 0)
+  ) {
+    throw new Error(`scene.gridCellSize must be a finite number > 0, got ${String(file.gridCellSize)}`);
   }
-  const ids = objects.map((o) => o.id);
-  const dup = ids.filter((id, i) => ids.indexOf(id) !== i);
-  if (dup.length) {
-    throw new Error(`duplicate placement ids: ${dup.join(', ')}`);
+  const objects: IsoPlacement[] = [];
+  const ids = new Set<string>();
+  const duplicates: string[] = [];
+  for (const obj of file.objects) {
+    const placement = validatePlacementGeometry(obj, registry);
+    if (ids.has(placement.id)) duplicates.push(placement.id);
+    ids.add(placement.id);
+    objects.push(placement);
+  }
+  if (duplicates.length) {
+    throw new Error(`duplicate placement ids: ${duplicates.join(', ')}`);
   }
   return { ...file, objects };
+}
+
+/** Import validation: all geometry must be safe and every part must be installed. */
+export function validateSceneFile(raw: unknown, registry: ContributionRegistry): IsoSceneFile {
+  const file = validateSceneGeometry(raw, registry);
+  for (const placement of file.objects) validatePlacementPart(placement, registry);
+  return file;
 }

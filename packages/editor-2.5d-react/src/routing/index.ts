@@ -1,6 +1,16 @@
 export { routePipe, defaultMinBendSpacing } from './astar';
 export type { RouteEnd, RouteOptions, RoutePath } from './astar';
-export { buildOccupancy, footprintCells, rotatedFootprint, runCells, NON_OBSTACLE_PARTS } from './occupancy';
+export {
+  buildOccupancy,
+  footprintCells,
+  footprintContains,
+  rotatedFootprint,
+  runCells,
+  GeometryRangeError,
+  MAX_FOOTPRINT_CELLS,
+  NON_OBSTACLE_PARTS,
+} from './occupancy';
+export { MAX_GRID_COORD } from './grid';
 export type { Occupancy, OccupancyOptions, Bounds } from './occupancy';
 export { resolveRouteEnd } from './ports';
 export type { ResolvedRouteEnd } from './ports';
