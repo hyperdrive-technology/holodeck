@@ -126,6 +126,31 @@ export function chainFrom(pipes: readonly PipeSeg[], start: GridPoint): PipeSeg[
   }
 }
 
+/** Split an oriented chain at fixed hosted parts, retaining original IDs for attachment lookup. */
+export function splitChainAtParts(chain: readonly PipeSeg[], fixed: readonly IsoPlacement[]): PipeSeg[][] {
+  const sections: PipeSeg[][] = [];
+  let section: PipeSeg[] = [];
+  for (const seg of chain) {
+    const cuts = fixed
+      .filter((part) => part.onPipe === seg.id)
+      .map((part) => ({ part, at: positionOnPipe(seg, part.x, part.y) }))
+      .filter((cut): cut is { part: IsoPlacement; at: number } => cut.at !== null)
+      .sort((a, b) => a.at - b.at);
+    let from = seg.from;
+    for (const { part } of cuts) {
+      const to = { x: part.x, y: part.y };
+      if (from.x === to.x && from.y === to.y) continue;
+      section.push({ ...seg, from, to });
+      sections.push(section);
+      section = [];
+      from = to;
+    }
+    section.push({ ...seg, from, to: seg.to });
+  }
+  if (section.length > 0) sections.push(section);
+  return sections;
+}
+
 /** Fraction (0..1) of the chain's total length at `t` along chain[index]. */
 function fractionAlong(chain: readonly PipeSeg[], index: number, t: number): number {
   const total = chain.reduce((n, s) => n + segLength(s), 0);
@@ -151,14 +176,20 @@ interface ClearSpan {
   hi: number;
 }
 
+/** Along-route body lengths of retained parts centred at the two route ends. */
+export interface EndpointBodies {
+  start?: number;
+  end?: number;
+}
+
 /** Legal centre positions by distance from the route start, excluding bends and body overhang. */
-function clearSpans(route: readonly PipeSeg[]): ClearSpan[] {
+function clearSpans(route: readonly PipeSeg[], endpoints: EndpointBodies = {}): ClearSpan[] {
   let offset = 0;
   const spans: ClearSpan[] = [];
   route.forEach((seg, i) => {
     const len = segLength(seg);
-    const lo = offset + PART_END_CLEARANCE + (i === 0 ? 0 : ELBOW_RADIUS);
-    const hi = offset + len - PART_END_CLEARANCE - (i === route.length - 1 ? 0 : ELBOW_RADIUS);
+    const lo = offset + PART_END_CLEARANCE + (i === 0 ? (endpoints.start ?? 0) / 2 : ELBOW_RADIUS);
+    const hi = offset + len - PART_END_CLEARANCE - (i === route.length - 1 ? (endpoints.end ?? 0) / 2 : ELBOW_RADIUS);
     if (lo <= hi + CLEARANCE_EPS) spans.push({ seg, offset, lo: Math.min(lo, hi), hi });
     offset += len;
   });
@@ -202,6 +233,7 @@ export function carryHostedParts(
   hosted: readonly IsoPlacement[],
   oldChain: readonly PipeSeg[],
   newRoute: readonly PipeSeg[],
+  endpoints: EndpointBodies = {},
 ): IsoPlacement[] | null {
   if (hosted.length === 0) return [];
   const ordered: Array<{ part: IsoPlacement; old: PipeSeg; fraction: number; index: number }> = [];
@@ -214,7 +246,7 @@ export function carryHostedParts(
   }
   ordered.sort((a, b) => a.fraction - b.fraction || a.index - b.index);
   const total = newRoute.reduce((n, s) => n + segLength(s), 0);
-  const spans = clearSpans(newRoute);
+  const spans = clearSpans(newRoute, endpoints);
   const latest: number[] = [];
   let ceiling = total;
   for (let i = ordered.length - 1; i >= 0; i -= 1) {

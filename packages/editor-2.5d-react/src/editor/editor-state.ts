@@ -4,7 +4,8 @@ import { getDefaultIsoRegistry } from '../registry/default';
 import type { IsoPartDefinition } from '../registry/types';
 import type { Heading } from '../routing/grid';
 import { resolveRouteEnd } from '../routing/ports';
-import { carryHostedParts, chainFrom, detachFrom, hostPipeOf, isPipePlacement, segOf, withAttachment } from '../routing/inline';
+import { carryHostedParts, chainFrom, detachFrom, hostPipeOf, INLINE_PART_LENGTH, isPipePlacement, positionOnPipe, segOf, splitChainAtParts, withAttachment } from '../routing/inline';
+import { headingOf, pipeArmsAt } from '../routing/elbows';
 import { findRun, isInlinePart } from '../routing/run';
 import { routeToPlacements, type GridPoint } from './routing';
 import { sameCell } from './snap';
@@ -18,6 +19,8 @@ export const NO_ROUTE_NOTICE = 'No clear route — drew a straight L';
 
 /** Rerouting is atomic when the carried parts cannot fit on the new run. */
 export const INLINE_PARTS_NO_ROUTE_NOTICE = 'No clear route — inline parts do not fit';
+
+export const RETAINED_CONNECTIONS_NO_ROUTE_NOTICE = 'No clear route — retained connections cannot be preserved';
 
 /** `run` = view only; `edit` = place / drag / delete. Set by the host via `ProcessEditor`'s `mode`. */
 export type EditorHostMode = 'run' | 'edit';
@@ -249,33 +252,71 @@ function rerouteSelected(state: EditorState): EditorState {
     return state; // closed loop: nothing sensible to route between
   }
   const ids = new Set(run.ids);
-  // Inline parts drawn on the run's pipes (holodeck#22) ride along: they are
-  // taken out of the obstacles so they do not block the new route, then
-  // re-seated near the same fraction, with room for every carried body.
+  // Inline parts drawn on the run's pipes (holodeck#22) ride along unless a
+  // retained pipe pins them in place. Movable parts are excluded as obstacles
+  // and re-seated near the same fraction, with room for every carried body.
   const runPipes = state.scene.objects.filter((o) => ids.has(o.id) && isPipePlacement(o));
   const hosted = state.scene.objects.filter((o) => {
     const host = hostPipeOf(o, state.scene.objects);
     return host !== null && ids.has(host.id) && !ids.has(o.id);
   });
-  const hostedIds = new Set(hosted.map((o) => o.id));
-  const rest = state.scene.objects.filter((o) => !ids.has(o.id) && !hostedIds.has(o.id));
-  const without = { objects: rest };
-  const from = resolveRouteEnd(without, state.registry, run.start);
-  const to = resolveRouteEnd(without, state.registry, run.end);
-  from.heading ??= run.startHeading;
-  to.heading ??= run.endHeading;
+  const retainedPipes = state.scene.objects.filter((o) => !ids.has(o.id) && isPipePlacement(o));
+  // An onPipe attachment does not imply that this is the part's only
+  // connection. Retained branches (including a second pipe passing through
+  // the part) pin it in place; split the old chain there before routing.
+  const fixed = hosted.filter((part) => pipeArmsAt(retainedPipes, part).length > 0
+    || retainedPipes.some((pipe) => positionOnPipe(segOf(pipe), part.x, part.y) !== null));
+  const fixedIds = new Set(fixed.map((o) => o.id));
+  const movable = hosted.filter((o) => !fixedIds.has(o.id));
+  const movableIds = new Set(movable.map((o) => o.id));
+  const rest = state.scene.objects.filter((o) => !ids.has(o.id) && !movableIds.has(o.id)).map((o) => {
+    if (!fixedIds.has(o.id)) return o;
+    // The fixed part becomes a joint between new pipes, rather than being
+    // hosted strictly inside one. Do not leave an attachment to the old ID.
+    const { onPipe: _onPipe, at: _at, ...joint } = o;
+    return joint;
+  });
+  const sections = splitChainAtParts(chainFrom(runPipes.map(segOf), run.start), fixed);
   const band = state.scene.objects.find((o) => o.id === run.ids[0])?.band;
   // Obstacle exclusion must not release IDs belonging to carried parts.
   const reservedObjects = state.scene.objects.filter((o) => !ids.has(o.id));
-  const { placements, noRoute } = routeToPlacements(without, state.registry, from, to, nextId, { band, reservedObjects });
-  const carried = carryHostedParts(
-    hosted,
-    chainFrom(runPipes.map(segOf), run.start),
-    placements.filter(isPipePlacement).map(segOf),
-  );
-  if (carried === null) {
-    return { ...state, notice: INLINE_PARTS_NO_ROUTE_NOTICE };
+  const placements: IsoPlacement[] = [];
+  const carried: IsoPlacement[] = [];
+  let noRoute = false;
+  for (const [i, section] of sections.entries()) {
+    const first = section[0]!;
+    const last = section[section.length - 1]!;
+    const without = { objects: [...rest, ...placements] };
+    const from = i === 0 ? resolveRouteEnd(without, state.registry, run.start) : {
+      cell: first.from,
+      heading: headingOf(first.to.x - first.from.x, first.to.y - first.from.y) ?? undefined,
+    };
+    const to = i === sections.length - 1 ? resolveRouteEnd(without, state.registry, run.end) : {
+      cell: last.to,
+      heading: headingOf(last.from.x - last.to.x, last.from.y - last.to.y) ?? undefined,
+    };
+    if (i === 0) from.heading ??= run.startHeading;
+    if (i === sections.length - 1) to.heading ??= run.endHeading;
+    const route = routeToPlacements(without, state.registry, from, to, nextId, {
+      band, reservedObjects: [...reservedObjects, ...placements],
+    });
+    // A fallback L can violate a fixed joint's heading. Keep the entire
+    // scene and history when any section cannot preserve its connections.
+    if (route.noRoute && fixed.length > 0) return { ...state, notice: RETAINED_CONNECTIONS_NO_ROUTE_NOTICE };
+    const endpointLength = (cell: GridPoint) => rest.some((o) => sameCell(o, cell) && isInlinePart(o, state.registry))
+      ? INLINE_PART_LENGTH : 0;
+    const parts = carryHostedParts(
+      movable.filter((part) => section.some((seg) => seg.id === part.onPipe && positionOnPipe(seg, part.x, part.y) !== null)),
+      section,
+      route.placements.filter(isPipePlacement).map(segOf),
+      { start: endpointLength(from.cell), end: endpointLength(to.cell) },
+    );
+    if (parts === null) return { ...state, notice: INLINE_PARTS_NO_ROUTE_NOTICE };
+    placements.push(...route.placements);
+    carried.push(...parts);
+    noRoute ||= route.noRoute;
   }
+  if (carried.length !== movable.length) return { ...state, notice: INLINE_PARTS_NO_ROUTE_NOTICE };
   return commit(
     state,
     { ...state.scene, objects: [...rest, ...placements, ...carried] },

@@ -3,10 +3,10 @@ import { HOLODECK_KINDS } from '@holodeck/sdk';
 import { createIsoRegistryWithBuiltins, getDefaultIsoRegistry } from '../registry/default';
 import { parseSceneFile, type IsoPlacement } from '../iso/scene';
 import { PROCESS_SCENE } from '../iso/load-process-scene';
-import { positionOnPipe, segOf } from '../routing/inline';
+import { INLINE_PART_LENGTH, positionOnPipe, segOf } from '../routing/inline';
 import { pipeArmsAt } from '../routing/elbows';
 import type { Heading } from '../routing/grid';
-import { INLINE_PARTS_NO_ROUTE_NOTICE, NO_ROUTE_NOTICE, committedScene, createEditorState, editorReducer, emptyScene, nextId, stamp } from './editor-state';
+import { INLINE_PARTS_NO_ROUTE_NOTICE, NO_ROUTE_NOTICE, RETAINED_CONNECTIONS_NO_ROUTE_NOTICE, committedScene, createEditorState, editorReducer, emptyScene, nextId, stamp } from './editor-state';
 
 const registry = getDefaultIsoRegistry();
 
@@ -544,6 +544,113 @@ describe('auto-routed pipes', () => {
         // Still on the route's first straight, i.e. near the start like before.
         expect(Math.hypot(valve.x, valve.y)).toBeLessThan(5);
         expect(editorReducer(r, { type: 'undo' }).scene.objects).toEqual(before);
+      });
+
+      it.each(['start', 'end', 'interior'])('keeps a hosted valve connected to a retained branch at its %s', (connection) => {
+        let s = place(drawPipe(blank(), [0, 0], [10, 0]), 'valve', 2, 0);
+        const branch: IsoPlacement = { id: 'branch', object: 'pipe', x: 2, y: 0, toX: 2, toY: 5 };
+        if (connection === 'end') Object.assign(branch, { y: 5, toY: 0 });
+        if (connection === 'interior') branch.y = -5;
+        s = withTankAcross({ ...s, selectedId: 'pipe-1', mode: 'select', scene: {
+          ...s.scene, objects: [...s.scene.objects, branch],
+        } });
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBeNull();
+        expect(r.past).toHaveLength(s.past.length + 1);
+        const valve = r.scene.objects.find((o) => o.id === 'valve-1')!;
+        const retained = r.scene.objects.find((o) => o.id === 'branch')!;
+        expect(retained).toEqual(branch);
+        // Assert actual pipe connectivity: the branch touches/passes through
+        // the valve and the new main run meets both original flange sides.
+        if (connection === 'interior') expect(positionOnPipe(segOf(retained), valve.x, valve.y)).not.toBeNull();
+        else expect(pipeArmsAt([retained], valve)).toHaveLength(1);
+        expect(pipeArmsAt(r.scene.objects.filter((o) => o.id !== 'branch'), valve).map((arm) => arm.heading).sort())
+          .toEqual(['e', 'w']);
+        expect(pipeArmsAt(r.scene.objects, { x: 0, y: 0 })).toHaveLength(1);
+        expect(pipeArmsAt(r.scene.objects, { x: 10, y: 0 })).toHaveLength(1);
+        expect(valve).not.toHaveProperty('onPipe');
+        expect(new Set(r.scene.objects.map((o) => o.id)).size).toBe(r.scene.objects.length);
+        expect(editorReducer(r, { type: 'undo' }).scene).toEqual(s.scene);
+        expect(editorReducer(editorReducer(r, { type: 'undo' }), { type: 'redo' }).scene).toEqual(r.scene);
+      });
+
+      const endpointRun = (end = 6, positions = [1]): ReturnType<typeof blank> => createEditorState({
+        ...emptyScene('endpoint-clearance'), objects: [
+          { id: 'a', object: 'pipe', x: 0, y: 0, toX: 2, toY: 0 },
+          { id: 'b', object: 'pipe', x: 2, y: 0, toX: 2, toY: 10 },
+          { id: 'c', object: 'pipe', x: 2, y: 10, toX: 4, toY: 10 },
+          { id: 'd', object: 'pipe', x: 4, y: 10, toX: 4, toY: 0 },
+          { id: 'e', object: 'pipe', x: 4, y: 0, toX: end, toY: 0 },
+          stamp(registry, 'valve', 0, 0, 'start'),
+          stamp(registry, 'valve', end, 0, 'end'),
+          ...positions.map((x, i) => ({ id: `hosted-${i}`, object: 'valve', x, y: 0, onPipe: 'a', at: x / 2 })),
+        ],
+      });
+
+      it('carries movable valves on either side of multiple fixed branch valves', () => {
+        const objects: IsoPlacement[] = [
+          { id: 'main', object: 'pipe', x: 0, y: 0, toX: 10, toY: 0 },
+          ...[1, 2, 8, 9].map((x) => ({ id: `v${x}`, object: 'valve', x, y: 0, onPipe: 'main', at: x / 10 })),
+          ...[2, 8].map((x) => ({ id: `branch${x}`, object: 'pipe', x, y: 0, toX: x, toY: 5 })),
+          stamp(registry, 'tank', 5, 0, 'tank'),
+        ];
+        const s = editorReducer(createEditorState({ ...emptyScene(), objects }), { type: 'select', id: 'main' });
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBeNull();
+        for (const x of [2, 8]) {
+          const valve = r.scene.objects.find((o) => o.id === `v${x}`)!;
+          expect(pipeArmsAt(r.scene.objects, valve).map((arm) => arm.heading).sort()).toEqual(['e', 's', 'w']);
+        }
+        for (const x of [1, 9]) onRoute(r.scene.objects, r.scene.objects.find((o) => o.id === `v${x}`)!);
+        expect(editorReducer(r, { type: 'undo' }).scene).toEqual(s.scene);
+      });
+
+      it('fails atomically when a fixed branch valve cannot be reached', () => {
+        const objects: IsoPlacement[] = [
+          { id: 'main', object: 'pipe', x: 0, y: 0, toX: 10, toY: 0 },
+          { id: 'valve', object: 'valve', x: 2, y: 0, onPipe: 'main', at: 0.2 },
+          { id: 'branch', object: 'pipe', x: 2, y: 0, toX: 2, toY: 5 },
+          stamp(registry, 'tank', 2, 0, 'tank'),
+        ];
+        const s = editorReducer(createEditorState({ ...emptyScene(), objects }), { type: 'select', id: 'main' });
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBe(RETAINED_CONNECTIONS_NO_ROUTE_NOTICE);
+        expect(r.scene).toBe(s.scene);
+        expect(r.past).toBe(s.past);
+        expect(r.future).toBe(s.future);
+        expect(r.revision).toBe(s.revision);
+      });
+
+      it.each([false, true])('reserves endpoint valve bodies when shortening the run (reversed: %s)', (reversed) => {
+        let s = endpointRun();
+        if (reversed) s.scene.objects = s.scene.objects.map((o) => o.object === 'pipe'
+          ? { ...o, x: o.toX!, y: o.toY!, toX: o.x, toY: o.y } : o);
+        s = editorReducer(s, { type: 'select', id: 'a' });
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBeNull();
+        expect(r.scene.objects.filter((o) => o.object === 'pipe')).toHaveLength(1);
+        const hosted = r.scene.objects.find((o) => o.id === 'hosted-0')!;
+        onRoute(r.scene.objects, hosted);
+        for (const id of ['start', 'end']) {
+          const endpoint = r.scene.objects.find((o) => o.id === id)!;
+          expect(endpoint).toEqual(s.scene.objects.find((o) => o.id === id));
+          expect(Math.hypot(hosted.x - endpoint.x, hosted.y - endpoint.y))
+            .toBeGreaterThanOrEqual(INLINE_PART_LENGTH - 1e-9);
+          expect(pipeArmsAt(r.scene.objects, endpoint)).toHaveLength(1);
+        }
+      });
+
+      it('fails atomically when carried parts cannot fit between retained endpoint bodies', () => {
+        // Eight carried bodies fit with bare endpoint reserves, but not with
+        // the additional half-body of each retained valve on the 6-unit run.
+        const s = editorReducer(endpointRun(6, Array.from({ length: 8 }, (_, i) => (i + 1) / 5)), { type: 'select', id: 'a' });
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBe(INLINE_PARTS_NO_ROUTE_NOTICE);
+        expect(r.scene).toBe(s.scene);
+        expect(r.past).toBe(s.past);
+        expect(r.future).toBe(s.future);
+        expect(r.revision).toBe(s.revision);
+        expect(committedScene(s, r)).toBeNull();
       });
 
       it('the valve does not block its own route', () => {

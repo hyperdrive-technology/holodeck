@@ -12,6 +12,7 @@ import {
   placeOnRoute,
   positionOnPipe,
   segOf,
+  splitChainAtParts,
   withAttachment,
   type PipeSeg,
 } from './inline';
@@ -98,6 +99,23 @@ describe('chainFrom', () => {
   });
   it('is empty when nothing touches the start', () => {
     expect(chainFrom([seg('a', 0, 0, 3, 0)], { x: 9, y: 9 })).toEqual([]);
+  });
+});
+
+describe('splitChainAtParts', () => {
+  it('splits multiple fixed boundaries in travel order, including reversed pipes', () => {
+    const chain = chainFrom([seg('a', 6, 0, 0, 0), seg('b', 6, 0, 6, 8)], { x: 0, y: 0 });
+    const sections = splitChainAtParts(chain, [
+      valve('later', 4, 0, { onPipe: 'a' }),
+      valve('first', 2, 0, { onPipe: 'a' }),
+      valve('last', 6, 3, { onPipe: 'b' }),
+    ]);
+    expect(sections).toEqual([
+      [seg('a', 0, 0, 2, 0)],
+      [seg('a', 2, 0, 4, 0)],
+      [seg('a', 4, 0, 6, 0), seg('b', 6, 0, 6, 3)],
+      [seg('b', 6, 3, 6, 8)],
+    ]);
   });
 });
 
@@ -230,5 +248,22 @@ describe('carryHostedParts', () => {
 
   it('handles no carried parts', () => {
     expect(carryHostedParts([], [], [])).toEqual([]);
+  });
+
+  it('reserves both retained endpoint bodies when allocating a cluster', () => {
+    const parts = [0.2, 0.4, 9.8].map((x, i) => valve(`v${i}`, x, 0, { onPipe: 'old' }));
+    const moved = carryHostedParts(parts, old, [seg('new', 0, 0, 3, 0)], { start: 0.6, end: 0.6 })!;
+    expect(moved[0]!.x).toBeCloseTo(0.7);
+    expect(moved[2]!.x).toBeCloseTo(2.3);
+    for (let i = 1; i < moved.length; i += 1) {
+      expect(moved[i]!.x - moved[i - 1]!.x).toBeGreaterThanOrEqual(INLINE_PART_LENGTH + INLINE_PART_MARGIN - 1e-9);
+    }
+  });
+
+  it('accepts an exact fit between endpoint bodies and rejects a shorter route', () => {
+    const parts = [valve('v', 1, 0, { onPipe: 'old' })];
+    const bodies = { start: 0.6, end: 0.6 };
+    expect(carryHostedParts(parts, old, [seg('new', 0, 0, 1.4, 0)], bodies)![0]!.x).toBeCloseTo(0.7);
+    expect(carryHostedParts(parts, old, [seg('new', 0, 0, 1.39, 0)], bodies)).toBeNull();
   });
 });
