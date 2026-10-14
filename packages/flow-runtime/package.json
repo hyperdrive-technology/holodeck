@@ -1,0 +1,68 @@
+{
+  "name": "@holodeck/flow-runtime",
+  "version": "0.1.0",
+  "description": "Flow block contract, cyclic dataflow runtime and the holodeck.flow.local provider for Holodeck flow documents",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./holodeck-package": {
+      "types": "./dist/holodeck-package.d.ts",
+      "import": "./dist/holodeck-package.mjs",
+      "require": "./dist/holodeck-package.js"
+    },
+    "./holodeck.package.json": "./holodeck.package.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**/*",
+    "src/**/*",
+    "holodeck.package.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "type-check": "tsc --noEmit",
+    "test": "vitest",
+    "prepublishOnly": "npm run build",
+    "smoke": "node ../../scripts/smoke-dist.mjs . && node --no-deprecation scripts/smoke-holodeck-package.mjs"
+  },
+  "keywords": [
+    "holodeck",
+    "flow",
+    "dataflow",
+    "function-blocks",
+    "runtime",
+    "provider"
+  ],
+  "author": "Hyperdrive Technology",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hyperdrive-technology/holodeck.git",
+    "directory": "packages/flow-runtime"
+  },
+  "homepage": "https://github.com/hyperdrive-technology/holodeck/tree/main/packages/flow-runtime#readme",
+  "dependencies": {
+    "@holodeck/sdk": "file:../../../holodeck-sdk/ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

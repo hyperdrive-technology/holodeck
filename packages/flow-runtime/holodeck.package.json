@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "holodeck.package.v1",
+  "id": "holodeck.flow-runtime",
+  "name": "Holodeck flow runtime",
+  "description": "Built-in structural flow blocks (flow.const, flow.delay, signal.in, signal.out) and the holodeck.flow.local provider, which deploys flow documents and runs them as cyclic dataflow.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "contributes": ["holodeck.flow.block", "holodeck.provider"],
+  "engines": { "holodeck.flow": "^1.0" },
+  "providers": ["holodeck.flow.local"],
+  "entry": "dist/holodeck-package.mjs",
+  "homepage": "https://github.com/hyperdrive-technology/holodeck/tree/main/packages/flow-runtime#readme",
+  "repository": "github:hyperdrive-technology/holodeck",
+  "keywords": ["flow", "dataflow", "runtime", "provider", "deploy"]
+}
