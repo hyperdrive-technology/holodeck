@@ -3,7 +3,7 @@ import { HOLODECK_KINDS } from '@holodeck/sdk';
 import { createIsoRegistryWithBuiltins, getDefaultIsoRegistry } from '../registry/default';
 import { pipeArmsAt } from '../routing/elbows';
 import type { Heading } from '../routing/grid';
-import { NO_ROUTE_NOTICE, committedScene, createEditorState, editorReducer, emptyScene, nextId, stamp } from './editor-state';
+import { NO_ROUTE_NOTICE, REROUTE_FAILED_NOTICE, committedScene, createEditorState, editorReducer, emptyScene, nextId, stamp } from './editor-state';
 
 const registry = getDefaultIsoRegistry();
 
@@ -146,7 +146,8 @@ describe('editorReducer', () => {
     expect(s.mode).toBe('draw-pipe');
     s = editorReducer(blank(), { type: 'place-mode', object: 'nope' });
     s = editorReducer(s, { type: 'floor-click', x: 0, y: 0 });
-    expect(s.scene.objects[0]).toMatchObject({ object: 'nope', id: 'nope-1' });
+    expect(s.scene.objects).toHaveLength(0);
+    expect(s.notice).toMatch(/Edit rejected: unknown library object/);
   });
 });
 
@@ -315,6 +316,16 @@ describe('auto-routed pipes', () => {
     expect(drawPipe(blank(), [0, 0], [4, 3]).notice).toBeNull();
   });
 
+  it('rejects a route commit when an existing obstacle has invalid geometry', () => {
+    const base = createEditorState({
+      ...emptyScene('doc'), objects: [{ id: 'bad', object: 'tank', x: Infinity, y: 0 }],
+    }, { registry });
+    const s = drawPipe(base, [0, 0], [4, 3]);
+    expect(s.notice).toMatch(/Edit rejected:/);
+    expect(s.scene).toBe(base.scene);
+    expect(s.past).toHaveLength(0);
+  });
+
   describe('reroute-selected', () => {
     it('replaces the selected run with a route around a new obstacle; undo restores it', () => {
       let s = drawPipe(blank(), [0, 0], [10, 0]);
@@ -440,7 +451,7 @@ describe('auto-routed pipes', () => {
       });
     });
 
-    it('flags the fallback when no route exists', () => {
+    it('keeps the original run and history when no clear route exists', () => {
       const wall = [-1, 0, 1]
         .flatMap((dx) => [-1, 0, 1].map((dy) => stamp(registry, 'valve', 20 + dx, dy, `v${dx}${dy}`)))
         .filter((o) => !(o.x === 20 && o.y === 0));
@@ -448,7 +459,11 @@ describe('auto-routed pipes', () => {
       s = { ...s, scene: { ...s.scene, objects: [...wall, { id: 'pipe-1', object: 'pipe', x: 20, y: 0, toX: 24, toY: 3 }] } };
       s = editorReducer(s, { type: 'select', id: 'pipe-1' });
       const r = editorReducer(s, { type: 'reroute-selected' });
-      expect(r.notice).toBe(NO_ROUTE_NOTICE);
+      expect(r.notice).toBe(REROUTE_FAILED_NOTICE);
+      expect(r.scene).toBe(s.scene);
+      expect(r.past).toBe(s.past);
+      expect(r.future).toBe(s.future);
+      expect(r.revision).toBe(s.revision);
     });
   });
 });
@@ -518,14 +533,16 @@ describe('resize handles (radius / height params)', () => {
     expect(s.past).toHaveLength(1); // only the stamp
   });
 
-  it('ignores handles on parts without `resize`, unknown ids, NaN values and run mode', () => {
+  it('ignores unavailable handles and run mode, and reports non-finite resize values', () => {
     let s = editorReducer(blank(), { type: 'place-mode', object: 'tank' });
     s = editorReducer(s, { type: 'floor-click', x: 0, y: 0 });
     expect(editorReducer(s, { type: 'resize-start', id: 'tank-1', handle: 'radius' }).resize).toBeNull();
     let v = withVessel();
     expect(editorReducer(v, { type: 'resize-start', id: 'nope', handle: 'radius' }).resize).toBeNull();
     v = editorReducer(v, { type: 'resize-start', id: 'test:vessel-1', handle: 'radius' });
-    expect(editorReducer(v, { type: 'resize-move', value: Number.NaN })).toBe(v);
+    const invalid = editorReducer(v, { type: 'resize-move', value: Number.NaN });
+    expect(invalid.scene).toBe(v.scene);
+    expect(invalid.notice).toBe('Edit rejected: resize value must be finite');
     v = editorReducer(v, { type: 'set-read-only', readOnly: true });
     expect(v.resize).toBeNull();
     expect(editorReducer(v, { type: 'resize-start', id: 'test:vessel-1', handle: 'radius' }).resize).toBeNull();

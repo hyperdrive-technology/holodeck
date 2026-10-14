@@ -35,9 +35,15 @@ describe('buildOccupancy', () => {
       },
     };
     const custom = { get: (_k: string, id: string) => (id === 'sized' ? def : reg.get('holodeck.iso.part', id)) } as typeof reg;
-    const occ = buildOccupancy({ objects: [{ id: 's', object: 'sized', x: 0, y: 0, params: { radius: 2 } }] }, custom);
-    expect(occ.isBlocked(2, 2)).toBe(true);
-    expect(occ.isBlocked(3, 0)).toBe(false);
+    for (const endpoints of [{}, { toX: 8, toY: 0 }]) {
+      const occ = buildOccupancy({ objects: [{ id: 's', object: 'sized', x: 0, y: 0, params: { radius: 2 }, ...endpoints }] }, custom);
+      expect(occ.skipped).toEqual([]);
+      expect(occ.isBlocked(2, 2)).toBe(true);
+      expect(occ.isBlocked(3, 0)).toBe(false);
+      expect(occ.isBlocked(8, 0)).toBe(false);
+      expect(occ.isNearVessel(3, 0)).toBe(true);
+      expect(occ.blocked.size).toBe(25);
+    }
   });
 
   it('swaps w and h for 90 and 270 degree rotations', () => {

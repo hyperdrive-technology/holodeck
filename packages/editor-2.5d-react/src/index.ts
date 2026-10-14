@@ -101,7 +101,7 @@ export type { EditorHostMode, EditorMode, EditorState } from './editor/editor-st
 export { BUILTIN_MODEL_URLS, modelUrl } from '../assets/models';
 
 // Obstacle-avoiding pipe routing (pure; see docs/routing.md).
-export { buildOccupancy, resolveRouteEnd, routePipe } from './routing';
+export { buildOccupancy, GeometryRangeError, MAX_GRID_COORD, resolveRouteEnd, routePipe } from './routing';
 export type { Occupancy, OccupancyOptions, ResolvedRouteEnd, RouteEnd, RouteOptions, RoutePath } from './routing';
 // Elbow orientation (`params.bend: "auto"`) and vessel-window pipe clipping.
 export {
@@ -137,3 +137,7 @@ export type {
   WindowConnection,
 } from './routing';
 export type { GridPoint, Heading } from './routing';
+
+// Engine contract (@holodeck/sdk docs/PACKAGING.md): descriptor, document envelope, live values, package entry.
+export * from './engine';
+export { ISO_PACKAGE_MANIFEST, createIsoPackageExtension, isoPackage } from './holodeck-package';

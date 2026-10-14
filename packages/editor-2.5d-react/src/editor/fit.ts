@@ -5,6 +5,7 @@ import type { IsoPose } from '../iso/pose';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { partScale } from '../registry/part-scale';
 import type { IsoPartDefinition } from '../registry/types';
+import { isRunPlacement } from '../registry/geometry';
 
 /** Same bounds the wheel / pinch / toolbar zoom clamps to (defined with the pan math). */
 export { MAX_ZOOM, MIN_ZOOM } from '../iso/pan';
@@ -54,7 +55,9 @@ export function sceneWorldBox(
       let h = def?.footprint.h ?? 1;
       if (Math.abs(Math.sin(p.rotation ?? 0)) > 0.7) [w, h] = [h, w];
       add(p.x, p.y, w / 2, h / 2);
-      if (typeof p.toX === 'number' && typeof p.toY === 'number') add(p.toX, p.toY, 0.15, 0.15);
+      if (isRunPlacement(p, def) && typeof p.toX === 'number' && typeof p.toY === 'number') {
+        add(p.toX, p.toY, 0.15, 0.15);
+      }
     }
     max[1] = Math.max(max[1], placementHeight(p, def));
   }

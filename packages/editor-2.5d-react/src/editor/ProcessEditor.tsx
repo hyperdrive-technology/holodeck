@@ -79,7 +79,7 @@ export function ProcessEditor({
   );
   const [zoom, setZoom] = useState(20);
   const [pose, setPose] = useState(home);
-  const [target, setTarget] = useState(() => sceneTarget(scene));
+  const [target, setTarget] = useState(() => sceneTarget(scene, registry));
   const [spacePan, setSpacePan] = useState(false);
   const [overObject, setOverObject] = useState(false);
   // Canvas size, for fit-to-scene. Null until the first layout.
@@ -458,7 +458,7 @@ export function ProcessEditor({
               setFittedId(state.scene.id);
             }
             setZoom(fit?.zoom ?? 20);
-            setTarget(fit?.target ?? sceneTarget(state.scene));
+            setTarget(fit?.target ?? sceneTarget(state.scene, registry));
             setPose(home);
           }}
           onRotate={(dir) => {
