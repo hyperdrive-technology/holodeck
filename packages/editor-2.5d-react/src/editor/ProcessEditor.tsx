@@ -4,7 +4,7 @@ import { initialIsoPose, rotatePose, toggleTopDown } from '../iso/pose';
 import type { IsoSceneFile } from '../iso/scene';
 import type { Vector3Tuple } from 'three';
 import { getDefaultIsoRegistry } from '../registry/default';
-import { IsoRegistryProvider, useIsoParts } from '../registry/react';
+import { IsoRegistryProvider, useIsoParts, useIsoRegistryVersion } from '../registry/react';
 import type { IsoInspectorSlot, IsoMetrics, IsoPartDefinition } from '../registry/types';
 import { EditorLayer } from './EditorLayer';
 import { clampZoom, WHEEL_ZOOM_STEP } from '../iso/pan';
@@ -51,7 +51,7 @@ export interface ProcessEditorProps {
    * `data-render-state` (`pending` | `ready` | `unsupported` when WebGPU is missing).
    * Wait for `[data-testid="process-editor"][data-render-state="ready"]`, never a sleep.
    * The revision increases on any change to the picture (scene, selection/drag state,
-   * metrics, zoom, look-at, pose, canvas size), so a reported revision can already be
+   * metrics, zoom, look-at, pose, canvas size, registry contents), so a reported revision can already be
    * stale: compare it with `data-holodeck-revision` when that matters.
    */
   onRendered?: (revision: number) => void;
@@ -69,6 +69,7 @@ export function ProcessEditor({
   onRendered,
 }: ProcessEditorProps) {
   const registry = registryProp ?? getDefaultIsoRegistry();
+  const registryVersion = useIsoRegistryVersion(registry);
   const readOnly = mode === 'run';
   const home = useMemo(() => initialIsoPose(18), []);
   const [state, dispatch] = useReducer(
@@ -120,7 +121,7 @@ export function ProcessEditor({
   // After that, re-fit on canvas resizes (e.g. Run -> Edit adds two side panels
   // and would otherwise leave the plant clipped) only while the user has not
   // zoomed, panned or rotated: their view wins. The "fit" button resets that.
-  // Scene edits never re-fit.
+  // Scene edits never re-fit, except the first placement in an empty document.
   const fittedSceneId = useRef<string | null>(null);
   // Mirrors fittedSceneId as state so the render hold below re-evaluates when a
   // fit lands even if it changed neither zoom nor target.
@@ -128,6 +129,7 @@ export function ProcessEditor({
   const userMovedView = useRef(false);
   const sceneForFit = useRef(scene);
   sceneForFit.current = scene;
+  const hasObjects = scene.objects.length > 0;
   useEffect(() => {
     const scene = sceneForFit.current;
     const sceneChanged = fittedSceneId.current !== scene.id;
@@ -140,13 +142,13 @@ export function ProcessEditor({
     setZoom(fit.zoom);
     setTarget(fit.target);
     if (sceneChanged) setPose(home);
-  }, [scene.id, fitScene, home]);
+  }, [scene.id, hasObjects, fitScene, home]);
 
   // Rendered signal (holodeck#34, render-signal.tsx). Held until the canvas is
   // measured and, for a non-empty scene, fitted: the first "ready" frame is the
   // fitted one, whatever size the host gives the editor.
   const holdRender = view === null || (scene.objects.length > 0 && fittedId !== scene.id);
-  const revision = useRevision([state, metrics, registry, readOnly, zoom, target, pose, view, holdRender]);
+  const revision = useRevision([scene, state, metrics, registry, registryVersion, readOnly, zoom, target, pose, view, holdRender]);
   const [renderedRevision, setRenderedRevision] = useState<number | null>(null);
   const onRenderedRef = useRef(onRendered);
   onRenderedRef.current = onRendered;
@@ -451,6 +453,10 @@ export function ProcessEditor({
           onFit={() => {
             userMovedView.current = false;
             const fit = fitScene(state.scene);
+            if (fit) {
+              fittedSceneId.current = state.scene.id;
+              setFittedId(state.scene.id);
+            }
             setZoom(fit?.zoom ?? 20);
             setTarget(fit?.target ?? sceneTarget(state.scene));
             setPose(home);

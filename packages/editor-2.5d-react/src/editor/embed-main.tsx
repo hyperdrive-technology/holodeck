@@ -9,6 +9,10 @@
  *                 item that does NOT set min-height: 0 (the sloppy-host case)
  *   layout=box    a fixed 640x360 box in the middle of the page
  *   mode=run|edit
+ *   empty        start empty, for first-placement fitting
+ *   latePack     leave the pump unresolved until __embed.installPump()
+ *   canvas       mount a standalone IsoCanvas for host-resize checks
+ *   selected=id  show the inspector for this placement
  *
  * Exposes window.__embed.rendered: every revision `onRendered` reported.
  */
@@ -22,6 +26,7 @@ import { createIsoRegistryWithBuiltins } from '../registry/default';
 import { GlbPart } from '../registry/GlbPart';
 import type { IsoPartDefinition } from '../registry/types';
 import { ProcessEditor } from './ProcessEditor';
+import { IsoCanvas } from '../iso/IsoCanvas';
 
 const params = new URLSearchParams(location.search);
 const layout = params.get('layout') ?? 'flex';
@@ -37,25 +42,35 @@ const pump: IsoPartDefinition = {
   model: pumpUrl,
   component: GlbPart,
 };
-registry.install({ id: 'embed.pack', version: '1', contributions: { [HOLODECK_KINDS.isoPart]: [pump] } });
+function installPump() {
+  registry.install({ id: 'embed.pack', version: '1', contributions: { [HOLODECK_KINDS.isoPart]: [pump] } });
+}
+if (!params.has('latePack') && !params.has('empty')) installPump();
 
 const initial: IsoSceneFile = {
   ...PROCESS_SCENE,
   id: 'embed',
-  objects: [...PROCESS_SCENE.objects, { id: 'pump-1', object: 'embed:pump', x: 10, y: 0 }],
+  objects: params.has('empty') ? [] : [...PROCESS_SCENE.objects, { id: 'pump-1', object: 'embed:pump', x: 10, y: 0 }],
 };
 
-const embed = { rendered: [] as number[] };
+const embed = {
+  rendered: [] as number[],
+  installPump,
+};
 (window as unknown as { __embed: typeof embed }).__embed = embed;
 
 function Editor() {
   const [scene, setScene] = useState(initial);
+  if (params.has('canvas')) {
+    return <IsoCanvas registry={registry} showControls={false} onRendered={(revision) => embed.rendered.push(revision)} />;
+  }
   return (
     <ProcessEditor
       scene={scene}
       onChange={setScene}
       mode={mode}
       registry={registry}
+      selectedId={params.get('selected') ?? undefined}
       onRendered={(revision) => embed.rendered.push(revision)}
     />
   );

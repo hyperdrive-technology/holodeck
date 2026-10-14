@@ -37,6 +37,7 @@ export function useIsoContributions<T extends Contribution>(kind: string, regist
 /** Exported for tests (no DOM here to mount a component against). */
 export interface ContributionStore {
   subscribe(listener: () => void): () => void;
+  version(): number;
   snapshot<T extends Contribution>(kind: string): readonly T[];
 }
 
@@ -55,6 +56,7 @@ export function getStore(registry: ContributionRegistry): ContributionStore {
     for (const l of listeners) l();
   });
   store = {
+    version: () => version,
     subscribe(listener) {
       listeners.add(listener);
       return () => {
@@ -71,6 +73,12 @@ export function getStore(registry: ContributionRegistry): ContributionStore {
   };
   stores.set(registry, store);
   return store;
+}
+
+/** Includes every registry mutation, even when the registry object stays the same. */
+export function useIsoRegistryVersion(registry: ContributionRegistry): number {
+  const store = getStore(registry);
+  return useSyncExternalStore(store.subscribe, store.version, store.version);
 }
 
 export const useIsoParts = (registry?: ContributionRegistry) =>
