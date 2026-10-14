@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { defaultMinBendSpacing, routePipe, type RoutePath } from './astar';
-import { HEADING_VECTOR, type GridPoint } from './grid';
+import { HEADING_VECTOR, MAX_GRID_COORD, type GridPoint } from './grid';
 import { last, occOf, pipe, tank } from './test-helpers';
 import { ELBOW_RADIUS } from '../../assets/process/pipe-math';
+import type { Occupancy } from '../index';
 
 const at = (x: number, y: number) => ({ cell: { x, y } });
 
@@ -26,6 +27,17 @@ function expectUnitSteps(path: RoutePath) {
 }
 
 describe('routePipe', () => {
+  it('accepts a custom public Occupancy without skipped diagnostics', () => {
+    // Keep this annotation: tsc also checks the pre-diagnostics public contract.
+    const occ: Occupancy = {
+      blocked: new Set<number>(), near: new Set<number>(), bounds: null,
+      isBlocked: () => false, isNearVessel: () => false,
+    };
+    expect(routePipe(at(0, 0), at(5, 0), occ)).toMatchObject({
+      cells: Array.from({ length: 6 }, (_, x) => ({ x, y: 0 })), bends: 0, cost: 5,
+    });
+  });
+
   it('derives minBendSpacing from ELBOW_RADIUS (two bends need 2R of straight run)', () => {
     expect(2 * ELBOW_RADIUS).toBeGreaterThan(1);
     expect(defaultMinBendSpacing()).toBe(2);
@@ -50,6 +62,20 @@ describe('routePipe', () => {
 
   it('handles start === end', () => {
     expect(routePipe(at(2, 2), at(2, 2), occOf([]))).toMatchObject({ cells: [{ x: 2, y: 2 }], bends: 0, cost: 0 });
+  });
+
+  it.each([
+    [MAX_GRID_COORD + 1, 0], [-MAX_GRID_COORD - 1, 0],
+    [0, MAX_GRID_COORD + 1], [0, -MAX_GRID_COORD - 1],
+    [Infinity, 0], [0, NaN], [0.5, 0],
+  ])('rejects invalid start and goal nodes at (%s, %s), including zero-length routes', (x, y) => {
+    const invalid = at(x, y);
+    const valid = at(Math.max(-MAX_GRID_COORD, Math.min(MAX_GRID_COORD, Math.round(x) || 0)),
+      Math.max(-MAX_GRID_COORD, Math.min(MAX_GRID_COORD, Math.round(y) || 0)));
+    const occ = occOf([]);
+    expect(routePipe(invalid, valid, occ)).toBeNull();
+    expect(routePipe(valid, invalid, occ)).toBeNull();
+    expect(routePipe(invalid, invalid, occ)).toBeNull();
   });
 
   it('detours around a 2x2 tank in the way', () => {

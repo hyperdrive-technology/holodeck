@@ -4,10 +4,10 @@ import { IsoCanvas, type IsoCanvasProps } from '../iso/IsoCanvas';
 import type { ContributionRegistry } from '@holodeck/sdk';
 import { gridToWorld } from '../iso/grid';
 import { sceneBounds, type IsoSceneFile } from '../iso/scene';
-import { useIsoThemeStyle } from '../registry/react';
+import { useIsoRegistry, useIsoThemeStyle } from '../registry/react';
 import type { IsoPose } from '../iso/pose';
 
-export function sceneTarget(scene: IsoSceneFile): Vector3Tuple {
+export function sceneTarget(scene: IsoSceneFile, registry?: ContributionRegistry): Vector3Tuple {
   if (scene.objects.length === 0) {
     return [0, 0, 0];
   }
@@ -20,7 +20,7 @@ export function sceneTarget(scene: IsoSceneFile): Vector3Tuple {
   }
   const tanks = scene.objects.filter((o) => o.object === 'tank' || o.object === 'mixer');
   const fallback = scene.objects.filter((o) => o.object !== 'label' && o.object !== 'area');
-  const b = sceneBounds(tanks.length ? tanks : fallback.length ? fallback : scene.objects);
+  const b = sceneBounds(tanks.length ? tanks : fallback.length ? fallback : scene.objects, registry);
   const [x, , z] = gridToWorld((b.minX + b.maxX) / 2 + 0.5, (b.minY + b.maxY) / 2 + 0.55);
   return [x, 1.28, z];
 }
@@ -77,8 +77,9 @@ export function ProcessSceneView({
   /** Resolves `scene.theme`. Default: registry from context. */
   registry?: ContributionRegistry;
 } & Pick<IsoCanvasProps, 'revision' | 'holdRender' | 'onRendered'>) {
+  const contextRegistry = useIsoRegistry();
   const holodeckStyle = useIsoThemeStyle(scene.theme, registry);
-  const lookAt = target ?? sceneTarget(scene);
+  const lookAt = target ?? sceneTarget(scene, registry ?? contextRegistry);
   return (
     <IsoCanvas
       showControls={showControls}

@@ -109,3 +109,30 @@ jobs:
       - name: Smoke-test built package
         working-directory: holodeck/packages/${{ matrix.package }}
         run: node ../../scripts/smoke-dist.mjs .
+
+      # editor-2.5d-react only: install the built holodeck.package.json entry into a
+      # HolodeckHost through the manifest path (SDK packaging contract, holodeck#15).
+      - name: Smoke-test the Holodeck package entry
+        if: matrix.package == 'editor-2.5d-react'
+        working-directory: holodeck/packages/${{ matrix.package }}
+        run: node --no-deprecation scripts/smoke-holodeck-package.mjs
+
+      # editor-2.5d-react only: consume the built package from a throwaway Vite app
+      # in real Chromium and fetch every GLB URL (holodeck#28: Vite dev pre-bundling
+      # rewrites them to 404s unless optimizeDeps.exclude is set). No GPU needed.
+      - name: Use the runner's preinstalled Chrome for the Vite consumer check
+        if: matrix.package == 'editor-2.5d-react'
+        # `playwright install chromium` downloads in ~1 s but then hangs while unpacking on the hosted
+        # runner (twice with --with-deps, once without; 2026-10-14). GitHub's ubuntu images ship
+        # Google Chrome, so point the check at it via HOLODECK_CHROMIUM (scripts/vite-consumer-check.mjs).
+        timeout-minutes: 2
+        run: |
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
+          test -n "$CHROME" || { echo "No preinstalled Chrome found on the runner" >&2; exit 1; }
+          "$CHROME" --version
+          echo "HOLODECK_CHROMIUM=$CHROME" >> "$GITHUB_ENV"
+      - name: Vite consumer check (GLB URLs resolve)
+        if: matrix.package == 'editor-2.5d-react'
+        working-directory: holodeck/packages/${{ matrix.package }}
+        timeout-minutes: 15
+        run: pnpm check:vite-consumer

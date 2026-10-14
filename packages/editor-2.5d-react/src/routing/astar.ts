@@ -33,7 +33,7 @@
 
 import { ELBOW_RADIUS } from '../../assets/process/pipe-math';
 import { GRID_CELL_SIZE } from '../iso/grid';
-import { cellKey, HEADINGS, HEADING_VECTOR, oppositeHeading, type GridPoint, type Heading } from './grid';
+import { cellKey, HEADINGS, HEADING_VECTOR, MAX_GRID_COORD, oppositeHeading, type GridPoint, type Heading } from './grid';
 import type { Occupancy } from './occupancy';
 
 export interface RouteEnd {
@@ -51,7 +51,7 @@ export interface RouteOptions {
    * `defaultMinBendSpacing()`.
    */
   minBendSpacing?: number;
-  /** Search box = bbox(from, to, obstacles) grown by this many cells. Default 6. */
+  /** Search box = bbox(from, to, obstacles) grown by this many cells, clipped to scene limits. Default 6. */
   margin?: number;
   /** Safety valve: give up (null) after this many node expansions. Default 200_000. */
   maxExpansions?: number;
@@ -135,6 +135,8 @@ class Heap {
 }
 
 export function routePipe(from: RouteEnd, to: RouteEnd, occ: Occupancy, opts: RouteOptions = {}): RoutePath | null {
+  // An incomplete obstacle grid cannot prove any route clear, even a zero-length one.
+  if (occ.skipped?.length) return null;
   const bendPenalty = opts.bendPenalty ?? 4;
   const clearancePenalty = opts.clearancePenalty ?? 2;
   const spacing = Math.max(1, opts.minBendSpacing ?? defaultMinBendSpacing());
@@ -143,15 +145,18 @@ export function routePipe(from: RouteEnd, to: RouteEnd, occ: Occupancy, opts: Ro
 
   const s = from.cell;
   const t = to.cell;
+  // Route nodes become persisted pipe endpoints and elbow origins. Obstacle
+  // footprints may extend farther, but even a zero-length route must reparse.
+  if (![s.x, s.y, t.x, t.y].every((v) => Number.isInteger(v) && Math.abs(v) <= MAX_GRID_COORD)) return null;
   if (s.x === t.x && s.y === t.y) {
     return { cells: [{ x: s.x, y: s.y }], bends: 0, cost: 0, expanded: 0 };
   }
 
   const bb = occ.bounds;
-  const minX = Math.min(s.x, t.x, bb?.minX ?? Infinity) - margin;
-  const maxX = Math.max(s.x, t.x, bb?.maxX ?? -Infinity) + margin;
-  const minY = Math.min(s.y, t.y, bb?.minY ?? Infinity) - margin;
-  const maxY = Math.max(s.y, t.y, bb?.maxY ?? -Infinity) + margin;
+  const minX = Math.max(-MAX_GRID_COORD, Math.min(s.x, t.x, bb?.minX ?? Infinity) - margin);
+  const maxX = Math.min(MAX_GRID_COORD, Math.max(s.x, t.x, bb?.maxX ?? -Infinity) + margin);
+  const minY = Math.max(-MAX_GRID_COORD, Math.min(s.y, t.y, bb?.minY ?? Infinity) - margin);
+  const maxY = Math.min(MAX_GRID_COORD, Math.max(s.y, t.y, bb?.maxY ?? -Infinity) + margin);
 
   const startCellKey = cellKey(s.x, s.y);
   const endCellKey = cellKey(t.x, t.y);

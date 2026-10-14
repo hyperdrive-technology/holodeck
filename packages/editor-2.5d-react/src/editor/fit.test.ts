@@ -35,6 +35,17 @@ describe('sceneWorldBox', () => {
     expect(box.max[2] - box.min[2]).toBeCloseTo(4);
   });
 
+  it('frames installed vessels by their footprint and only uses endpoints for runs', () => {
+    const vessel = at('v', 'custom', 0, 0);
+    const endpoints = { toX: 100, toY: 0 };
+    const def = part({ w: 2, h: 2 });
+    expect(sceneWorldBox({ objects: [{ ...vessel, ...endpoints }] }, () => def))
+      .toEqual(sceneWorldBox({ objects: [vessel] }, () => def));
+    for (const getPart of [() => ({ ...def, draw: 'run' as const }), () => undefined]) {
+      expect(sceneWorldBox({ objects: [{ ...vessel, ...endpoints }] }, getPart).max[0]).toBeCloseTo(100.65);
+    }
+  });
+
   it('uses the explicit height, and scale for GLB parts', () => {
     expect(sceneWorldBox({ objects: [at('t', 'tank', 0, 0, { height: 5 })] }).max[1]).toBe(5);
     const glb = part({ w: 1, h: 1 }, { model: 'x.glb', scale: 1.5, defaults: { height: 2 } });
