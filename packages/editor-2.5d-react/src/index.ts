@@ -137,3 +137,7 @@ export type {
   WindowConnection,
 } from './routing';
 export type { GridPoint, Heading } from './routing';
+
+// Engine contract (@holodeck/sdk docs/PACKAGING.md): descriptor, document envelope, live values, package entry.
+export * from './engine';
+export { ISO_PACKAGE_MANIFEST, createIsoPackageExtension, isoPackage } from './holodeck-package';

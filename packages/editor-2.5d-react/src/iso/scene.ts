@@ -13,7 +13,8 @@
 
 import { GRID_CELL_SIZE, gridToWorld, worldToGrid } from './grid';
 import { getDefaultIsoRegistry } from '../registry/default';
-import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
+import { HOLODECK_KINDS, type ContributionRegistry, type SignalBinding } from '@holodeck/sdk';
+import { placementBindingProblems } from '../engine/bindings';
 import type { IsoPartDefinition } from '../registry/types';
 import { isRunPlacement } from '../registry/geometry';
 import { MAX_GRID_COORD } from '../routing/grid';
@@ -53,6 +54,12 @@ export interface IsoPlacement {
   params?: Record<string, unknown>;
   /** param -> animator override (`holodeck.iso.animator` id + settings). */
   animation?: Record<string, { animator: string; settings?: Record<string, unknown> }>;
+  /**
+   * param -> live signal (`{ connection, source, transform? }`, @holodeck/sdk).
+   * `connection` names a `ProviderConnection` of the enclosing document;
+   * `source` is the provider's own address and is never parsed here.
+   */
+  bindings?: Record<string, SignalBinding>;
   /** Host bags keyed by extension id (e.g. tag bindings); opaque to the editor. */
   extensions?: Record<string, unknown>;
   /** Screen-space px on the frozen 760×540 snapshot (CSS translate). */
@@ -218,6 +225,9 @@ export function validatePlacementGeometry(raw: unknown, registry: ContributionRe
       throw new Error(`placement ${raw.id}: ${bag} must be an object`);
     }
   }
+  // A parsed scene can go straight to ProviderHub.setBindings, which throws on malformed bindings.
+  const bindingProblems = placementBindingProblems(raw.id, raw.bindings);
+  if (bindingProblems.length) throw new Error(bindingProblems.join('; '));
   const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, raw.object);
   const placement = def ? migrateLegacyPlacement(def, raw) : raw as unknown as IsoPlacement;
   const isRun = isRunPlacement(placement, def);
