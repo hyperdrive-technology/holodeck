@@ -31,7 +31,8 @@
     "parts:build": "node scripts/build-parts.mjs",
     "parts:watch": "node scripts/build-parts.mjs --watch",
     "prepublishOnly": "npm run build",
-    "smoke": "node ../../scripts/smoke-dist.mjs ."
+    "smoke": "node ../../scripts/smoke-dist.mjs .",
+    "check:vite-consumer": "node ../../scripts/vite-consumer-check.mjs ."
   },
   "keywords": [
     "holodeck",

@@ -18,7 +18,7 @@ import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoSceneFile } from '../iso/scene';
 import type { IsoPartDefinition } from '../registry/types';
 import { rotateHeading, rotateOffset, type GridPoint } from './grid';
-import { footprintCells, rotatedFootprint } from './occupancy';
+import { footprintContains, rotatedFootprint } from './occupancy';
 import type { RouteEnd } from './astar';
 
 export interface ResolvedRouteEnd extends RouteEnd {
@@ -42,7 +42,7 @@ export function resolveRouteEnd(
     const ports = def.ports ?? {};
     if (Object.keys(ports).length === 0) continue;
     const { w, h } = rotatedFootprint(def, obj.rotation, obj);
-    if (!footprintCells(obj.x, obj.y, w, h).some((c) => c.x === cell.x && c.y === cell.y)) continue;
+    if (!footprintContains(obj.x, obj.y, w, h, cell)) continue;
 
     let bestEnd: ResolvedRouteEnd | null = null;
     let bestDist = Infinity;

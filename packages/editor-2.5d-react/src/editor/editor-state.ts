@@ -1,5 +1,5 @@
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
-import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
+import { validatePlacementGeometry, validatePlacementPart, validateSceneGeometry, type IsoPlacement, type IsoSceneFile } from '../iso/scene';
 import { getDefaultIsoRegistry } from '../registry/default';
 import type { IsoPartDefinition } from '../registry/types';
 import { rotateOffset, type Heading } from '../routing/grid';
@@ -16,6 +16,8 @@ export type ResizeHandle = 'radius' | 'height';
 
 /** Shown when A* finds no clear route and the manhattan L was drawn instead. */
 export const NO_ROUTE_NOTICE = 'No clear route — drew a straight L';
+export const ROUTE_FAILED_NOTICE = 'No route drawn — no replacement geometry';
+export const REROUTE_FAILED_NOTICE = 'Could not reroute — original run kept';
 
 /** Rerouting is atomic when the carried parts cannot fit on the new run. */
 export const INLINE_PARTS_NO_ROUTE_NOTICE = 'No clear route — inline parts do not fit';
@@ -40,7 +42,7 @@ export interface EditorState {
   /** One-line inline message (e.g. the routing fallback). Cleared by the next non-pointer action. */
   notice: string | null;
   cursor: GridPoint | null;
-  drag: { id: string; origin: IsoPlacement; grab: GridPoint } | null;
+  drag: { id: string; origin: IsoPlacement; grab: GridPoint; /** Single-node part, computed once so drag-move frames stay O(1) in footprint calls. */ inline: boolean } | null;
   /**
    * Live resize drag (radius / height handle). `param` is the number param
    * the handle edits, `origin` its value when the handle was grabbed, so a
@@ -223,6 +225,9 @@ function finishPipe(state: EditorState, click: GridPoint): EditorState {
     end,
     nextId,
   );
+  if (placements.length === 0) {
+    return { ...state, notice: ROUTE_FAILED_NOTICE };
+  }
   // Chaining continues from the end cell with no required heading: a port's
   // outward heading points back out of the pipe we just drew into it.
   return commit(
@@ -249,7 +254,7 @@ function rerouteSelected(state: EditorState): EditorState {
     return state;
   }
   if (sameCell(run.start, run.end)) {
-    return state; // closed loop: nothing sensible to route between
+    return { ...state, notice: REROUTE_FAILED_NOTICE }; // closed loop: no replacement
   }
   const ids = new Set(run.ids);
   // Inline parts drawn on the run's pipes (holodeck#22) ride along unless a
@@ -291,7 +296,6 @@ function rerouteSelected(state: EditorState): EditorState {
   const reservedObjects = state.scene.objects.filter((o) => !ids.has(o.id));
   const placements: IsoPlacement[] = [];
   const carried: IsoPlacement[] = [];
-  let noRoute = false;
   for (const [i, section] of sections.entries()) {
     const first = section[0]!;
     const last = section[section.length - 1]!;
@@ -313,6 +317,7 @@ function rerouteSelected(state: EditorState): EditorState {
     // half-cell endpoints set fallback=true but noRoute=false. Conservatively
     // reject them for fixed sections and retained endpoint ports/flanges;
     // staged placements must never partially replace the original run.
+    if (route.placements.length === 0) return { ...state, notice: REROUTE_FAILED_NOTICE };
     if (route.fallback && (fixed.length > 0 || from.heading !== undefined || to.heading !== undefined)) {
       return { ...state, notice: RETAINED_CONNECTIONS_NO_ROUTE_NOTICE };
     }
@@ -324,16 +329,18 @@ function rerouteSelected(state: EditorState): EditorState {
       route.placements.filter(isPipePlacement).map(segOf),
       { start: endpointLength(from.cell), end: endpointLength(to.cell) },
     );
+    // A failed plan (even one offering an obstructed L) must not replace a
+    // working run; invalid resolved ports can also produce no geometry.
+    if (route.noRoute) return { ...state, notice: REROUTE_FAILED_NOTICE };
     if (parts === null) return { ...state, notice: INLINE_PARTS_NO_ROUTE_NOTICE };
     placements.push(...route.placements);
     carried.push(...parts);
-    noRoute ||= route.noRoute;
   }
   if (carried.length !== movable.length) return { ...state, notice: INLINE_PARTS_NO_ROUTE_NOTICE };
   return commit(
     state,
     { ...state.scene, objects: [...rest, ...placements, ...carried] },
-    { selectedId: placements[0]?.id ?? null, notice: noRoute ? NO_ROUTE_NOTICE : null },
+    { selectedId: placements[0]?.id ?? null, notice: null },
   );
 }
 
@@ -350,8 +357,8 @@ function isRunPart(state: EditorState, partId: string): boolean {
   return state.registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, partId)?.draw === 'run';
 }
 
-/** Actions that may set a notice; every other non-pointer action dismisses it. */
-const NOTICE_KEEPERS: ReadonlySet<EditorAction['type']> = new Set(['cursor', 'drag-move', 'resize-move', 'load', 'set-read-only']);
+/** Pointer/release actions keep notices visible; other actions dismiss old notices. */
+const NOTICE_KEEPERS: ReadonlySet<EditorAction['type']> = new Set(['cursor', 'drag-move', 'drag-end', 'resize-move', 'resize-end', 'load', 'set-read-only']);
 
 /** The number-param spec a resize handle edits, or null when the part is not resizable that way. */
 function resizeParam(state: EditorState, partId: string, handle: ResizeHandle): { param: string; spec: IsoPartDefinition['params'][string] } | null {
@@ -371,10 +378,40 @@ function numberParam(obj: IsoPlacement, param: string, fallback: unknown): numbe
 
 export function editorReducer(state: EditorState, action: EditorAction): EditorState {
   let next = reduce(state, action);
+  // Reject the whole edit, preserving scene, selection, history and revision.
+  // Pointer previews only change one placement's geometry, never its id/type.
+  // Validate that placement each frame; commits still validate the whole scene.
+  if (next.scene !== state.scene || next.revision !== state.revision) {
+    try {
+      if (action.type === 'drag-move' || action.type === 'resize-move') {
+        for (let i = 0; i < next.scene.objects.length; i += 1) {
+          const placement = next.scene.objects[i]!;
+          if (placement !== state.scene.objects[i]) {
+            validatePlacementGeometry(placement, state.registry);
+          }
+        }
+      } else {
+        validateSceneGeometry(next.scene, state.registry);
+        // History restores placements already admitted to this document. Other
+        // edits (including controlled loads) must check new ids and part types,
+        // while keeping existing placements usable after a pack is uninstalled.
+        if (action.type !== 'undo' && action.type !== 'redo') {
+          const previousParts = new Map(state.scene.objects.map((o) => [o.id, o.object]));
+          for (const placement of next.scene.objects) {
+            if (previousParts.get(placement.id) !== placement.object) {
+              validatePlacementPart(placement, state.registry);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      return { ...state, notice: `Edit rejected: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  }
   if (next.pipeStart === null && next.pipeStartHeading !== null) {
     next = { ...next, pipeStartHeading: null };
   }
-  const setsNotice = action.type === 'floor-click' || action.type === 'reroute-selected';
+  const setsNotice = next.notice !== state.notice || action.type === 'floor-click' || action.type === 'reroute-selected';
   return next.notice && !setsNotice && !NOTICE_KEEPERS.has(action.type) ? { ...next, notice: null } : next;
 }
 
@@ -417,7 +454,7 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
         mode: 'select',
         placing: null,
         pipeStart: null,
-        drag: { id: action.id, origin: structuredClone(obj), grab: { x: action.x, y: action.y } },
+        drag: { id: action.id, origin: structuredClone(obj), grab: { x: action.x, y: action.y }, inline: isInlinePart(obj, state.registry) },
       };
     }
     case 'drag-move': {
@@ -432,7 +469,7 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
         }
         const moved = moveBy(state.drag.origin, dx, dy);
         // Keep the pipe attachment in step with where the part is dropped.
-        return isInlinePart(moved, state.registry) ? withAttachment(moved, state.scene.objects) : moved;
+        return state.drag.inline ? withAttachment(moved, state.scene.objects) : moved;
       });
       return { ...state, cursor: { x: action.x, y: action.y }, scene: { ...state.scene, objects } };
     }
@@ -445,6 +482,7 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
       if (!moved) {
         // A drag out and back is a no-op, including attachment metadata.
         const origin = state.drag.origin;
+        if (current && JSON.stringify(current) === JSON.stringify(origin)) return { ...state, drag: null };
         const objects = state.scene.objects.map((o) => o.id === origin.id ? { ...origin } : o);
         return { ...state, scene: { ...state.scene, objects }, drag: null };
       }
@@ -490,8 +528,11 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
     }
     case 'resize-move': {
       const resize = state.resize;
-      if (!resize || !Number.isFinite(action.value)) {
+      if (!resize) {
         return state;
+      }
+      if (!Number.isFinite(action.value)) {
+        return { ...state, notice: 'Edit rejected: resize value must be finite' };
       }
       const objects = state.scene.objects.map((o) => {
         if (o.id !== resize.id) {

@@ -6,7 +6,7 @@ import { PROCESS_SCENE } from '../iso/load-process-scene';
 import { INLINE_PART_LENGTH, positionOnPipe, segOf } from '../routing/inline';
 import { pipeArmsAt } from '../routing/elbows';
 import type { Heading } from '../routing/grid';
-import { INLINE_PARTS_NO_ROUTE_NOTICE, NO_ROUTE_NOTICE, RETAINED_CONNECTIONS_NO_ROUTE_NOTICE, committedScene, createEditorState, editorReducer, emptyScene, nextId, stamp } from './editor-state';
+import { INLINE_PARTS_NO_ROUTE_NOTICE, NO_ROUTE_NOTICE, REROUTE_FAILED_NOTICE, RETAINED_CONNECTIONS_NO_ROUTE_NOTICE, committedScene, createEditorState, editorReducer, emptyScene, nextId, stamp } from './editor-state';
 
 const registry = getDefaultIsoRegistry();
 
@@ -149,7 +149,8 @@ describe('editorReducer', () => {
     expect(s.mode).toBe('draw-pipe');
     s = editorReducer(blank(), { type: 'place-mode', object: 'nope' });
     s = editorReducer(s, { type: 'floor-click', x: 0, y: 0 });
-    expect(s.scene.objects[0]).toMatchObject({ object: 'nope', id: 'nope-1' });
+    expect(s.scene.objects).toHaveLength(0);
+    expect(s.notice).toMatch(/Edit rejected: unknown library object/);
   });
 });
 
@@ -316,6 +317,16 @@ describe('auto-routed pipes', () => {
 
   it('a clear route sets no notice', () => {
     expect(drawPipe(blank(), [0, 0], [4, 3]).notice).toBeNull();
+  });
+
+  it('rejects a route commit when an existing obstacle has invalid geometry', () => {
+    const base = createEditorState({
+      ...emptyScene('doc'), objects: [{ id: 'bad', object: 'tank', x: Infinity, y: 0 }],
+    }, { registry });
+    const s = drawPipe(base, [0, 0], [4, 3]);
+    expect(s.notice).toMatch(/Edit rejected:/);
+    expect(s.scene).toBe(base.scene);
+    expect(s.past).toHaveLength(0);
   });
 
   describe('reroute-selected', () => {
@@ -798,27 +809,10 @@ describe('auto-routed pipes', () => {
       });
 
       // The case from the issue: tests/scene.json draws its valves on top of one long pipe.
-      it.each([
-        ['valve-a-in', 'pipe-a-in'],
-      ])('tests/scene.json: %s is carried when %s is rerouted', (valveId, pipeId) => {
-        let s = createEditorState(PROCESS_SCENE, { registry });
-        s = editorReducer(s, { type: 'select', id: pipeId });
-        const original = s.scene.objects.find((o) => o.id === valveId)!;
-        const r = editorReducer(s, { type: 'reroute-selected' });
-        expect(r.past).toHaveLength(1);
-        const valve = r.scene.objects.find((o) => o.id === valveId)!;
-        expect(r.scene.objects.filter((o) => o.id === valveId)).toHaveLength(1);
-        onRoute(r.scene.objects, valve);
-        expect(valve.handwheel).toBe(original.handwheel);
-        // Vessels are untouched.
-        for (const o of r.past[0]!.objects.filter((o) => o.object === 'tank' || o.object === 'mixer')) {
-          expect(r.scene.objects.find((n) => n.id === o.id)).toEqual(o);
-        }
-      });
-
-      it.each(['pipe-holding-mixer-x', 'pipe-packaging'])('tests/scene.json: rejects the unverified port fallback on %s', (pipeId) => {
-        // These sample runs resolve a vessel port heading and previously
-        // committed unverified Ls (off-grid endpoints) while carrying valves.
+      // holodeck#19 resolves off-grid ends inside a vessel footprint to that vessel's port, so
+      // pipe-a-in's tank end now carries a required heading while its other end stays an
+      // unverifiable half-cell fallback: the whole reroute is rejected rather than half-applied.
+      it.each(['pipe-a-in', 'pipe-packaging'])('tests/scene.json: rejects the unverified port fallback on %s', (pipeId) => {
         const s = { ...createEditorState(PROCESS_SCENE, { registry }), selectedId: pipeId };
         const r = editorReducer(s, { type: 'reroute-selected' });
         expect(r.notice).toBe(RETAINED_CONNECTIONS_NO_ROUTE_NOTICE);
@@ -827,6 +821,15 @@ describe('auto-routed pipes', () => {
         expect(r.future).toBe(s.future);
         expect(r.revision).toBe(s.revision);
         expect(committedScene(s, r)).toBeNull();
+      });
+
+      it('tests/scene.json: pipe-holding-mixer-x reroutes through resolved ports as one undo step', () => {
+        // Both ends now resolve to vessel ports on the grid, so A* (not the L fallback) runs.
+        const s = { ...createEditorState(PROCESS_SCENE, { registry }), selectedId: 'pipe-holding-mixer-x' };
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBeNull();
+        expect(r.past).toHaveLength(1);
+        expect(r.scene).not.toBe(s.scene);
       });
 
       it('rotates a carried valve onto a perpendicular straight', () => {
@@ -956,7 +959,7 @@ describe('auto-routed pipes', () => {
       expect(r.scene.objects).toEqual(s.scene.objects);
     });
 
-    it('flags the fallback when no route exists', () => {
+    it('keeps the original run and history when no clear route exists', () => {
       const wall = [-1, 0, 1]
         .flatMap((dx) => [-1, 0, 1].map((dy) => stamp(registry, 'valve', 20 + dx, dy, `v${dx}${dy}`)))
         .filter((o) => !(o.x === 20 && o.y === 0));
@@ -964,7 +967,11 @@ describe('auto-routed pipes', () => {
       s = { ...s, scene: { ...s.scene, objects: [...wall, { id: 'pipe-1', object: 'pipe', x: 20, y: 0, toX: 24, toY: 3 }] } };
       s = editorReducer(s, { type: 'select', id: 'pipe-1' });
       const r = editorReducer(s, { type: 'reroute-selected' });
-      expect(r.notice).toBe(NO_ROUTE_NOTICE);
+      expect(r.notice).toBe(REROUTE_FAILED_NOTICE);
+      expect(r.scene).toBe(s.scene);
+      expect(r.past).toBe(s.past);
+      expect(r.future).toBe(s.future);
+      expect(r.revision).toBe(s.revision);
     });
   });
 });
@@ -1034,14 +1041,16 @@ describe('resize handles (radius / height params)', () => {
     expect(s.past).toHaveLength(1); // only the stamp
   });
 
-  it('ignores handles on parts without `resize`, unknown ids, NaN values and run mode', () => {
+  it('ignores unavailable handles and run mode, and reports non-finite resize values', () => {
     let s = editorReducer(blank(), { type: 'place-mode', object: 'tank' });
     s = editorReducer(s, { type: 'floor-click', x: 0, y: 0 });
     expect(editorReducer(s, { type: 'resize-start', id: 'tank-1', handle: 'radius' }).resize).toBeNull();
     let v = withVessel();
     expect(editorReducer(v, { type: 'resize-start', id: 'nope', handle: 'radius' }).resize).toBeNull();
     v = editorReducer(v, { type: 'resize-start', id: 'test:vessel-1', handle: 'radius' });
-    expect(editorReducer(v, { type: 'resize-move', value: Number.NaN })).toBe(v);
+    const invalid = editorReducer(v, { type: 'resize-move', value: Number.NaN });
+    expect(invalid.scene).toBe(v.scene);
+    expect(invalid.notice).toBe('Edit rejected: resize value must be finite');
     v = editorReducer(v, { type: 'set-read-only', readOnly: true });
     expect(v.resize).toBeNull();
     expect(editorReducer(v, { type: 'resize-start', id: 'test:vessel-1', handle: 'radius' }).resize).toBeNull();
