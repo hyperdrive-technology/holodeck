@@ -82,7 +82,12 @@ export type EditorAction =
   | { type: 'set-param'; param: string; value: unknown }
   /** Merge fields onto the selection (host inspector panels). */
   | { type: 'patch-selected'; patch: Partial<IsoPlacement> }
-  /** Replace the scene from outside (controlled `scene` prop). Not a commit; keeps history. */
+  /**
+   * Replace the scene from outside (controlled `scene` prop). Not a commit.
+   * Same `scene.id`: an external update of the open document, history kept.
+   * Different `scene.id`: a different document, so undo/redo and all
+   * transient editing state are reset (see `loadDocument`).
+   */
   | { type: 'load'; scene: IsoSceneFile }
   | { type: 'set-read-only'; readOnly: boolean }
   | { type: 'cancel' };
@@ -232,9 +237,10 @@ function finishPipe(state: EditorState, click: GridPoint): EditorState {
  * Replace the selected run with a fresh route between its two ends. The run is
  * excluded from the obstacles so it does not block itself; its ends re-resolve
  * through `resolveRouteEnd` so a run that leaves a tank port keeps leaving it.
+ * Inline parts without declared ports keep the original pipe's joint heading.
  */
 function rerouteSelected(state: EditorState): EditorState {
-  const run = state.selectedId ? findRun(state.scene.objects, state.selectedId) : null;
+  const run = state.selectedId ? findRun(state.scene.objects, state.selectedId, state.registry) : null;
   if (!run) {
     return state;
   }
@@ -246,6 +252,8 @@ function rerouteSelected(state: EditorState): EditorState {
   const without = { objects: rest };
   const from = resolveRouteEnd(without, state.registry, run.start);
   const to = resolveRouteEnd(without, state.registry, run.end);
+  from.heading ??= run.startHeading;
+  to.heading ??= run.endHeading;
   const band = state.scene.objects.find((o) => o.id === run.ids[0])?.band;
   const { placements, noRoute } = routeToPlacements(without, state.registry, from, to, nextId, { band });
   // A failed plan (even if it offers an obstructed L) must not replace a
@@ -553,10 +561,8 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
         placing: null,
         mode: 'select',
       });
-    case 'load': {
-      const selectedId = action.scene.objects.some((o) => o.id === state.selectedId) ? state.selectedId : null;
-      return { ...state, scene: action.scene, selectedId, drag: null, resize: null };
-    }
+    case 'load':
+      return loadDocument(state, action.scene);
     case 'set-read-only':
       return action.readOnly === state.readOnly
         ? state
@@ -575,6 +581,26 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
       return _never;
     }
   }
+}
+
+/**
+ * `load` reducer. Document identity is `scene.id` (the same key
+ * `ProcessEditor` uses to re-fit the camera). On a switch, undo/redo must not
+ * cross documents: undoing after "edit A, load B" used to put A back and
+ * `ProcessEditor` then emitted A through `onChange` while the host was editing
+ * B, overwriting it (holodeck#9). Hosts whose documents can share an id should
+ * remount `ProcessEditor` with a React `key` instead.
+ */
+function loadDocument(state: EditorState, scene: IsoSceneFile): EditorState {
+  if (scene.id !== state.scene.id) {
+    const fresh = createEditorState(scene, { registry: state.registry, readOnly: state.readOnly });
+    // Keep `revision` monotonic (ProcessEditor compares it) and don't bump it:
+    // a load is not a commit, so nothing is emitted. Keep the caller's object
+    // (createEditorState clones) so the controlled-prop echo check still works.
+    return { ...fresh, scene, revision: state.revision };
+  }
+  const selectedId = scene.objects.some((o) => o.id === state.selectedId) ? state.selectedId : null;
+  return { ...state, scene, selectedId, drag: null, resize: null };
 }
 
 export function selectedObject(state: EditorState): IsoPlacement | undefined {
