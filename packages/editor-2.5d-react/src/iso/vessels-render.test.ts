@@ -11,7 +11,8 @@ import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CHROMIUM } from '../test-support/chromium';
+import { CHROMIUM, RENDER_ARGS } from '../test-support/chromium';
+import { waitForPageRendered } from '../test-support/render-harness';
 import { TANK_PRESETS } from '../../assets/process/tank-presets';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
@@ -45,7 +46,7 @@ describe.skipIf(!CHROMIUM)('vessel family workbench', () => {
     const browser = await chromium.launch({
       executablePath: CHROMIUM,
       headless: true,
-      args: ['--enable-unsafe-webgpu', '--enable-features=WebGPU', '--ignore-gpu-blocklist'],
+      args: RENDER_ARGS,
     });
     const logs: string[] = [];
     try {
@@ -56,7 +57,7 @@ describe.skipIf(!CHROMIUM)('vessel family workbench', () => {
       const root = page.getByTestId('vessels-root');
       await root.waitFor();
       await page.waitForSelector('canvas');
-      await page.waitForTimeout(3000);
+      await waitForPageRendered(page);
       expect(await root.getAttribute('data-vessels')).toBe(Object.keys(TANK_PRESETS).join(','));
       expect(logs.filter((l) => l.startsWith('pageerror'))).toEqual([]);
       mkdirSync(snapDir, { recursive: true });

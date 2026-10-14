@@ -7,7 +7,8 @@ import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CHROMIUM } from '../test-support/chromium';
+import { CHROMIUM, RENDER_ARGS } from '../test-support/chromium';
+import { waitForPageRendered } from '../test-support/render-harness';
 import { PROCESS_SCENE } from './load-process-scene';
 import { REFERENCE_CANVAS } from '../editor/ProcessSceneView';
 
@@ -56,7 +57,7 @@ describe.skipIf(!CHROMIUM)('renders scene.json', () => {
     const browser = await chromium.launch({
       executablePath: CHROMIUM,
       headless: true,
-      args: ['--enable-unsafe-webgpu', '--enable-features=WebGPU', '--ignore-gpu-blocklist'],
+      args: RENDER_ARGS,
     });
     try {
       const page = await browser.newPage({
@@ -73,7 +74,7 @@ describe.skipIf(!CHROMIUM)('renders scene.json', () => {
       const box = await page.locator('canvas').boundingBox();
       expect(box?.width).toBeGreaterThan(100);
       expect(box?.height).toBeGreaterThan(100);
-      await page.waitForTimeout(3500);
+      await waitForPageRendered(page);
 
       expect(await root.getAttribute('data-scene-id')).toBe(onDisk.id);
       expect(await root.getAttribute('data-object-count')).toBe(String(onDisk.objects.length));

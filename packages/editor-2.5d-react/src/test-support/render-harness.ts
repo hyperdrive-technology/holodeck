@@ -9,12 +9,9 @@
 import path from 'node:path';
 import { chromium, type Browser, type Locator, type Page } from 'playwright';
 import { createServer, type ViteDevServer } from 'vite';
-import { CHROMIUM } from './chromium';
+import { CHROMIUM, RENDER_ARGS } from './chromium';
 
 export const PKG_ROOT = path.resolve(import.meta.dirname, '../..');
-
-/** Flags that expose WebGPU in headless Chromium (same as the existing render tests). */
-export const WEBGPU_ARGS = ['--enable-unsafe-webgpu', '--enable-features=WebGPU', '--ignore-gpu-blocklist'];
 
 export interface Harness {
   server: ViteDevServer;
@@ -40,7 +37,7 @@ export async function startHarness(dir: string): Promise<Harness> {
 
 export function launchRenderBrowser(): Promise<Browser> {
   if (!CHROMIUM) throw new Error('no Chromium for render tests (see test-support/chromium.ts)');
-  return chromium.launch({ executablePath: CHROMIUM, headless: true, args: WEBGPU_ARGS });
+  return chromium.launch({ executablePath: CHROMIUM, headless: true, args: RENDER_ARGS });
 }
 
 /** Collects console errors, page errors and failed requests for failure messages. */
@@ -86,4 +83,36 @@ export function animationFrames(page: Page, n: number): Promise<void> {
       }),
     n,
   );
+}
+
+/**
+ * Resolves once at least one `[data-render-state]` element exists and every
+ * one reports `ready` (several IsoCanvases on one page, or editor + inner
+ * canvas). Throws on `unsupported` instead of timing out. Unlike
+ * `waitForRendered` it needs no locator, for tests that own a whole page.
+ */
+export async function waitForPageRendered(page: Page, timeout = 60_000): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const els = [...document.querySelectorAll('[data-render-state]')];
+      if (els.length === 0) return false;
+      const states = els.map((el) => el.getAttribute('data-render-state'));
+      return states.every((s) => s === 'ready') || states.includes('unsupported');
+    },
+    undefined,
+    { timeout },
+  );
+  const states = await page.$$eval('[data-render-state]', (els) => els.map((el) => el.getAttribute('data-render-state')));
+  if (states.some((s) => s !== 'ready')) throw new Error(`render state is ${states.join(',')} (WebGPU unavailable?)`);
+}
+
+/**
+ * After a pointer / keyboard / viewport interaction: lets the page commit the
+ * resulting state (two animation frames: input handlers and rAF-batched
+ * updates run, React commits) and then waits for the new picture to be
+ * presented. Replaces `waitForTimeout(<guess>)` after an input.
+ */
+export async function settle(page: Page, timeout = 60_000): Promise<void> {
+  await animationFrames(page, 2);
+  await waitForPageRendered(page, timeout);
 }

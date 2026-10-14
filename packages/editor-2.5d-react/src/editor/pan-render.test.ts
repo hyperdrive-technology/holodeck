@@ -10,7 +10,8 @@ import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { chromium, type Browser, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CHROMIUM } from '../test-support/chromium';
+import { CHROMIUM, RENDER_ARGS } from '../test-support/chromium';
+import { settle, waitForPageRendered } from '../test-support/render-harness';
 import type { Vector3Tuple } from 'three';
 import type { IsoSceneFile } from '../iso/scene';
 import { panTarget } from '../iso/pan';
@@ -39,7 +40,7 @@ beforeAll(async () => {
   browser = await chromium.launch({
     executablePath: CHROMIUM,
     headless: true,
-    args: ['--enable-unsafe-webgpu', '--enable-features=WebGPU', '--ignore-gpu-blocklist'],
+    args: RENDER_ARGS,
   });
 }, 30_000);
 
@@ -53,7 +54,7 @@ async function open(query: string): Promise<Page> {
   await page.goto(`${base}/editor.html?${query}`);
   await page.getByTestId('process-editor').waitFor();
   await page.waitForSelector('canvas');
-  await page.waitForTimeout(1500); // first fit + WebGPU init
+  await waitForPageRendered(page); // first fit + WebGPU init
   return page;
 }
 
@@ -71,7 +72,7 @@ async function drag(page: Page, from: [number, number], by: [number, number]) {
   // Several steps, like a real pointer (first step crosses the pan threshold).
   for (let i = 1; i <= 6; i++) await page.mouse.move(from[0] + (by[0] * i) / 6, from[1] + (by[1] * i) / 6);
   await page.mouse.up();
-  await page.waitForTimeout(150); // rAF flush + React commit
+  await settle(page); // rAF flush + React commit + presented frame
 }
 
 function expectNear(a: Vector3Tuple, b: Vector3Tuple, tol: number) {
@@ -97,7 +98,7 @@ describe.skipIf(!CHROMIUM)('view pan', () => {
 
       // A pan is a user view change: a canvas resize must not re-fit it away.
       await page.setViewportSize({ width: 1100, height: 700 });
-      await page.waitForTimeout(400);
+      await settle(page);
       expect(await target(page)).toEqual(after);
       mkdirSync(snapDir, { recursive: true });
       await page.screenshot({ path: path.join(snapDir, 'pan-edit.png') });
@@ -136,11 +137,11 @@ describe.skipIf(!CHROMIUM)('view pan', () => {
       await page.mouse.down();
       await page.mouse.move(cx - 40, cy + 10);
       await page.mouse.move(cx - 100, cy + 30);
-      await page.waitForTimeout(100);
+      await page.waitForFunction(() => document.querySelector('[data-iso-target]')?.getAttribute('data-panning') === 'true');
       expect(await surface.getAttribute('data-panning')).toBe('true');
       expect(await surface.evaluate((el) => getComputedStyle(el).cursor)).toBe('grabbing');
       await page.mouse.up();
-      await page.waitForTimeout(150);
+      await settle(page);
       expect(await surface.getAttribute('data-panning')).toBe('false');
       const after = await target(page);
       expect(after).not.toEqual(before);
@@ -157,7 +158,7 @@ describe.skipIf(!CHROMIUM)('view pan', () => {
       const box = await canvasBox(page);
       const before = await target(page);
       await page.mouse.click(box.x + 60, box.y + 60);
-      await page.waitForTimeout(150);
+      await settle(page);
       expect(await target(page)).toEqual(before);
     } finally {
       await page.close();
@@ -173,7 +174,7 @@ describe.skipIf(!CHROMIUM)('view pan', () => {
       const t0 = await target(page);
       // deltaX present => two-finger scroll, never a mouse wheel.
       await page.mouse.wheel(30, 20);
-      await page.waitForTimeout(150);
+      await settle(page);
       const t1 = await target(page);
       expect(t1).not.toEqual(t0);
       expect(await zoom(page)).toBe(z0);
@@ -181,7 +182,7 @@ describe.skipIf(!CHROMIUM)('view pan', () => {
       await page.keyboard.down('Control');
       await page.mouse.wheel(0, -40);
       await page.keyboard.up('Control');
-      await page.waitForTimeout(150);
+      await settle(page);
       expect(await zoom(page)).toBeGreaterThan(z0);
       // Off-centre cursor: the zoom also shifts the look-at toward it.
       expect(await target(page)).not.toEqual(t1);

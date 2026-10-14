@@ -8,7 +8,8 @@ import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { chromium, type Browser, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CHROMIUM } from '../test-support/chromium';
+import { CHROMIUM, RENDER_ARGS } from '../test-support/chromium';
+import { animationFrames, settle, waitForPageRendered } from '../test-support/render-harness';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
 
@@ -29,7 +30,7 @@ beforeAll(async () => {
   const address = server.httpServer?.address();
   if (!address || typeof address === 'string') throw new Error('vite did not bind a port');
   base = `http://127.0.0.1:${address.port}/registry-harness.html`;
-  browser = await chromium.launch({ executablePath: CHROMIUM, headless: true });
+  browser = await chromium.launch({ executablePath: CHROMIUM, headless: true, args: RENDER_ARGS });
 }, 60_000);
 
 afterAll(async () => {
@@ -44,6 +45,7 @@ async function open(query = ''): Promise<Page> {
   });
   await page.goto(`${base}${query}`);
   await page.getByTestId('process-editor').waitFor();
+  await waitForPageRendered(page);
   // The probe part hands over the R3F scene; the GLB loads asynchronously after that.
   await page.waitForFunction(
     () => {
@@ -77,10 +79,12 @@ describe.skipIf(!CHROMIUM)('registry-driven editor in a real canvas', () => {
     const page = await open();
     try {
       const a = await shaftRotationY(page);
-      await page.waitForTimeout(600);
-      const b = await shaftRotationY(page);
-      // 600 rpm = 10 rev/s; any positive delta proves the frame loop ran spin().
-      expect(b).not.toBe(a);
+      // 600 rpm = 10 rev/s; any change proves the frame loop ran spin(). Wait on the
+      // condition itself (polled per animation frame), not on elapsed time.
+      await page.waitForFunction(
+        (before) => (window as any).__harness.scene.getObjectByName('animshaft').rotation.y !== before,
+        a,
+      );
     } finally {
       await page.close();
     }
@@ -127,7 +131,8 @@ describe.skipIf(!CHROMIUM)('registry-driven editor in a real canvas', () => {
       const changed = await page.evaluate(() => (window as any).__harness.changes[0]);
       expect(changed.objects.find((o: any) => o.id === 'tank-1').params).toEqual({ level: 0.9 });
       // The echoed scene must not loop back as a second change.
-      await page.waitForTimeout(300);
+      await settle(page);
+      await animationFrames(page, 10);
       expect(await page.evaluate(() => (window as any).__harness.changes.length)).toBe(1);
     } finally {
       await page.close();
@@ -143,7 +148,7 @@ describe.skipIf(!CHROMIUM)('registry-driven editor in a real canvas', () => {
       expect(await page.getByText('Process library').count()).toBe(0);
       await page.keyboard.press('Delete');
       await page.keyboard.press('p');
-      await page.waitForTimeout(200);
+      await settle(page);
       expect(await root.getAttribute('data-object-count')).toBe('3');
       expect(await root.getAttribute('data-mode')).toBe('select');
       expect(await page.evaluate(() => (window as any).__harness.changes.length)).toBe(0);
