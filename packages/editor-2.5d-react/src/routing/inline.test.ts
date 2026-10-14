@@ -7,6 +7,8 @@ import {
   detachFrom,
   findHostPipe,
   hostPipeOf,
+  INLINE_PART_LENGTH,
+  INLINE_PART_MARGIN,
   placeOnRoute,
   positionOnPipe,
   segOf,
@@ -111,21 +113,22 @@ describe('placeOnRoute', () => {
     const r = placeOnRoute(l, 6 / 14)!; // exactly on the bend
     const along = r.t * 6;
     expect(r.seg.id).toBe('a');
-    expect(along).toBeCloseTo(6 - ELBOW_RADIUS);
+    expect(along).toBeCloseTo(6 - ELBOW_RADIUS - INLINE_PART_LENGTH / 2 - INLINE_PART_MARGIN);
     const r2 = placeOnRoute(l, 6.2 / 14)!; // just past the bend
     expect(r2.seg.id).toBe('b');
-    expect(r2.t * 8).toBeCloseTo(ELBOW_RADIUS);
+    expect(r2.t * 8).toBeCloseTo(ELBOW_RADIUS + INLINE_PART_LENGTH / 2 + INLINE_PART_MARGIN);
   });
-  it('does not shy away from the route start and end (no bend there)', () => {
+  it('clears the route start and end by the body half-length plus a margin', () => {
     expect(placeOnRoute(l, 0.01)!.t * 6).toBeGreaterThan(0);
     expect(placeOnRoute(l, 0.01)!.t * 6).toBeLessThan(ELBOW_RADIUS);
     const end = placeOnRoute(l, 1)!;
     expect(end.t).toBeLessThan(1); // strictly inside, so it stays hosted
-    expect(end.t).toBeGreaterThan(0.99);
+    expect((1 - end.t) * 8).toBeCloseTo(INLINE_PART_LENGTH / 2 + INLINE_PART_MARGIN);
   });
-  it('puts a part in the middle of a straight too short to clear its bends', () => {
-    const short = [seg('a', 0, 0, 0, 1), seg('b', 0, 1, 1, 1), seg('c', 1, 1, 1, 2)];
-    expect(placeOnRoute(short, 0.5)).toMatchObject({ seg: { id: 'b' }, t: 0.5 });
+  it('skips straights too short to clear their bends and the part body', () => {
+    const short = [seg('a', 0, 0, 0, 3), seg('b', 0, 3, 1, 3), seg('c', 1, 3, 1, 6)];
+    expect(placeOnRoute(short, 0.5)!.seg.id).not.toBe('b');
+    expect(placeOnRoute([seg('tiny', 0, 0, 0.7, 0)], 0.5)).toBeNull();
   });
   it('returns null for an empty or zero-length route', () => {
     expect(placeOnRoute([], 0.5)).toBeNull();
@@ -140,32 +143,92 @@ describe('placeOnRoute', () => {
 describe('carryHostedParts', () => {
   const old = [seg('old', 0, 0, 10, 0)];
   it('keeps the same fraction on a straight replacement and stays attached', () => {
-    const [v] = carryHostedParts([valve('v', 4, 0, { onPipe: 'old', at: 0.4 })], old, [seg('new', 0, 0, 20, 0)]);
+    const [v] = carryHostedParts([valve('v', 4, 0, { onPipe: 'old', at: 0.4 })], old, [seg('new', 0, 0, 20, 0)])!;
     expect(v).toMatchObject({ x: 8, y: 0, onPipe: 'new', at: 0.4 });
     expect(v).not.toHaveProperty('rotation');
   });
   it('turns the part with the pipe axis when it lands on a perpendicular straight', () => {
     const route = [seg('n1', 0, 0, 0, 5), seg('n2', 0, 5, 5, 5)];
-    const [v] = carryHostedParts([valve('v', 2, 0, { onPipe: 'old', at: 0.2 })], old, route);
+    const [v] = carryHostedParts([valve('v', 2, 0, { onPipe: 'old', at: 0.2 })], old, route)!;
     expect(v).toMatchObject({ x: 0, y: 2, onPipe: 'n1' });
     expect(v!.rotation).toBeCloseTo(Math.PI / 2);
     // A yawed part keeps its own offset from the axis.
-    const [w] = carryHostedParts([valve('w', 2, 0, { onPipe: 'old', rotation: Math.PI / 2 })], old, route);
+    const [w] = carryHostedParts([valve('w', 2, 0, { onPipe: 'old', rotation: Math.PI / 2 })], old, route)!;
     expect(w!.rotation).toBeCloseTo(Math.PI);
   });
   it('uses the pipe geometry, not a stale `at`', () => {
-    const [v] = carryHostedParts([valve('v', 5, 0, { onPipe: 'old', at: 0.9 })], old, [seg('new', 0, 0, 10, 0)]);
+    const [v] = carryHostedParts([valve('v', 5, 0, { onPipe: 'old', at: 0.9 })], old, [seg('new', 0, 0, 10, 0)])!;
     expect(v).toMatchObject({ x: 5, at: 0.5 });
   });
   it('maps across a multi-pipe run by total length', () => {
     const chain = [seg('o1', 0, 0, 4, 0), seg('o2', 4, 0, 4, 4)];
-    const [v] = carryHostedParts([valve('v', 4, 2, { onPipe: 'o2', at: 0.5 })], chain, [seg('n', 0, 0, 16, 0)]);
+    const [v] = carryHostedParts([valve('v', 4, 2, { onPipe: 'o2', at: 0.5 })], chain, [seg('n', 0, 0, 16, 0)])!;
     expect(v).toMatchObject({ x: 12, y: 0, onPipe: 'n' });
   });
-  it('leaves a part alone when it is not on the old chain or the route is empty', () => {
+  it('rejects an invalid old attachment or an empty replacement route', () => {
     const v = valve('v', 5, 0, { onPipe: 'zzz' });
-    expect(carryHostedParts([v], old, [seg('n', 0, 0, 5, 0)])).toEqual([v]);
+    expect(carryHostedParts([v], old, [seg('n', 0, 0, 5, 0)])).toBeNull();
     const w = valve('w', 5, 0, { onPipe: 'old' });
-    expect(carryHostedParts([w], old, [])).toEqual([w]);
+    expect(carryHostedParts([w], old, [])).toBeNull();
+  });
+
+  it('shortens a U run without overlapping carried bodies and preserves geometric order', () => {
+    const chain = [seg('a', 0, 0, 0, 10), seg('b', 0, 10, 10, 10), seg('c', 10, 10, 10, 0)];
+    const parts = [valve('later', 0, 4, { onPipe: 'a' }), valve('earlier', 0, 3, { onPipe: 'a' })];
+    const [later, earlier] = carryHostedParts(parts, chain, [seg('new', 0, 0, 10, 0)])!;
+    expect(earlier!.x).toBeCloseTo(1);
+    expect(later!.x - earlier!.x).toBeGreaterThanOrEqual(INLINE_PART_LENGTH + INLINE_PART_MARGIN - 1e-9);
+    expect(later!.onPipe).toBe('new');
+    expect(earlier!.onPipe).toBe('new');
+    expect(parts.map((p) => p.x)).toEqual([0, 0]); // inputs unchanged
+  });
+
+  it('shifts a late cluster upstream to leave room for every part', () => {
+    const parts = [8, 8.8, 9.6].map((x, i) => valve(`v${i}`, x, 0, { onPipe: 'old' }));
+    const moved = carryHostedParts(parts, old, [seg('new', 0, 0, 3, 0)])!;
+    expect(moved).toHaveLength(3);
+    expect(moved[2]!.x).toBeCloseTo(2.6);
+    for (let i = 1; i < moved.length; i += 1) {
+      expect(moved[i]!.x - moved[i - 1]!.x).toBeCloseTo(INLINE_PART_LENGTH + INLINE_PART_MARGIN);
+    }
+  });
+
+  it('distributes a cluster near bends over clear straights without coinciding', () => {
+    const parts = [4.1, 4.9, 5.7].map((x, i) => valve(`v${i}`, x, 0, { onPipe: 'old' }));
+    const route = [seg('a', 0, 0, 0, 4), seg('short', 0, 4, 1, 4), seg('b', 1, 4, 1, 8)];
+    const moved = carryHostedParts(parts, old, route)!;
+    const distances = moved.map((p) => p.onPipe === 'a' ? p.y : 5 + p.y - 4);
+    expect(distances[0]).toBeLessThan(distances[1]!);
+    expect(distances[1]).toBeLessThan(distances[2]!);
+    for (const p of moved) {
+      expect(p.onPipe).not.toBe('short');
+      const host = route.find((s) => s.id === p.onPipe)!;
+      expect(positionOnPipe(host, p.x, p.y)).toBeCloseTo(p.at!);
+      const fromBend = p.onPipe === 'a' ? 4 - p.y : p.y - 4;
+      expect(fromBend).toBeGreaterThanOrEqual(ELBOW_RADIUS + INLINE_PART_LENGTH / 2 + INLINE_PART_MARGIN - 1e-9);
+    }
+    for (let i = 1; i < moved.length; i += 1) {
+      expect(Math.hypot(moved[i]!.x - moved[i - 1]!.x, moved[i]!.y - moved[i - 1]!.y))
+        .toBeGreaterThanOrEqual(INLINE_PART_LENGTH + INLINE_PART_MARGIN - 1e-9);
+    }
+  });
+
+  it('rejects too many parts for a straight or a route trimmed by bends', () => {
+    const parts = [2, 4, 6].map((x, i) => valve(`v${i}`, x, 0, { onPipe: 'old' }));
+    expect(carryHostedParts(parts, old, [seg('new', 0, 0, 2, 0)])).toBeNull();
+    const bends = [seg('a', 0, 0, 0, 1), seg('b', 0, 1, 1, 1), seg('c', 1, 1, 1, 2)];
+    expect(carryHostedParts(parts, old, bends)).toBeNull();
+  });
+
+  it.each([1, 2, 3, 10])('fits %i parts at the exact clearance limit', (count) => {
+    const parts = Array.from({ length: count }, (_, i) => valve(`v${i}`, (i + 0.5) * 10 / count, 0, { onPipe: 'old' }));
+    const length = 0.8 + (count - 1) * 0.7;
+    const moved = carryHostedParts(parts, old, [seg('new', 0, 0, length, 0)])!;
+    expect(moved).not.toBeNull();
+    expect(moved.map((p) => p.x)).toEqual(parts.map((_, i) => expect.closeTo(0.4 + i * 0.7)));
+  });
+
+  it('handles no carried parts', () => {
+    expect(carryHostedParts([], [], [])).toEqual([]);
   });
 });

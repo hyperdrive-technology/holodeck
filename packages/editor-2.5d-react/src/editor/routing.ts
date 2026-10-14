@@ -75,6 +75,8 @@ export function planRoute(
 /**
  * Placements for a click-click pipe: routed around obstacles when possible,
  * else the manhattan L. `fallback` surfaces which one the caller got.
+ * `reservedObjects` separates retained IDs from the obstacle scene (e.g.
+ * hosted parts excluded while rerouting); defaults to all scene objects.
  */
 export function routeToPlacements(
   scene: Pick<IsoSceneFile, 'objects'>,
@@ -82,11 +84,11 @@ export function routeToPlacements(
   from: RouteEnd,
   to: RouteEnd,
   nextId: NextId,
-  opts: { exclude?: ReadonlySet<string>; band?: string; route?: RouteOptions } = {},
+  opts: { exclude?: ReadonlySet<string>; band?: string; route?: RouteOptions; reservedObjects?: readonly IsoPlacement[] } = {},
 ): { placements: IsoPlacement[]; fallback: boolean; noRoute: boolean } {
   const plan = planRoute(scene, registry, from, to, opts);
   return {
-    placements: pathToPlacements(plan.points, scene.objects, nextId, opts.band),
+    placements: pathToPlacements(plan.points, opts.reservedObjects ?? scene.objects, nextId, opts.band),
     fallback: plan.fallback,
     noRoute: plan.noRoute,
   };

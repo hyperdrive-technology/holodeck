@@ -16,6 +16,9 @@ export type ResizeHandle = 'radius' | 'height';
 /** Shown when A* finds no clear route and the manhattan L was drawn instead. */
 export const NO_ROUTE_NOTICE = 'No clear route — drew a straight L';
 
+/** Rerouting is atomic when the carried parts cannot fit on the new run. */
+export const INLINE_PARTS_NO_ROUTE_NOTICE = 'No clear route — inline parts do not fit';
+
 /** `run` = view only; `edit` = place / drag / delete. Set by the host via `ProcessEditor`'s `mode`. */
 export type EditorHostMode = 'run' | 'edit';
 export type EditorMode = 'select' | 'place' | 'draw-pipe';
@@ -34,7 +37,7 @@ export interface EditorState {
   /** One-line inline message (e.g. the routing fallback). Cleared by the next non-pointer action. */
   notice: string | null;
   cursor: GridPoint | null;
-  drag: { id: string; origin: GridPoint; grab: GridPoint } | null;
+  drag: { id: string; origin: IsoPlacement; grab: GridPoint } | null;
   /**
    * Live resize drag (radius / height handle). `param` is the number param
    * the handle edits, `origin` its value when the handle was grabbed, so a
@@ -248,7 +251,7 @@ function rerouteSelected(state: EditorState): EditorState {
   const ids = new Set(run.ids);
   // Inline parts drawn on the run's pipes (holodeck#22) ride along: they are
   // taken out of the obstacles so they do not block the new route, then
-  // re-seated on it at the same fraction of its length.
+  // re-seated near the same fraction, with room for every carried body.
   const runPipes = state.scene.objects.filter((o) => ids.has(o.id) && isPipePlacement(o));
   const hosted = state.scene.objects.filter((o) => {
     const host = hostPipeOf(o, state.scene.objects);
@@ -262,12 +265,17 @@ function rerouteSelected(state: EditorState): EditorState {
   from.heading ??= run.startHeading;
   to.heading ??= run.endHeading;
   const band = state.scene.objects.find((o) => o.id === run.ids[0])?.band;
-  const { placements, noRoute } = routeToPlacements(without, state.registry, from, to, nextId, { band });
+  // Obstacle exclusion must not release IDs belonging to carried parts.
+  const reservedObjects = state.scene.objects.filter((o) => !ids.has(o.id));
+  const { placements, noRoute } = routeToPlacements(without, state.registry, from, to, nextId, { band, reservedObjects });
   const carried = carryHostedParts(
     hosted,
     chainFrom(runPipes.map(segOf), run.start),
     placements.filter(isPipePlacement).map(segOf),
   );
+  if (carried === null) {
+    return { ...state, notice: INLINE_PARTS_NO_ROUTE_NOTICE };
+  }
   return commit(
     state,
     { ...state.scene, objects: [...rest, ...placements, ...carried] },
@@ -355,7 +363,7 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
         mode: 'select',
         placing: null,
         pipeStart: null,
-        drag: { id: action.id, origin: { x: obj.x, y: obj.y }, grab: { x: action.x, y: action.y } },
+        drag: { id: action.id, origin: structuredClone(obj), grab: { x: action.x, y: action.y } },
       };
     }
     case 'drag-move': {
@@ -368,14 +376,7 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
         if (o.id !== state.drag?.id) {
           return o;
         }
-        const fromOrigin = { ...o, x: state.drag.origin.x, y: state.drag.origin.y };
-        if (typeof o.toX === 'number' && typeof o.toY === 'number') {
-          const dtx = o.toX - o.x;
-          const dty = o.toY - o.y;
-          fromOrigin.toX = state.drag.origin.x + dtx;
-          fromOrigin.toY = state.drag.origin.y + dty;
-        }
-        const moved = moveBy(fromOrigin, dx, dy);
+        const moved = moveBy(state.drag.origin, dx, dy);
         // Keep the pipe attachment in step with where the part is dropped.
         return isInlinePart(moved, state.registry) ? withAttachment(moved, state.scene.objects) : moved;
       });
@@ -388,21 +389,18 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
       const current = state.scene.objects.find((o) => o.id === state.drag?.id);
       const moved = current && (current.x !== state.drag.origin.x || current.y !== state.drag.origin.y);
       if (!moved) {
-        return { ...state, drag: null };
+        // A drag out and back is a no-op, including attachment metadata.
+        const origin = state.drag.origin;
+        const objects = state.scene.objects.map((o) => o.id === origin.id ? { ...origin } : o);
+        return { ...state, scene: { ...state.scene, objects }, drag: null };
       }
       const before = cloneScene(state.scene);
       before.objects = before.objects.map((o) => {
         if (o.id !== state.drag?.id) {
           return o;
         }
-        const restored = { ...o, x: state.drag.origin.x, y: state.drag.origin.y };
-        if (typeof o.toX === 'number' && typeof o.toY === 'number') {
-          const dtx = o.toX - o.x;
-          const dty = o.toY - o.y;
-          restored.toX = state.drag.origin.x + dtx;
-          restored.toY = state.drag.origin.y + dty;
-        }
-        return restored;
+        // Coordinates alone lose onPipe/at after withAttachment detaches it.
+        return { ...state.drag.origin };
       });
       return {
         ...state,

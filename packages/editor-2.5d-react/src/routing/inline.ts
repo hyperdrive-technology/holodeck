@@ -4,7 +4,8 @@
  * Design: a valve drawn on the middle of one long pipe records the pipe it
  * sits on with `onPipe: <pipe id>` and `at: <0..1 along that pipe, from its
  * (x, y) end to its (toX, toY) end>`. The pipe is NOT split. Reroute then
- * carries such parts along to the same fraction of the new route.
+ * carries such parts along near the same fraction of the new route, with
+ * clearance for their bodies and bends.
  *
  * Why not split the pipe at the valve (so the valve becomes a joint and
  * `findRun` already stops there)? Splitting rewrites hand-authored scenes:
@@ -134,57 +135,114 @@ function fractionAlong(chain: readonly PipeSeg[], index: number, t: number): num
 
 const axisOf = (s: PipeSeg) => (Math.abs(s.to.x - s.from.x) >= Math.abs(s.to.y - s.from.y) ? 0 : Math.PI / 2);
 
-/**
- * Where on `route` (oriented pipes of the NEW route, start to end) a part at
- * fraction `f` of the old run goes. Positions within an elbow's trim of a
- * bend slide to the nearest clear spot on that straight; if a straight is
- * too short to clear its bends the part goes to its middle.
- */
+/** Along-pipe body length and extra clearance, in grid units. */
+export const INLINE_PART_LENGTH = 0.6;
+export const INLINE_PART_MARGIN = 0.1;
+const PART_END_CLEARANCE = INLINE_PART_LENGTH / 2 + INLINE_PART_MARGIN;
+const PART_SPACING = INLINE_PART_LENGTH + INLINE_PART_MARGIN;
+// Repeated 0.7-unit spacing can differ by a few ulps at an exact fit. This
+// tolerance is far smaller than the attachment epsilon or the body margin.
+const CLEARANCE_EPS = 1e-9;
+
+interface ClearSpan {
+  seg: PipeSeg;
+  offset: number;
+  lo: number;
+  hi: number;
+}
+
+/** Legal centre positions by distance from the route start, excluding bends and body overhang. */
+function clearSpans(route: readonly PipeSeg[]): ClearSpan[] {
+  let offset = 0;
+  const spans: ClearSpan[] = [];
+  route.forEach((seg, i) => {
+    const len = segLength(seg);
+    const lo = offset + PART_END_CLEARANCE + (i === 0 ? 0 : ELBOW_RADIUS);
+    const hi = offset + len - PART_END_CLEARANCE - (i === route.length - 1 ? 0 : ELBOW_RADIUS);
+    if (lo <= hi + CLEARANCE_EPS) spans.push({ seg, offset, lo: Math.min(lo, hi), hi });
+    offset += len;
+  });
+  return spans;
+}
+
+/** Nearest legal centre inside the bounds; ties use the earlier straight. */
+function nearestPosition(spans: readonly ClearSpan[], desired: number, lo: number, hi: number): { span: ClearSpan; distance: number } | null {
+  let best: { span: ClearSpan; distance: number } | null = null;
+  for (const span of spans) {
+    const start = Math.max(lo, span.lo);
+    const end = Math.min(hi, span.hi);
+    if (start > end + CLEARANCE_EPS) continue;
+    const bounded = Math.min(Math.max(desired, start), end);
+    const distance = Math.min(Math.max(bounded, span.lo), span.hi);
+    if (!best || Math.abs(distance - desired) < Math.abs(best.distance - desired)) {
+      best = { span, distance };
+    }
+  }
+  return best;
+}
+
+/** Nearest straight with clearance for one part's entire body, or null if none fits. */
 export function placeOnRoute(route: readonly PipeSeg[], f: number): { seg: PipeSeg; t: number } | null {
   const total = route.reduce((n, s) => n + segLength(s), 0);
-  if (route.length === 0 || total === 0) return null;
-  let remaining = Math.min(Math.max(f, 0), 1) * total;
-  let i = 0;
-  while (i < route.length - 1 && remaining > segLength(route[i]!)) {
-    remaining -= segLength(route[i]!);
-    i += 1;
-  }
-  const seg = route[i]!;
-  const len = segLength(seg);
-  // A bend sits at a pipe end unless it is the route's own start / end.
-  const lo = i === 0 ? 0 : ELBOW_RADIUS;
-  const hi = len - (i === route.length - 1 ? 0 : ELBOW_RADIUS);
-  const d = lo >= hi ? len / 2 : Math.min(Math.max(remaining, lo), hi);
-  // Strictly inside, so the part stays hosted rather than becoming a joint.
-  const t = Math.min(Math.max(d / len, 2 * ON_PIPE_EPS / len), 1 - 2 * ON_PIPE_EPS / len);
-  return { seg, t };
+  const target = nearestPosition(clearSpans(route), Math.min(Math.max(f, 0), 1) * total, 0, total);
+  if (!target) return null;
+  return { seg: target.span.seg, t: (target.distance - target.span.offset) / segLength(target.span.seg) };
 }
 
 /**
- * Re-seat `hosted` parts (attached to the old run's pipes) on the new route.
- * `oldChain` / `newRoute` are both oriented start to end. Rotation follows
- * the part's own offset from the pipe axis, so a yawed extension part keeps
- * its barrel along the pipe whichever way the new straight runs.
+ * Allocate carried parts jointly, in their geometric order along the old run.
+ * Fractions are preferred positions, subject to body/bend clearance and spacing.
+ * A backward pass reserves room for every later part; a forward pass picks the
+ * nearest remaining position. This prevents both bend clamping collisions and
+ * a late cluster failing when it could fit by shifting earlier parts upstream.
+ * Return null when the new route cannot carry them all; callers must keep the
+ * old scene rather than publish a partially reattached run.
  */
 export function carryHostedParts(
   hosted: readonly IsoPlacement[],
   oldChain: readonly PipeSeg[],
   newRoute: readonly PipeSeg[],
-): IsoPlacement[] {
-  return hosted.map((part) => {
-    const index = oldChain.findIndex((s) => s.id === part.onPipe);
-    const old = oldChain[index];
+): IsoPlacement[] | null {
+  if (hosted.length === 0) return [];
+  const ordered: Array<{ part: IsoPlacement; old: PipeSeg; fraction: number; index: number }> = [];
+  for (const [index, part] of hosted.entries()) {
+    const oldIndex = oldChain.findIndex((s) => s.id === part.onPipe);
+    const old = oldChain[oldIndex];
     const at = old ? positionOnPipe(old, part.x, part.y) : null;
-    const target = index >= 0 && at !== null ? placeOnRoute(newRoute, fractionAlong(oldChain, index, at)) : null;
-    if (!old || !target) return part; // cannot happen for validated parts; leave as is
-    const { seg, t } = target;
-    const x = round(seg.from.x + t * (seg.to.x - seg.from.x));
-    const y = round(seg.from.y + t * (seg.to.y - seg.from.y));
-    const turn = axisOf(seg) - axisOf(old);
-    const next: IsoPlacement = { ...part, x, y, onPipe: seg.id, at: round(t) };
-    if (turn !== 0) next.rotation = (part.rotation ?? 0) + turn;
-    return next;
-  });
-}
+    if (!old || at === null) return null;
+    ordered.push({ part, old, fraction: fractionAlong(oldChain, oldIndex, at), index });
+  }
+  ordered.sort((a, b) => a.fraction - b.fraction || a.index - b.index);
+  const total = newRoute.reduce((n, s) => n + segLength(s), 0);
+  const spans = clearSpans(newRoute);
+  const latest: number[] = [];
+  let ceiling = total;
+  for (let i = ordered.length - 1; i >= 0; i -= 1) {
+    const target = nearestPosition(spans, ceiling, 0, ceiling);
+    if (!target) return null;
+    latest[i] = target.distance;
+    ceiling = target.distance - PART_SPACING;
+  }
 
-const round = (n: number) => Math.round(n * 1e4) / 1e4;
+  const out: IsoPlacement[] = [];
+  let floor = 0;
+  for (const [i, { part, old, fraction, index }] of ordered.entries()) {
+    const target = nearestPosition(spans, fraction * total, floor, latest[i]!);
+    if (!target) return null;
+    const { seg, offset } = target.span;
+    const t = (target.distance - offset) / segLength(seg);
+    const turn = axisOf(seg) - axisOf(old);
+    // Keep full precision: rounding centres independently can erode clearance.
+    const next: IsoPlacement = {
+      ...part,
+      x: seg.from.x + t * (seg.to.x - seg.from.x),
+      y: seg.from.y + t * (seg.to.y - seg.from.y),
+      onPipe: seg.id,
+      at: t,
+    };
+    if (turn !== 0) next.rotation = (part.rotation ?? 0) + turn;
+    out[index] = next;
+    floor = target.distance + PART_SPACING;
+  }
+  return out;
+}
