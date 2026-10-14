@@ -667,6 +667,37 @@ describe('hazards', () => {
       expect((await session.read!(['flow:n.out']))[0]?.value).toBe(true);
     });
 
+    it('a schedule that ticks inside start(), whose scan closes the session → SUPERSEDED, status stays disconnected', async () => {
+      let session!: ProviderSession;
+      const eager = (tick: () => void) => {
+        tick(); // e.g. a scheduler that runs the first tick immediately
+        return () => {};
+      };
+      const harness = await connect({ schedule: eager });
+      session = harness.session;
+      session.subscribe(['flow:add.sum'], (samples) => {
+        if (samples[0]?.value === 2) void session.close();
+      });
+      const result = await session.deploy!(flowDoc(counterBody()));
+      expect(result.diagnostics.map((d) => d.code)).toEqual(['SUPERSEDED']);
+      expect(session.status().state).toBe('disconnected');
+    });
+
+    it('a schedule that throws → SCHEDULE_FAILED, nothing left running, status error', async () => {
+      const bridge = createMemorySignalBridge();
+      const { session } = await connect({
+        signals: bridge,
+        schedule: () => {
+          throw new Error('no timers here');
+        },
+      });
+      const result = await session.deploy!(flowDoc(signalBody(), [plc]));
+      expect(result).toMatchObject({ ok: false, diagnostics: [expect.objectContaining({ code: 'SCHEDULE_FAILED', message: expect.stringMatching(/no timers here/) })] });
+      expect(bridge.subscriptions).toBe(0);
+      expect(session.status()).toMatchObject({ state: 'error' });
+      expect((await session.read!(['flow:in.value']))[0]).toMatchObject({ value: null, quality: 'bad' });
+    });
+
     it('a subscriber unsubscribing another during delivery skips it', async () => {
       const { session, manual } = await connect();
       await session.deploy!(flowDoc(counterBody()));

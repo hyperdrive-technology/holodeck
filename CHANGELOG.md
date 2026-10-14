@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`@holodeck/flow-runtime`**: `holodeck.flow.block` contract (`FlowBlockDefinition`), `holodeck.flow.graph.v1` validation, cyclic dataflow compiler and scheduler, built-in `flow.const` / `flow.delay` / `signal.in` / `signal.out` blocks, and the `holodeck.flow.local` deploy provider with hub signal bridges (#44)
+
 ## [0.1.0] - 2026-09-22
 
 First tagged Holodeck monorepo release (formerly Starfleet).

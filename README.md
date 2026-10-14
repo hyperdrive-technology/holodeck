@@ -47,6 +47,7 @@ pnpm parts
 | [packages/editor-2.5d-react](packages/editor-2.5d-react) | `@holodeck/editor-2.5d-react`: orthographic process editor, routing, animation, and equipment assets |
 | [packages/editor-2d-react](packages/editor-2d-react) | `@holodeck/editor-2d-react`: editable 2D diagrams using React Flow |
 | [packages/viewer-3d-react](packages/viewer-3d-react) | `@holodeck/viewer-3d-react`: read-only 3D scenes using React Three Fiber |
+| [packages/flow-runtime](packages/flow-runtime) | `@holodeck/flow-runtime`: flow block contract, cyclic dataflow runtime and the `holodeck.flow.local` provider (no React) |
 | [packages/cli](packages/cli) | `@holodeck/cli`: incomplete command-line tooling |
 | [blender](blender/README.md) | Python scripts that build fixed-shape equipment as GLB models |
 | [docs](docs) | Design notes and dated audits |

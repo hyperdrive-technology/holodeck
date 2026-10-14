@@ -281,6 +281,49 @@ describe('state', () => {
   });
 });
 
+describe('README example', () => {
+  /** The on-delay timer from README.md, verbatim. */
+  const ton: FlowBlockDefinition<{ elapsed: number }> = {
+    id: 'logic.ton',
+    label: 'TON',
+    category: 'Timers',
+    inputs: [{ name: 'in', type: 'bool' }],
+    outputs: [{ name: 'q', type: 'bool' }, { name: 'et', type: 'number' }],
+    params: { preset: { type: 'number', default: 1000, min: 0, unit: 'ms' } },
+    initialState: () => ({ elapsed: 0 }),
+    evaluate: ({ inputs, params, state, dtMs }) => {
+      const elapsed = inputs.in ? Math.min(state.elapsed + dtMs, params.preset as number) : 0;
+      return { outputs: { q: elapsed >= (params.preset as number) && inputs.in === true, et: elapsed }, state: { elapsed } };
+    },
+  };
+
+  it('a TON timer driven by dtMs turns on after its preset', () => {
+    const c = clock();
+    const run = runOf(
+      graph([node('in', 'signal.in', { connection: 'c', source: 's' }), node('t', 'logic.ton', { preset: 300 })], [wire('w', 'in.value', 't.in')]),
+      [ton as FlowBlockDefinition],
+      { now: c.now },
+    );
+    run.setSignal('in', true);
+    const q: unknown[] = [];
+    for (let i = 0; i < 5; i++) {
+      run.step();
+      q.push([value(run, 'flow:t.q'), value(run, 'flow:t.et')]);
+      c.advance(100);
+    }
+    expect(q).toEqual([
+      [false, 0],
+      [false, 100],
+      [false, 200],
+      [true, 300],
+      [true, 300],
+    ]);
+    run.setSignal('in', false);
+    run.step();
+    expect([value(run, 'flow:t.q'), value(run, 'flow:t.et')]).toEqual([false, 0]);
+  });
+});
+
 describe('faults', () => {
   const faultGraph = (mode: string) =>
     graph(

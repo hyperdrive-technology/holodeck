@@ -420,11 +420,18 @@ class LocalFlowSession implements ProviderSession {
     try {
       run.start();
     } catch (error) {
-      this.deployment = undefined;
-      this.teardown(deployment);
-      this.setStatus('error', `scan schedule failed: ${errorMessage(error)}`);
-      return failed([...diagnostics, diag('error', 'SCHEDULE_FAILED', `scan schedule failed: ${errorMessage(error)}`)]);
+      const message = `scan schedule failed: ${errorMessage(error)}`;
+      // Only undo what is still ours: a callback may already have replaced or closed it.
+      if (this.isCurrent(deployment, generation)) {
+        this.deployment = undefined;
+        this.teardown(deployment);
+        this.setStatus('error', message);
+      }
+      return failed([...diagnostics, diag('error', 'SCHEDULE_FAILED', message)]);
     }
+    // A schedule may tick synchronously inside start(), and that scan's
+    // subscribers may have closed the session or deployed again.
+    if (!this.isCurrent(deployment, generation)) return superseded();
 
     this.setStatus('live', `running ${quote(deployment.label)}`);
     if (!this.isCurrent(deployment, generation)) return superseded();
