@@ -6,14 +6,17 @@
  *   node scripts/smoke-holodeck-package.mjs
  *
  * 1. holodeck.package.json passes the SDK's validateHolodeckPackageManifest.
- * 2. The manifest `entry` (dist/holodeck-package.mjs) loads as an ES module
+ * 2. The manifest `entry` (dist/holodeck-package.js) loads as an ES module
  *    from its path, the way a host that only has the package directory loads it.
- * 3. `@holodeck/flow-runtime/holodeck-package` resolves by name as ESM and
- *    CJS, and each default export installs into a HolodeckHost that has a
- *    `holodeck.flow` engine built from the main entry's helpers (lane F2 ships
- *    the real one). The four structural blocks and the provider register, and
- *    the provider deploys and runs a small flow through a ProviderHub.
- * 4. `npm pack --dry-run` publishes the manifest and the entry.
+ * 3. `@holodeck/flow-runtime/holodeck-package` resolves by name, and each
+ *    default export installs into a HolodeckHost that has a `holodeck.flow`
+ *    engine built from the main entry's helpers (lane F2 ships the real one).
+ *    The four structural blocks and the provider register, and the provider
+ *    deploys and runs a small flow through a ProviderHub.
+ * 4. The package is ESM only (no CJS build, holodeck#60). Node's `require(esm)`
+ *    of the entry works (so there is no top-level await) and returns the very
+ *    same module instance as `import`: one copy of the built-ins per realm.
+ * 5. `npm pack --dry-run` publishes the manifest and the entry.
  *
  * The repo-wide scripts/smoke-dist.mjs checks the main entry only; this file
  * covers the second entry without changing that shared script.
@@ -108,17 +111,24 @@ try {
   fail(`import ${pkg.name}/holodeck-package threw: ${err.stack ?? err}`);
 }
 try {
-  // CJS against the CJS SDK; mixing module systems is not a supported setup.
-  await checkInstall('cjs ./holodeck-package', require('@holodeck/sdk'), require(pkg.name), require(`${pkg.name}/holodeck-package`));
+  // require(esm): one synchronous call, by path (the exports map is import-only).
+  const entryPath = join(PKG_DIR, manifest.entry);
+  const required = require(entryPath);
+  const imported = await import(pathToFileURL(entryPath).href);
+  if (required.default !== imported.default) fail('require(esm) returned a different module instance than import');
+  if (require(join(PKG_DIR, pkg.exports['.'].import)).createLocalFlowProvider !== mainEsm.createLocalFlowProvider) {
+    fail('require(esm) of the main entry returned a different module instance than import');
+  }
+  await checkInstall('require(esm) entry', sdk, mainEsm, required);
 } catch (err) {
-  fail(`require ${pkg.name}/holodeck-package failed: ${err.stack ?? err}`);
+  fail(`require(esm) of ${manifest.entry} failed: ${err.stack ?? err}`);
 }
 
 const pack = JSON.parse(
   execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts', '--loglevel=error'], { cwd: PKG_DIR, encoding: 'utf8' }),
 );
 const packed = new Set(pack[0].files.map((f) => f.path));
-for (const file of ['holodeck.package.json', manifest.entry, 'dist/holodeck-package.js', 'dist/holodeck-package.d.ts', 'README.md']) {
+for (const file of ['holodeck.package.json', manifest.entry, 'dist/holodeck-package.d.ts', 'README.md']) {
   if (!packed.has(file)) fail(`npm pack would not publish ${file}`);
 }
 

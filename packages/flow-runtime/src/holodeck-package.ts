@@ -15,7 +15,7 @@
  * time. A host that wants `signal.in` / `signal.out` installs a module made
  * by `createFlowRuntimePackage({ signals })` instead.
  *
- * Built to `dist/holodeck-package.mjs` (the manifest's `entry`) and also
+ * Built to `dist/holodeck-package.js` (the manifest's `entry`) and also
  * re-exported from the main entry, so bundled apps need no second import.
  */
 

@@ -103,7 +103,8 @@ jobs:
         working-directory: holodeck/packages/${{ matrix.package }}
         run: pnpm build
 
-      # Load the built dist/ by package name in plain Node, as both ESM and CJS,
+      # Load the built dist/ by package name in plain Node, as both ESM and CJS
+      # (ESM-only packages such as flow-runtime: require(esm) of the import target),
       # and (editor-2.5d-react) check every bundled GLB URL points at a real,
       # published file. Catches holodeck#7-style "builds fine, crashes on import".
       - name: Smoke-test built package

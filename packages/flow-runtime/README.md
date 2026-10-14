@@ -282,8 +282,12 @@ const flowEngine: HolodeckEngine<FlowGraphBody> = {
 
 `holodeck.package.json` declares id `holodeck.flow-runtime`, contributes `holodeck.flow.block` and
 `holodeck.provider`, targets `engines: { "holodeck.flow": "^1.0" }`, and lists `providers: ["holodeck.flow.local"]`.
-The entry is `dist/holodeck-package.mjs`, which is also importable as `@holodeck/flow-runtime/holodeck-package` and
-re-exported from the main entry. Before a host registers the `holodeck.flow` engine, the blocks wait as `pending`.
+The entry is `dist/holodeck-package.js`, which is also importable as `@holodeck/flow-runtime/holodeck-package` and
+re-exported from the main entry.
+
+The package is **ESM only** (`"type": "module"`, an `import`-only exports map). A CommonJS build would load a
+second module instance, with its own built-in blocks, next to the ESM one (holodeck#60). The code has no
+top-level await, so Node's `require(esm)` of a file path, such as `require('…/dist/index.js')`, still works. Before a host registers the `holodeck.flow` engine, the blocks wait as `pending`.
 The provider works regardless, because it resolves the built-in blocks itself.
 
 ## Limits

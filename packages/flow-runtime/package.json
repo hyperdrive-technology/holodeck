@@ -2,19 +2,17 @@
   "name": "@holodeck/flow-runtime",
   "version": "0.1.0",
   "description": "Flow block contract, cyclic dataflow runtime and the holodeck.flow.local provider for Holodeck flow documents",
+  "type": "module",
   "main": "./dist/index.js",
-  "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": "./dist/index.js"
     },
     "./holodeck-package": {
       "types": "./dist/holodeck-package.d.ts",
-      "import": "./dist/holodeck-package.mjs",
-      "require": "./dist/holodeck-package.js"
+      "import": "./dist/holodeck-package.js"
     },
     "./holodeck.package.json": "./holodeck.package.json",
     "./package.json": "./package.json"

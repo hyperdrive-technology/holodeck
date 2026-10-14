@@ -8,7 +8,7 @@
   "contributes": ["holodeck.flow.block", "holodeck.provider"],
   "engines": { "holodeck.flow": "^1.0" },
   "providers": ["holodeck.flow.local"],
-  "entry": "dist/holodeck-package.mjs",
+  "entry": "dist/holodeck-package.js",
   "homepage": "https://github.com/hyperdrive-technology/holodeck/tree/main/packages/flow-runtime#readme",
   "repository": "github:hyperdrive-technology/holodeck",
   "keywords": ["flow", "dataflow", "runtime", "provider", "deploy"]

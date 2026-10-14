@@ -27,7 +27,7 @@ describe('holodeck.package.json', () => {
       contributes: ['holodeck.flow.block', 'holodeck.provider'],
       engines: { 'holodeck.flow': '^1.0' },
       providers: ['holodeck.flow.local'],
-      entry: 'dist/holodeck-package.mjs',
+      entry: 'dist/holodeck-package.js',
     });
     expect(packageRoles(FLOW_RUNTIME_PACKAGE_MANIFEST)).toEqual(['library', 'provider']);
   });
