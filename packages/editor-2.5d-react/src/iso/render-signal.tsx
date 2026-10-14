@@ -17,10 +17,10 @@
  * k+1 observing the same state proves frame k was submitted. Two frames is the
  * minimum that guarantees a presented frame contains the revision.
  *
- * Holds are counted, not flagged, so any number of loaders can overlap. A
- * Suspense fallback that mounts `<PendingAsset />` holds the signal for as long
- * as its boundary is suspended (the fallback unmounts in the same commit that
- * mounts the loaded model), so GLB parts need no bookkeeping of their own.
+ * Holds are counted, not flagged, so any number of loaders can overlap.
+ * HolodeckModel registers its suspended loader promise before rethrowing it,
+ * so even a host's `Suspense fallback={null}` waits for GLBs. A fallback that
+ * mounts `<PendingAsset />` additionally holds until its boundary commits.
  */
 import { useFrame, useThree } from '@react-three/fiber';
 import { createContext, useContext, useLayoutEffect, useRef, useState } from 'react';
@@ -53,6 +53,54 @@ export function createRenderTracker(): RenderTracker {
 
 /** Null outside an IsoCanvas: holds are then no-ops (parts can render in any canvas). */
 export const RenderTrackerContext = createContext<RenderTracker | null>(null);
+
+// Suspended mounts have no effects/ref state to clean up. Own these holds by
+// the cached loader promise instead, and deduplicate React retries and models
+// sharing that promise separately for each canvas.
+const pendingAssets = new WeakMap<RenderTracker, WeakSet<PromiseLike<unknown>>>();
+// Holds whose load succeeded but whose model has not mounted yet, by mount key.
+const awaitingMount = new WeakMap<RenderTracker, Map<string, () => void>>();
+/** Safety net: a model abandoned between load and mount must not hold forever. */
+export const MOUNT_HANDOFF_TIMEOUT_MS = 2000;
+
+/**
+ * Holds `tracker` until `promise` settles. With `mountKey`, a successful load
+ * keeps the hold until `confirmAssetMounted(tracker, mountKey)` (or the safety
+ * timeout): the promise settles BEFORE React retries and commits the suspended
+ * model, so releasing on settle lets the two-frame gate report a frame that
+ * does not contain the model yet (seen in embed-render.test.ts, "null Suspense
+ * fallback"). Failures release immediately; nothing will mount.
+ */
+export function holdPendingAsset(tracker: RenderTracker, promise: PromiseLike<unknown>, mountKey?: string): void {
+  let assets = pendingAssets.get(tracker);
+  if (!assets) {
+    assets = new WeakSet();
+    pendingAssets.set(tracker, assets);
+  }
+  if (assets.has(promise)) return;
+  assets.add(promise);
+  const release = tracker.hold();
+  if (mountKey === undefined) {
+    Promise.resolve(promise).then(release, release);
+    return;
+  }
+  Promise.resolve(promise).then(() => {
+    let waiting = awaitingMount.get(tracker);
+    if (!waiting) awaitingMount.set(tracker, (waiting = new Map()));
+    const previous = waiting.get(mountKey);
+    waiting.set(mountKey, () => { previous?.(); release(); });
+    setTimeout(() => confirmAssetMounted(tracker, mountKey), MOUNT_HANDOFF_TIMEOUT_MS);
+  }, release);
+}
+
+/** The model for `mountKey` is committed: release holds waiting on its mount. */
+export function confirmAssetMounted(tracker: RenderTracker, mountKey: string): void {
+  const waiting = awaitingMount.get(tracker);
+  const release = waiting?.get(mountKey);
+  if (!release) return;
+  waiting!.delete(mountKey);
+  release();
+}
 
 /** Holds the rendered signal while `active` (inside an IsoCanvas). */
 export function useRenderHold(active = true): void {

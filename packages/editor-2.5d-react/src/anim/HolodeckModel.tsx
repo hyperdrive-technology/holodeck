@@ -11,6 +11,8 @@ import { useIsoAnimators } from './use-iso-animators';
  * `def` (its `animNodes`), resolved `params` and the placement's `animation`
  * overrides and the model's `anim.*` nodes are driven every frame.
  * Without `def`/`params` it behaves exactly like the static component.
+ * Pending GLB loads hold IsoCanvas's rendered signal automatically, even in
+ * a host's `Suspense fallback={null}`; a Suspense boundary is still required.
  */
 export function HolodeckModel({
   def,
