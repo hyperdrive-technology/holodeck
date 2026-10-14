@@ -1,0 +1,11 @@
+{
+  "description": "Arcentry fidelity ratchet for src/iso/scene-render.test.ts: render of tests/scene.json vs tests/snapshots/reference-canvas.png (760x540, DPR 1). fidelity = 1 - pixelmatch diff ratio (threshold 0.1, AA ignored). Runs fail below fidelity - epsilon; `pnpm visual:record` only raises the score. Lowering it is a deliberate hand edit with a reason in the PR.",
+  "platforms": {
+    "darwin": {
+      "fidelity": 0.283,
+      "epsilon": 0.0005,
+      "rmse": 25.34,
+      "recordedAt": "2026-10-14T05:00:43.737Z"
+    }
+  }
+}

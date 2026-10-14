@@ -3,19 +3,21 @@
  * first tank's (solid-wall) port to a cell beside the last with the real
  * pointer, and assert it goes around the middle tank. Needs local Chromium + WebGPU like the other *-render tests.
  */
-import { mkdirSync, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { chromium, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
+import { waitForRendered } from '../test-support/render-harness';
+import { artifactsDir } from '../visual/io';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { footprintCells } from '../routing/occupancy';
 import { runCells } from '../routing/occupancy';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
-const snapDir = path.join(pkgRoot, 'tests/snapshots');
-const shotPath = path.join(snapDir, 'auto-route.png');
+// Review screenshot only (nothing compares it): gitignored artifacts, not the tracked tree.
+const shotPath = path.join(artifactsDir('render'), 'auto-route.png');
 
 
 let server: ViteDevServer;
@@ -128,8 +130,8 @@ describe.skipIf(!CHROMIUM)('auto pipe routing in the editor', () => {
       // Back to the iso view for a reviewable screenshot.
       await page.keyboard.press('Escape');
       await page.keyboard.press('x');
-      await page.waitForTimeout(800);
-      mkdirSync(snapDir, { recursive: true });
+      // The 2D -> 2.5D pose animation holds the rendered signal until it lands.
+      await waitForRendered(root);
       await page.screenshot({ path: shotPath, type: 'png' });
     } finally {
       await browser.close();
