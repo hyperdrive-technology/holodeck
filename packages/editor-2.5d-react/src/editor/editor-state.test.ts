@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { HOLODECK_KINDS } from '@holodeck/sdk';
 import { createIsoRegistryWithBuiltins, getDefaultIsoRegistry } from '../registry/default';
+import { parseSceneFile, type IsoPlacement } from '../iso/scene';
+import { PROCESS_SCENE } from '../iso/load-process-scene';
+import { INLINE_PART_LENGTH, positionOnPipe, segOf } from '../routing/inline';
 import { pipeArmsAt } from '../routing/elbows';
 import type { Heading } from '../routing/grid';
-import { NO_ROUTE_NOTICE, REROUTE_FAILED_NOTICE, committedScene, createEditorState, editorReducer, emptyScene, nextId, stamp } from './editor-state';
+import { INLINE_PARTS_NO_ROUTE_NOTICE, NO_ROUTE_NOTICE, REROUTE_FAILED_NOTICE, RETAINED_CONNECTIONS_NO_ROUTE_NOTICE, committedScene, createEditorState, editorReducer, emptyScene, nextId, stamp } from './editor-state';
 
 const registry = getDefaultIsoRegistry();
 
@@ -372,6 +375,480 @@ describe('auto-routed pipes', () => {
       expect(r.scene.objects[0]).toMatchObject({ x: 0, y: 0, toX: 5, toY: 0 });
     });
 
+    // holodeck#22: a part drawn on the middle of ONE long pipe rides along.
+    describe('inline parts hosted on a pipe (onPipe)', () => {
+      const place = (s: ReturnType<typeof blank>, part: string, x: number, y: number) => {
+        s = editorReducer(s, { type: 'place-mode', object: part });
+        return editorReducer(s, { type: 'floor-click', x, y });
+      };
+      const withTankAcross = (s: ReturnType<typeof blank>) => ({
+        ...s,
+        scene: { ...s.scene, objects: [...s.scene.objects, stamp(registry, 'tank', 5, 0, 'tank-1')] },
+      });
+      const onRoute = (objects: readonly IsoPlacement[], v: IsoPlacement) => {
+        const host = objects.find((o) => o.id === v.onPipe);
+        expect(host?.object).toBe('pipe');
+        expect(positionOnPipe(segOf(host!), v.x, v.y)).not.toBeNull();
+      };
+
+      it('placing a valve inside a pipe records the pipe; off a pipe or at a joint it does not', () => {
+        let s = drawPipe(blank(), [0, 0], [10, 0]);
+        s = place(s, 'valve', 2, 0);
+        expect(s.scene.objects.find((o) => o.id === 'valve-1')).toMatchObject({ onPipe: 'pipe-1', at: 0.2 });
+        s = editorReducer(s, { type: 'floor-click', x: 2, y: 3 });
+        expect(s.scene.objects.find((o) => o.id === 'valve-2')).not.toHaveProperty('onPipe');
+        s = editorReducer(s, { type: 'floor-click', x: 10, y: 0 });
+        expect(s.scene.objects.find((o) => o.id === 'valve-3')).not.toHaveProperty('onPipe');
+        // A tank is not an inline part, even dropped on a pipe.
+        s = place(s, 'tank', 6, 0);
+        expect(s.scene.objects.find((o) => o.object === 'tank')).not.toHaveProperty('onPipe');
+      });
+
+      it('dragging a valve along its pipe updates `at`; dragging it off detaches it', () => {
+        let s = drawPipe(blank(), [0, 0], [10, 0]);
+        s = place(s, 'valve', 2, 0);
+        s = editorReducer(s, { type: 'drag-start', id: 'valve-1', x: 2, y: 0 });
+        s = editorReducer(s, { type: 'drag-move', x: 6, y: 0 });
+        expect(s.scene.objects.find((o) => o.id === 'valve-1')).toMatchObject({ onPipe: 'pipe-1', at: 0.6 });
+        s = editorReducer(s, { type: 'drag-move', x: 6, y: 4 });
+        expect(s.scene.objects.find((o) => o.id === 'valve-1')).not.toHaveProperty('onPipe');
+        s = editorReducer(s, { type: 'drag-move', x: 3, y: 0 });
+        expect(s.scene.objects.find((o) => o.id === 'valve-1')).toMatchObject({ onPipe: 'pipe-1', at: 0.3 });
+      });
+
+      it('drag-off then undo restores the whole placement and reroute keeps it attached', () => {
+        let s = place(drawPipe(blank(), [0, 0], [10, 0]), 'valve', 2, 0);
+        s = editorReducer(s, { type: 'patch-selected', patch: { handwheel: '#123456', extensions: { tags: { open: 'v.open' } } } });
+        const original = s.scene.objects.find((o) => o.id === 'valve-1')!;
+        s = editorReducer(s, { type: 'drag-start', id: original.id, x: 2, y: 0 });
+        expect(s.drag?.origin).toEqual(original);
+        expect(s.drag?.origin).not.toBe(original);
+        s = editorReducer(s, { type: 'drag-move', x: 6, y: 4 });
+        s = editorReducer(s, { type: 'drag-end' });
+        expect(s.scene.objects.find((o) => o.id === original.id)).not.toHaveProperty('onPipe');
+        const dragged = s.scene;
+        s = editorReducer(s, { type: 'undo' });
+        expect(s.scene.objects.find((o) => o.id === original.id)).toEqual(original);
+        expect(editorReducer(s, { type: 'redo' }).scene).toEqual(dragged);
+        s = withTankAcross(editorReducer(s, { type: 'select', id: 'pipe-1' }));
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.past).toHaveLength(s.past.length + 1);
+        const carried = r.scene.objects.find((o) => o.id === original.id)!;
+        onRoute(r.scene.objects, carried);
+        expect(carried.extensions).toEqual(original.extensions);
+      });
+
+      it('dragging between pipes updates the host; undo and redo retain each attachment', () => {
+        let s = drawPipe(drawPipe(blank(), [0, 0], [10, 0]), [0, 4], [10, 4]);
+        s = place(s, 'valve', 2, 0);
+        const original = s.scene.objects.find((o) => o.id === 'valve-1')!;
+        s = editorReducer(s, { type: 'drag-start', id: original.id, x: 2, y: 0 });
+        s = editorReducer(s, { type: 'drag-move', x: 3, y: 2 }); // detached mid-drag
+        s = editorReducer(s, { type: 'drag-move', x: 6, y: 4 });
+        s = editorReducer(s, { type: 'drag-end' });
+        const moved = s.scene.objects.find((o) => o.id === original.id)!;
+        expect(moved).toMatchObject({ x: 6, y: 4, onPipe: 'pipe-2', at: 0.6 });
+        let u = editorReducer(s, { type: 'undo' });
+        expect(u.scene.objects.find((o) => o.id === original.id)).toEqual(original);
+        u = editorReducer(editorReducer(u, { type: 'select', id: 'pipe-1' }), { type: 'reroute-selected' });
+        onRoute(u.scene.objects, u.scene.objects.find((o) => o.id === original.id)!);
+        let r = editorReducer(editorReducer(s, { type: 'undo' }), { type: 'redo' });
+        expect(r.scene.objects.find((o) => o.id === original.id)).toEqual(moved);
+        r = editorReducer(editorReducer(r, { type: 'select', id: 'pipe-2' }), { type: 'reroute-selected' });
+        onRoute(r.scene.objects, r.scene.objects.find((o) => o.id === original.id)!);
+      });
+
+      it('a drag out and back restores original attachment fields without a history step', () => {
+        let s = place(drawPipe(blank(), [0, 0], [10, 0]), 'valve', 2, 0);
+        // An authored at value is informational; a no-op must preserve it exactly.
+        s = editorReducer(s, { type: 'patch-selected', patch: { at: 0.25 } });
+        const original = s.scene;
+        const past = s.past;
+        const revision = s.revision;
+        s = editorReducer(s, { type: 'drag-start', id: 'valve-1', x: 2, y: 0 });
+        s = editorReducer(s, { type: 'drag-move', x: 6, y: 4 });
+        s = editorReducer(s, { type: 'drag-move', x: 2, y: 0 });
+        s = editorReducer(s, { type: 'drag-end' });
+        expect(s.scene).toEqual(original);
+        expect(s.past).toBe(past);
+        expect(s.revision).toBe(revision);
+      });
+
+      it('reserves hosted parts with authored pipe/elbow IDs while excluding their obstacles', () => {
+        const scene = { ...emptyScene('authored'), objects: [
+          { id: 'old', object: 'pipe', x: 0, y: 0, toX: 10, toY: 0 },
+          { id: 'pipe-1', object: 'valve', x: 2, y: 0, onPipe: 'old', at: 0.2 },
+          { id: 'elbow-1', object: 'valve', x: 8, y: 0, onPipe: 'old', at: 0.8 },
+          stamp(registry, 'tank', 5, 0, 'pipe-2'),
+        ] };
+        expect(() => parseSceneFile(scene)).not.toThrow();
+        const s = editorReducer(createEditorState(scene), { type: 'select', id: 'old' });
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.past).toHaveLength(1);
+        const ids = r.scene.objects.map((o) => o.id);
+        expect(new Set(ids).size).toBe(ids.length);
+        expect(() => parseSceneFile(r.scene)).not.toThrow();
+        for (const id of ['pipe-1', 'elbow-1']) {
+          const part = r.scene.objects.find((o) => o.id === id)!;
+          expect(part.object).toBe('valve');
+          onRoute(r.scene.objects, part);
+        }
+        expect(r.scene.objects.find((o) => o.id === 'pipe-2')).toEqual(scene.objects[3]);
+      });
+
+      const uRun = (end: number, positions: number[]) => createEditorState({ ...emptyScene('shorten'), objects: [
+        { id: 'a', object: 'pipe', x: 0, y: 0, toX: 0, toY: 10 },
+        { id: 'b', object: 'pipe', x: 0, y: 10, toX: end, toY: 10 },
+        { id: 'c', object: 'pipe', x: end, y: 10, toX: end, toY: 0 },
+        ...positions.map((y, i) => ({ id: `v${i}`, object: 'valve', x: 0, y, onPipe: 'a', at: y / 10 })),
+      ] });
+
+      it('shortens a run while keeping carried valves apart and in order', () => {
+        const s = editorReducer(uRun(10, [3, 4]), { type: 'select', id: 'a' });
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        const [a, b] = ['v0', 'v1'].map((id) => r.scene.objects.find((o) => o.id === id)!);
+        expect(r.scene.objects.filter((o) => o.object === 'pipe')).toHaveLength(1);
+        onRoute(r.scene.objects, a!);
+        onRoute(r.scene.objects, b!);
+        expect(b!.x - a!.x).toBeGreaterThanOrEqual(0.7 - 1e-9);
+        expect(editorReducer(r, { type: 'undo' }).scene).toEqual(s.scene);
+      });
+
+      it('rejects a reroute that cannot fit carried valves without changing scene or history', () => {
+        let s = editorReducer(uRun(1, [3, 4]), { type: 'select', id: 'a' });
+        // Keep a redo entry to prove a routing failure does not commit or clear it.
+        s = editorReducer(s, { type: 'rotate-selected', direction: 1 });
+        s = editorReducer(s, { type: 'undo' });
+        s = editorReducer(s, { type: 'select', id: 'a' });
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBe(INLINE_PARTS_NO_ROUTE_NOTICE);
+        expect(r.scene).toBe(s.scene);
+        expect(r.past).toBe(s.past);
+        expect(r.future).toBe(s.future);
+        expect(r.selectedId).toBe('a');
+        expect(r.revision).toBe(s.revision);
+        expect(committedScene(s, r)).toBeNull();
+      });
+
+      it('deleting the pipe detaches its parts', () => {
+        let s = drawPipe(blank(), [0, 0], [10, 0]);
+        s = place(s, 'valve', 2, 0);
+        s = editorReducer(editorReducer(s, { type: 'select', id: 'pipe-1' }), { type: 'delete' });
+        expect(s.scene.objects).toEqual([expect.objectContaining({ id: 'valve-1' })]);
+        expect(s.scene.objects[0]).not.toHaveProperty('onPipe');
+      });
+
+      it('reroute carries the valve onto the new route in ONE undo step; undo restores it', () => {
+        let s = drawPipe(blank(), [0, 0], [10, 0]);
+        s = place(s, 'valve', 2, 0);
+        s = withTankAcross({ ...editorReducer(s, { type: 'select', id: 'pipe-1' }), mode: 'select' });
+        const before = s.scene.objects;
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.past).toHaveLength(s.past.length + 1);
+        const valve = r.scene.objects.find((o) => o.id === 'valve-1')!;
+        expect(r.scene.objects.filter((o) => o.id === 'valve-1')).toHaveLength(1);
+        onRoute(r.scene.objects, valve);
+        // Ids are reused by nextId, so `onPipe` may name 'pipe-1' again: it must be the NEW pipe.
+        expect(r.scene.objects.filter((o) => o.object === 'pipe').length).toBeGreaterThanOrEqual(3);
+        expect(r.scene.objects.find((o) => o.id === 'pipe-1')).not.toMatchObject({ toX: 10, toY: 0 });
+        expect(r.scene.objects.find((o) => o.id === valve.onPipe)).toBeDefined();
+        // Still on the route's first straight, i.e. near the start like before.
+        expect(Math.hypot(valve.x, valve.y)).toBeLessThan(5);
+        expect(editorReducer(r, { type: 'undo' }).scene.objects).toEqual(before);
+      });
+
+      it.each(['start', 'end', 'interior'])('keeps a hosted valve connected to a retained branch at its %s', (connection) => {
+        let s = place(drawPipe(blank(), [0, 0], [10, 0]), 'valve', 2, 0);
+        const branch: IsoPlacement = { id: 'branch', object: 'pipe', x: 2, y: 0, toX: 2, toY: 5 };
+        if (connection === 'end') Object.assign(branch, { y: 5, toY: 0 });
+        if (connection === 'interior') branch.y = -5;
+        s = withTankAcross({ ...s, selectedId: 'pipe-1', mode: 'select', scene: {
+          ...s.scene, objects: [...s.scene.objects, branch],
+        } });
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBeNull();
+        expect(r.past).toHaveLength(s.past.length + 1);
+        const valve = r.scene.objects.find((o) => o.id === 'valve-1')!;
+        const retained = r.scene.objects.find((o) => o.id === 'branch')!;
+        expect(retained).toEqual(branch);
+        // Assert actual pipe connectivity: the branch touches/passes through
+        // the valve and the new main run meets both original flange sides.
+        if (connection === 'interior') expect(positionOnPipe(segOf(retained), valve.x, valve.y)).not.toBeNull();
+        else expect(pipeArmsAt([retained], valve)).toHaveLength(1);
+        expect(pipeArmsAt(r.scene.objects.filter((o) => o.id !== 'branch'), valve).map((arm) => arm.heading).sort())
+          .toEqual(['e', 'w']);
+        expect(pipeArmsAt(r.scene.objects, { x: 0, y: 0 })).toHaveLength(1);
+        expect(pipeArmsAt(r.scene.objects, { x: 10, y: 0 })).toHaveLength(1);
+        expect(valve).not.toHaveProperty('onPipe');
+        expect(new Set(r.scene.objects.map((o) => o.id)).size).toBe(r.scene.objects.length);
+        expect(editorReducer(r, { type: 'undo' }).scene).toEqual(s.scene);
+        expect(editorReducer(editorReducer(r, { type: 'undo' }), { type: 'redo' }).scene).toEqual(r.scene);
+      });
+
+      describe.each([
+        [0, 4.5, 0],
+        [90, 4, -0.5],
+        [180, 3.5, 0],
+        [270, 4, 0.5],
+      ])('retained declared-port connections at %s degrees', (degrees, portX, portY) => {
+        it.each(['start', 'end', 'interior'])('pins a hosted extension valve with a branch touching the port at its %s', (connection) => {
+          const reg = createIsoRegistryWithBuiltins();
+          reg.install({ id: 'test.port-valve', version: '1', contributions: { [HOLODECK_KINDS.isoPart]: [{
+            id: 'test:port-valve', label: 'Port valve', footprint: { w: 1, h: 1 },
+            ports: {
+              unused: { x: -0.5, y: 0, dir: 'w' },
+              branch: { x: 0.5, y: 0, dir: 'e' },
+            },
+            params: {}, component: () => null,
+          } as Record<string, unknown> & { id: string }] } });
+          // Keep the branch off the centre so only the declared port pins it.
+          const dy = portY < 0 ? -5 : 5;
+          const branch: IsoPlacement = { id: 'branch', object: 'pipe', x: portX, y: portY, toX: portX, toY: portY + dy };
+          if (connection === 'end') Object.assign(branch, { y: portY + dy, toY: portY });
+          if (connection === 'interior') {
+            if (portY === 0) branch.y = portY - dy;
+            else Object.assign(branch, { x: portX - 5, toX: portX + 5, toY: portY });
+          }
+          const original: IsoPlacement = {
+            id: 'valve', object: 'test:port-valve', x: 4, y: 0,
+            rotation: degrees * Math.PI / 180, onPipe: 'main', at: 0.4,
+          };
+          const s = { ...createEditorState({ ...emptyScene(), objects: [
+            { id: 'main', object: 'pipe', x: 0, y: 0, toX: 10, toY: 0 },
+            original, branch, stamp(reg, 'tank', 7, 0, 'tank'),
+          ] }, { registry: reg }), selectedId: 'main' };
+          const r = editorReducer(s, { type: 'reroute-selected' });
+          expect(r.notice).toBeNull();
+          expect(r.revision).toBe(s.revision + 1);
+          const valve = r.scene.objects.find((o) => o.id === original.id)!;
+          expect(valve).toEqual({ id: original.id, object: original.object, x: 4, y: 0, rotation: original.rotation });
+          const retained = r.scene.objects.find((o) => o.id === 'branch')!;
+          expect(retained).toEqual(branch);
+          const rotation = valve.rotation ?? 0;
+          const port = { x: valve.x + 0.5 * Math.cos(rotation), y: valve.y - 0.5 * Math.sin(rotation) };
+          if (connection === 'interior') expect(positionOnPipe(segOf(retained), port.x, port.y)).not.toBeNull();
+          else expect(pipeArmsAt([retained], port)).toHaveLength(1);
+          const main = r.scene.objects.filter((o) => o.object === 'pipe' && o.id !== 'branch');
+          expect(pipeArmsAt(main, valve).map((arm) => arm.heading).sort()).toEqual(['e', 'w']);
+          expect(pipeArmsAt(main, { x: 0, y: 0 })).toHaveLength(1);
+          expect(pipeArmsAt(main, { x: 10, y: 0 })).toHaveLength(1);
+          expect(main.some((o) => o.y !== 0 || o.toY !== 0)).toBe(true);
+          expect(editorReducer(r, { type: 'undo' }).scene).toEqual(s.scene);
+        });
+      });
+
+      const endpointRun = (end = 6, positions = [1]): ReturnType<typeof blank> => createEditorState({
+        ...emptyScene('endpoint-clearance'), objects: [
+          { id: 'a', object: 'pipe', x: 0, y: 0, toX: 2, toY: 0 },
+          { id: 'b', object: 'pipe', x: 2, y: 0, toX: 2, toY: 10 },
+          { id: 'c', object: 'pipe', x: 2, y: 10, toX: 4, toY: 10 },
+          { id: 'd', object: 'pipe', x: 4, y: 10, toX: 4, toY: 0 },
+          { id: 'e', object: 'pipe', x: 4, y: 0, toX: end, toY: 0 },
+          stamp(registry, 'valve', 0, 0, 'start'),
+          stamp(registry, 'valve', end, 0, 'end'),
+          ...positions.map((x, i) => ({ id: `hosted-${i}`, object: 'valve', x, y: 0, onPipe: 'a', at: x / 2 })),
+        ],
+      });
+
+      it('carries movable valves on either side of multiple fixed branch valves', () => {
+        const objects: IsoPlacement[] = [
+          { id: 'main', object: 'pipe', x: 0, y: 0, toX: 10, toY: 0 },
+          ...[1, 2, 8, 9].map((x) => ({ id: `v${x}`, object: 'valve', x, y: 0, onPipe: 'main', at: x / 10 })),
+          ...[2, 8].map((x) => ({ id: `branch${x}`, object: 'pipe', x, y: 0, toX: x, toY: 5 })),
+          stamp(registry, 'tank', 5, 0, 'tank'),
+        ];
+        const s = editorReducer(createEditorState({ ...emptyScene(), objects }), { type: 'select', id: 'main' });
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBeNull();
+        for (const x of [2, 8]) {
+          const valve = r.scene.objects.find((o) => o.id === `v${x}`)!;
+          expect(pipeArmsAt(r.scene.objects, valve).map((arm) => arm.heading).sort()).toEqual(['e', 's', 'w']);
+        }
+        for (const x of [1, 9]) onRoute(r.scene.objects, r.scene.objects.find((o) => o.id === `v${x}`)!);
+        expect(editorReducer(r, { type: 'undo' }).scene).toEqual(s.scene);
+      });
+
+      it('fails atomically when a fixed branch valve cannot be reached', () => {
+        const objects: IsoPlacement[] = [
+          { id: 'main', object: 'pipe', x: 0, y: 0, toX: 10, toY: 0 },
+          { id: 'valve', object: 'valve', x: 2, y: 0, onPipe: 'main', at: 0.2 },
+          { id: 'branch', object: 'pipe', x: 2, y: 0, toX: 2, toY: 5 },
+          stamp(registry, 'tank', 2, 0, 'tank'),
+        ];
+        const s = editorReducer(createEditorState({ ...emptyScene(), objects }), { type: 'select', id: 'main' });
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBe(RETAINED_CONNECTIONS_NO_ROUTE_NOTICE);
+        expect(r.scene).toBe(s.scene);
+        expect(r.past).toBe(s.past);
+        expect(r.future).toBe(s.future);
+        expect(r.revision).toBe(s.revision);
+      });
+
+      it.each([false, true])('rejects the half-cell fixed-valve fallback atomically (reversed: %s)', (reversed) => {
+        const objects: IsoPlacement[] = [
+          { id: 'a', object: 'pipe', x: 0, y: 0, toX: 5, toY: 0 },
+          { id: 'b', object: 'pipe', x: 5, y: 0, toX: 5, toY: 5 },
+          { id: 'c', object: 'pipe', x: 5, y: 5, toX: 0, toY: 5 },
+          { id: 'valve', object: 'valve', x: 2.5, y: 0, onPipe: 'a', at: 0.5 },
+          { id: 'branch', object: 'pipe', x: 2.5, y: 0, toX: 2.5, toY: -3 },
+        ];
+        if (reversed) objects.splice(0, 3, ...objects.slice(0, 3).map((o) => ({
+          ...o, x: o.toX!, y: o.toY!, toX: o.x, toY: o.y,
+        })));
+        const s = { ...createEditorState({ ...emptyScene(), objects }), selectedId: 'a',
+          past: [emptyScene('past')], future: [emptyScene('future')], revision: 7 };
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBe(RETAINED_CONNECTIONS_NO_ROUTE_NOTICE);
+        expect(r).toEqual({ ...s, notice: RETAINED_CONNECTIONS_NO_ROUTE_NOTICE });
+        expect(r.scene).toBe(s.scene);
+        expect(r.past).toBe(s.past);
+        expect(r.future).toBe(s.future);
+        expect(committedScene(s, r)).toBeNull();
+      });
+
+      it('discards earlier routed sections when a later fixed section falls back off-grid', () => {
+        const objects: IsoPlacement[] = [
+          { id: 'main', object: 'pipe', x: 0, y: 0, toX: 10, toY: 0 },
+          ...[2, 7.5].map((x) => ({ id: `v${x}`, object: 'valve', x, y: 0, onPipe: 'main', at: x / 10 })),
+          ...[2, 7.5].map((x) => ({ id: `branch${x}`, object: 'pipe', x, y: 0, toX: x, toY: -3 })),
+        ];
+        const s = { ...createEditorState({ ...emptyScene(), objects }), selectedId: 'main',
+          past: [emptyScene('past')], future: [emptyScene('future')] };
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBe(RETAINED_CONNECTIONS_NO_ROUTE_NOTICE);
+        expect(r.scene).toBe(s.scene);
+        expect(r.past).toBe(s.past);
+        expect(r.future).toBe(s.future);
+        expect(r.revision).toBe(s.revision);
+        expect(committedScene(s, r)).toBeNull();
+      });
+
+      it.each([false, true])('reserves endpoint valve bodies when shortening the run (reversed: %s)', (reversed) => {
+        let s = endpointRun();
+        if (reversed) s.scene.objects = s.scene.objects.map((o) => o.object === 'pipe'
+          ? { ...o, x: o.toX!, y: o.toY!, toX: o.x, toY: o.y } : o);
+        s = editorReducer(s, { type: 'select', id: 'a' });
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBeNull();
+        expect(r.scene.objects.filter((o) => o.object === 'pipe')).toHaveLength(1);
+        const hosted = r.scene.objects.find((o) => o.id === 'hosted-0')!;
+        onRoute(r.scene.objects, hosted);
+        for (const id of ['start', 'end']) {
+          const endpoint = r.scene.objects.find((o) => o.id === id)!;
+          expect(endpoint).toEqual(s.scene.objects.find((o) => o.id === id));
+          expect(Math.hypot(hosted.x - endpoint.x, hosted.y - endpoint.y))
+            .toBeGreaterThanOrEqual(INLINE_PART_LENGTH - 1e-9);
+          expect(pipeArmsAt(r.scene.objects, endpoint)).toHaveLength(1);
+        }
+      });
+
+      it('fails atomically when carried parts cannot fit between retained endpoint bodies', () => {
+        // Eight carried bodies fit with bare endpoint reserves, but not with
+        // the additional half-body of each retained valve on the 6-unit run.
+        const s = editorReducer(endpointRun(6, Array.from({ length: 8 }, (_, i) => (i + 1) / 5)), { type: 'select', id: 'a' });
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBe(INLINE_PARTS_NO_ROUTE_NOTICE);
+        expect(r.scene).toBe(s.scene);
+        expect(r.past).toBe(s.past);
+        expect(r.future).toBe(s.future);
+        expect(r.revision).toBe(s.revision);
+        expect(committedScene(s, r)).toBeNull();
+      });
+
+      it('the valve does not block its own route', () => {
+        // A 1x1 valve at the only gap would wall in a tight channel; hosted parts are not obstacles.
+        let s = drawPipe(blank(), [0, 0], [4, 0]);
+        s = place(s, 'valve', 2, 0);
+        s = editorReducer(editorReducer(s, { type: 'select', id: 'pipe-1' }), { type: 'reroute-selected' });
+        const pipes = s.scene.objects.filter((o) => o.object === 'pipe');
+        expect(pipes).toHaveLength(1);
+        expect(pipes[0]).toMatchObject({ x: 0, y: 0, toX: 4, toY: 0 });
+        expect(s.scene.objects.find((o) => o.id === 'valve-1')).toMatchObject({ x: 2, y: 0, onPipe: pipes[0]!.id, at: 0.5 });
+      });
+
+      it('carries several valves, keeping their order along the route', () => {
+        let s = drawPipe(blank(), [0, 0], [10, 0]);
+        s = place(s, 'valve', 8, 0);
+        s = place(s, 'valve', 2, 0);
+        s = withTankAcross({ ...editorReducer(s, { type: 'select', id: 'pipe-1' }), mode: 'select' });
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        const [a, b] = ['valve-1', 'valve-2'].map((id) => r.scene.objects.find((o) => o.id === id)!);
+        onRoute(r.scene.objects, a!);
+        onRoute(r.scene.objects, b!);
+        const order = r.scene.objects.filter((o) => o.object === 'pipe').map((o) => o.id);
+        const rank = (v: IsoPlacement) => order.indexOf(v.onPipe!);
+        expect(rank(b!)).toBeLessThanOrEqual(rank(a!)); // valve-2 (x=2) is upstream of valve-1 (x=8)
+      });
+
+      it('carries parts hosted on any pipe of a multi-pipe run', () => {
+        let s = drawPipe(blank(), [0, 0], [6, 4]); // pipe + elbow + pipe
+        s = place(s, 'valve', 3, 0);
+        s = place(s, 'valve', 6, 2);
+        s = editorReducer(editorReducer(s, { type: 'select', id: 'pipe-1' }), { type: 'reroute-selected' });
+        for (const id of ['valve-1', 'valve-2']) onRoute(s.scene.objects, s.scene.objects.find((o) => o.id === id)!);
+      });
+
+      it('leaves behind a part with no attachment (an obstacle dropped on the pipe) and a stale attachment', () => {
+        let s = drawPipe(blank(), [0, 0], [10, 0]);
+        s = place(s, 'valve', 2, 0);
+        s = {
+          ...s,
+          scene: {
+            ...s.scene,
+            objects: [
+              ...s.scene.objects.map((o) => (o.id === 'valve-1' ? { ...o, y: 3 } : o)), // dragged off by an older host
+              { id: 'free', object: 'valve', x: 9, y: 0 },
+            ],
+          },
+          selectedId: 'pipe-1',
+          mode: 'select',
+        };
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.scene.objects.find((o) => o.id === 'valve-1')).toMatchObject({ x: 2, y: 3 }); // stale: not carried
+        expect(r.scene.objects.find((o) => o.id === 'free')).toMatchObject({ x: 9, y: 0 });
+      });
+
+      // The case from the issue: tests/scene.json draws its valves on top of one long pipe.
+      // holodeck#19 resolves off-grid ends inside a vessel footprint to that vessel's port, so
+      // pipe-a-in's tank end now carries a required heading while its other end stays an
+      // unverifiable half-cell fallback: the whole reroute is rejected rather than half-applied.
+      it.each(['pipe-a-in', 'pipe-packaging'])('tests/scene.json: rejects the unverified port fallback on %s', (pipeId) => {
+        const s = { ...createEditorState(PROCESS_SCENE, { registry }), selectedId: pipeId };
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBe(RETAINED_CONNECTIONS_NO_ROUTE_NOTICE);
+        expect(r.scene).toBe(s.scene);
+        expect(r.past).toBe(s.past);
+        expect(r.future).toBe(s.future);
+        expect(r.revision).toBe(s.revision);
+        expect(committedScene(s, r)).toBeNull();
+      });
+
+      it('tests/scene.json: pipe-holding-mixer-x reroutes through resolved ports as one undo step', () => {
+        // Both ends now resolve to vessel ports on the grid, so A* (not the L fallback) runs.
+        const s = { ...createEditorState(PROCESS_SCENE, { registry }), selectedId: 'pipe-holding-mixer-x' };
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBeNull();
+        expect(r.past).toHaveLength(1);
+        expect(r.scene).not.toBe(s.scene);
+      });
+
+      it('rotates a carried valve onto a perpendicular straight', () => {
+        let s = drawPipe(blank(), [0, 0], [10, 0]);
+        s = place(s, 'valve', 1.5, 0);
+        // Wall the start so the route must leave north/south first.
+        s = withTankAcross({ ...editorReducer(s, { type: 'select', id: 'pipe-1' }), mode: 'select' });
+        s = {
+          ...s,
+          scene: { ...s.scene, objects: [...s.scene.objects, stamp(registry, 'tank', 3, 0, 'tank-2')] },
+        };
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        const valve = r.scene.objects.find((o) => o.id === 'valve-1')!;
+        const host = r.scene.objects.find((o) => o.id === valve.onPipe)!;
+        const vertical = host.x === host.toX;
+        expect(valve.rotation ?? 0).toBeCloseTo(vertical ? Math.PI / 2 : 0);
+      });
+    });
+
     it('is a no-op for non-pipe selections, no selection, and run mode', () => {
       const s = editorReducer(withTanks(), { type: 'select', id: 'tank-1' });
       expect(editorReducer(s, { type: 'reroute-selected' })).toBe(s);
@@ -449,6 +926,37 @@ describe('auto-routed pipes', () => {
         expect(pipeArmsAt(r.scene.objects, joint).map((arm) => arm.heading).sort()).toEqual(vertical ? ['n', 's'] : ['e', 'w']);
         expect(pipeArmsAt(rerouted, point(id === 'pipe-a' ? 0 : far))).toHaveLength(1);
       });
+    });
+
+    it.each([false, true])('rejects fallbacks at retained inline endpoints (off-grid: %s)', (offGrid) => {
+      const x = offGrid ? 0.5 : 0;
+      const objects: IsoPlacement[] = [
+        { id: 'a', object: 'pipe', x: 0, y: 0, toX: 5, toY: 0 },
+        { id: 'b', object: 'pipe', x: 5, y: 0, toX: 5, toY: 5 },
+        { id: 'c', object: 'pipe', x: 5, y: 5, toX: x, toY: 5 },
+        stamp(registry, 'valve', x, 5, 'valve'),
+        { id: 'retained', object: 'pipe', x, y: 5, toX: -3, toY: 5 },
+        // On-grid: block the required eastward approach. Off-grid skips A*.
+        ...(offGrid ? [] : [stamp(registry, 'tank', 2, 5, 'tank')]),
+      ];
+      const s = { ...createEditorState({ ...emptyScene(), objects }), selectedId: 'a' };
+      const r = editorReducer(s, { type: 'reroute-selected' });
+      expect(r.notice).toBe(RETAINED_CONNECTIONS_NO_ROUTE_NOTICE);
+      expect(r.scene).toBe(s.scene);
+      expect(r.past).toBe(s.past);
+      expect(r.future).toBe(s.future);
+      expect(r.revision).toBe(s.revision);
+      expect(committedScene(s, r)).toBeNull();
+      expect(pipeArmsAt(r.scene.objects, { x, y: 5 }).map((arm) => arm.heading).sort()).toEqual(['e', 'w']);
+    });
+
+    it('keeps the half-cell fallback for an unconstrained run', () => {
+      const s = { ...drawPipe(blank(), [0, 0], [5.5, 3]), selectedId: 'pipe-1' };
+      expect(s.notice).toBeNull(); // Drawing also intentionally accepts half-cell Ls.
+      const r = editorReducer(s, { type: 'reroute-selected' });
+      expect(r.notice).toBeNull();
+      expect(r.revision).toBe(s.revision + 1);
+      expect(r.scene.objects).toEqual(s.scene.objects);
     });
 
     it('keeps the original run and history when no clear route exists', () => {
