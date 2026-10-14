@@ -7,7 +7,7 @@ Pure modules in `src/routing/` (no React, no three). The editor wires them in `s
 `buildOccupancy(scene, registry, { exclude, margin })` -> `resolveRouteEnd(scene, registry, cell)` -> `routePipe(from, to, occ, opts)` -> `pathToPlacements(cells, existing, nextId)`.
 
 - Draw-pipe: first click resolves to a part port (or bare cell); the hovered cell is routed live (ghost, once per animation frame); the second click commits pipes + elbows as one undo step and keeps chaining from the end cell.
-- Reroute (`R`, or the "Reroute" button; edit mode, pipe or elbow selected): finds the connected pipe/elbow run, deletes it, routes between its two ends with the run excluded from the obstacles. One undo step.
+- Reroute (`R`, or the "Reroute" button; edit mode, pipe or elbow selected): finds the connected pipe/elbow run, deletes it, routes between its two ends with the run excluded from the obstacles. One undo step. The run (`routing/run.ts`) stops at tees and at single-node parts (valve, cap, any 1x1 part) on a joint, so inline valves stay connected; a vessel centred on a joint is an obstacle, not an end. A part drawn on top of the middle of one pipe is not detected and is left behind by a reroute.
 - No route: the ghost turns red; the click draws the old manhattan L and shows "No clear route — drew a straight L". Half-cell clicks skip the router (not a pipe node) and also draw the L, without the notice.
 
 ## Geometry conventions
@@ -16,6 +16,7 @@ Pure modules in `src/routing/` (no React, no three). The editor wires them in `s
 - `area` and `label` never block. Pipes block every node of their run, ends included; elbows, valves and end caps block their node.
 - Ports (`IsoPartDefinition.ports`) are part-local offsets from the centre plus an outward `dir`; both rotate with the placement. Compass: n = -y, e = +x, s = +y, w = -x. The built-in `tank` and `mixer` have `east` / `west` ports at floor level on the vessel edge; the east one sits in the window, so routing only uses west (see Vessel cutouts).
 - `RouteEnd.heading` is the port's OUTWARD direction: the first step leaves that way; at the end the last step arrives moving the opposite way.
+- At an inline reroute endpoint without a declared port (including built-in valves and caps), `findRun` carries `startHeading` / `endHeading` from the terminal pipe: the direction from the joint towards that pipe's other end. This preserves the connected flange side on either end of the route, including rotated parts and reversed pipe coordinates. The existing connection is used rather than inferring a barrel axis from rotation: single-cell extension parts have no common local axis, and an axis alone cannot identify which side of the part was connected. Declared port headings take precedence. Diagonal or zero-length pipes supply no heading; rerouting preserves valid axis-aligned connections rather than repairing invalid attachments.
 
 ## Elbows (`elbows.ts`)
 
