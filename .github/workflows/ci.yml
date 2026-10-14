@@ -110,6 +110,13 @@ jobs:
         working-directory: holodeck/packages/${{ matrix.package }}
         run: node ../../scripts/smoke-dist.mjs .
 
+      # editor-2.5d-react only: install the built holodeck.package.json entry into a
+      # HolodeckHost through the manifest path (SDK packaging contract, holodeck#15).
+      - name: Smoke-test the Holodeck package entry
+        if: matrix.package == 'editor-2.5d-react'
+        working-directory: holodeck/packages/${{ matrix.package }}
+        run: node --no-deprecation scripts/smoke-holodeck-package.mjs
+
       # editor-2.5d-react only: consume the built package from a throwaway Vite app
       # in real Chromium and fetch every GLB URL (holodeck#28: Vite dev pre-bundling
       # rewrites them to 404s unless optimizeDeps.exclude is set). No GPU needed.

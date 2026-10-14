@@ -34,12 +34,78 @@ Notes:
 
 This is enforced in CI: `pnpm check:vite-consumer` (after `pnpm build`) creates a throwaway Vite app that consumes a copy of the built package, in real Chromium, and fetches every URL in `BUILTIN_MODEL_URLS` in dev (documented config), `vite build` + `vite preview`, and (informationally) dev without the config. It needs a Playwright Chromium (`pnpm exec playwright install chromium`, or set `HOLODECK_CHROMIUM`). No GPU is required because nothing is rendered.
 
+## Engine contract
+
+This package is the `holodeck.iso` engine of the Holodeck packaging contract
+(`@holodeck/sdk`, `docs/PACKAGING.md`). Code: `src/engine/`, `src/holodeck-package.ts`.
+
+**Descriptor.** `isoEngine` (`HolodeckEngine<IsoSceneFile>`): id `holodeck.iso`, API version
+`1.0.0`, document format `holodeck.iso.scene.v1`, kinds `holodeck.iso.{part,theme,animator,inspector}`.
+`validateBody` never throws; it checks structure (via `parseSceneFile`) and bindings, but not
+whether parts are installed, because the host installs libraries after registering the engine.
+For that check too, register `createIsoEngine({ registry: host.registry })` instead.
+
+**Built-ins as a package.** `holodeck.package.json` (id `holodeck.iso`, version `1.0.0`) with
+entry `dist/holodeck-package.mjs` (also `@holodeck/editor-2.5d-react/holodeck-package`, and
+`isoPackage` / `ISO_PACKAGE_MANIFEST` from the main entry):
+
+```ts
+import { HolodeckHost } from '@holodeck/sdk';
+import { ISO_PACKAGE_MANIFEST, isoEngine, isoPackage } from '@holodeck/editor-2.5d-react';
+
+const host = new HolodeckHost({ name: 'my-app' });
+host.registerEngine(isoEngine);
+await host.installPackage(ISO_PACKAGE_MANIFEST, isoPackage);
+```
+
+`BUILTIN_ISO_EXTENSION` keeps its id `holodeck.iso.builtin` for hosts that install it into a
+registry directly. Use one or the other in a registry: together they collide on part ids.
+
+**Bindings.** A placement binds part params to provider signals; the provider owns `source`:
+
+```json
+{ "id": "t1", "object": "tank", "x": 0, "y": 0,
+  "bindings": { "level": { "connection": "plant", "source": "sine:10",
+                           "transform": { "kind": "scale", "inMin": 0, "inMax": 100, "outMin": 0, "outMax": 1 } } } }
+```
+
+`parseSceneFile` rejects malformed bindings; `isoEngine.collectBindings(scene)` lists them as
+`{ objectId: placementId, param, binding }`.
+
+**Documents.** `toIsoDocument(scene, { connections, requires, metadata })` wraps a scene in a
+`holodeck.document.v1` envelope for saving. `loadIsoDocument(raw, registry?)` accepts an
+envelope or a bare legacy `IsoSceneFile`, and returns `{ document, scene }`. It throws one
+`IsoDocumentError` whose `problems` list every problem: envelope fields, engine and major
+version, the body, and bindings to connections the document does not have. The envelope
+`theme` wins over `body.theme`, and the envelope `id` is always the loaded `scene.id`
+(`toIsoDocument(scene, { id })` writes it into the body too). `ProcessEditor` resets undo/redo
+on `scene.id`, so two documents saved from one scene must never share it.
+
+**Live values.** One `ProviderHub` per open document; its metrics are already the editor's
+`metrics` shape (placement id → param → value):
+
+```tsx
+const { document, scene } = loadIsoDocument(json, host.registry);
+// Create and dispose the hub in one effect: a disposed hub cannot be reused (StrictMode re-runs effects).
+const [hub, setHub] = useState<ProviderHub>();
+useEffect(() => {
+  const next = host.createProviderHub();
+  setHub(next);
+  return () => void next.dispose();
+}, [host]);
+useEffect(() => {
+  if (hub) connectIsoDocument(hub, document); // re-run after edits; the hub diffs and only reopens what changed
+}, [hub, document]);
+
+<ProcessEditor scene={scene} onChange={setScene} mode="run" registry={host.registry} metrics={useHubMetrics(hub)} />;
+```
+
 ## Checks
 
 ```sh
 pnpm type-check
 pnpm exec vitest run
 pnpm build
-pnpm smoke                  # Node import of dist (ESM+CJS), GLB files, npm pack
+pnpm smoke                  # Node import of dist (ESM+CJS), GLB files, npm pack, holodeck-package entry install
 pnpm check:vite-consumer    # Vite consumer URL check, see above
 ```

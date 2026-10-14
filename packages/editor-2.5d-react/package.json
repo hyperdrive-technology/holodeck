@@ -11,12 +11,19 @@
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
     },
+    "./holodeck-package": {
+      "types": "./dist/holodeck-package.d.ts",
+      "import": "./dist/holodeck-package.mjs",
+      "require": "./dist/holodeck-package.js"
+    },
+    "./holodeck.package.json": "./holodeck.package.json",
     "./package.json": "./package.json"
   },
   "files": [
     "dist/**/*",
     "src/**/*",
     "assets/**/*",
+    "holodeck.package.json",
     "README.md",
     "LICENSE"
   ],
@@ -31,7 +38,7 @@
     "parts:build": "node scripts/build-parts.mjs",
     "parts:watch": "node scripts/build-parts.mjs --watch",
     "prepublishOnly": "npm run build",
-    "smoke": "node ../../scripts/smoke-dist.mjs .",
+    "smoke": "node ../../scripts/smoke-dist.mjs . && node --no-deprecation scripts/smoke-holodeck-package.mjs",
     "check:vite-consumer": "node ../../scripts/vite-consumer-check.mjs ."
   },
   "keywords": [
