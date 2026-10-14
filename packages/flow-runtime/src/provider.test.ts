@@ -641,6 +641,20 @@ describe('hazards', () => {
       expect((await session.read!(['flow:k.value']))[0]?.value).toBe(9);
     });
 
+    it('a status listener whose re-entrant deploy fails does not supersede the outer deploy', async () => {
+      const { session, manual } = await connect();
+      let inner: Promise<{ ok: boolean }> | undefined;
+      session.onStatus((status) => {
+        if (status.message === 'running "first"' && !inner) inner = session.deploy!(flowDoc(graph([node('x', 'acme.missing')])));
+      });
+      const outer = await session.deploy!(flowDoc(counterBody(), [], { name: 'first' }));
+      expect(outer).toMatchObject({ ok: true, diagnostics: [] });
+      expect(await inner).toMatchObject({ ok: false });
+      expect(session.status().message).toBe('running "first"');
+      manual.tick();
+      expect((await session.read!(['flow:add.sum']))[0]?.value).toBe(2);
+    });
+
     it('a bridge that closes the session while subscribing → SUPERSEDED, its subscription released', async () => {
       const unsubscribe = vi.fn();
       let session!: ProviderSession;

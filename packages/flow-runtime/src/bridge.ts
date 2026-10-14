@@ -238,8 +238,9 @@ export function createHubSignalBridge(hub: ProviderHub, options: HubSignalBridge
         generation: 0,
         last: null,
       };
-      subscriptions.add(sub);
+      // Join the hub first: if that throws, nothing has been recorded yet.
       offHub ??= hub.subscribe(sync);
+      subscriptions.add(sub);
       const { session, up } = lookup(connection);
       attach(sub, session, up);
       return () => release(sub);

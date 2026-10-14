@@ -247,7 +247,7 @@ class SignalWriter {
 
 class LocalFlowSession implements ProviderSession {
   private closed = false;
-  /** Bumped by every deploy and by close; a deploy whose generation is stale stops. */
+  /** Bumped by every committed deploy and by close; a deploy whose generation is stale stops. */
   private generation = 0;
   private deployment: Deployment | undefined;
   private current: ProviderStatus;
@@ -351,7 +351,6 @@ class LocalFlowSession implements ProviderSession {
 
   private deployNow(raw: unknown): DeployResult {
     if (this.closed) return failed([diag('error', 'SESSION_CLOSED', 'the session is closed')]);
-    const generation = ++this.generation;
     const diagnostics: Diagnostic[] = [];
 
     let doc: unknown;
@@ -389,7 +388,10 @@ class LocalFlowSession implements ProviderSession {
     const superseded = (): DeployResult =>
       failed([...diagnostics, diag('error', 'SUPERSEDED', 'a later deploy or close replaced this deployment while it started')]);
 
-    // Commit: from here on the previous flow is gone.
+    // Commit: from here on the previous flow is gone. The generation moves only
+    // here and in close(), so a re-entrant deploy that fails validation does
+    // not supersede this one.
+    const generation = ++this.generation;
     const run = createFlowRun(plan, {
       scanMs: this.scanMs,
       now: this.now,
