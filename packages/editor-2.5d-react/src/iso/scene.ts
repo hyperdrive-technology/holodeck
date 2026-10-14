@@ -13,7 +13,8 @@
 
 import { GRID_CELL_SIZE, gridToWorld, worldToGrid } from './grid';
 import { getDefaultIsoRegistry } from '../registry/default';
-import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
+import { HOLODECK_KINDS, type ContributionRegistry, type SignalBinding } from '@holodeck/sdk';
+import { placementBindingProblems } from '../engine/bindings';
 import type { IsoPartDefinition } from '../registry/types';
 
 export { GRID_CELL_SIZE, gridToWorld, worldToGrid };
@@ -41,6 +42,12 @@ export interface IsoPlacement {
   params?: Record<string, unknown>;
   /** param -> animator override (`holodeck.iso.animator` id + settings). */
   animation?: Record<string, { animator: string; settings?: Record<string, unknown> }>;
+  /**
+   * param -> live signal (`{ connection, source, transform? }`, @holodeck/sdk).
+   * `connection` names a `ProviderConnection` of the enclosing document;
+   * `source` is the provider's own address and is never parsed here.
+   */
+  bindings?: Record<string, SignalBinding>;
   /** Host bags keyed by extension id (e.g. tag bindings); opaque to the editor. */
   extensions?: Record<string, unknown>;
   /** Screen-space px on the frozen 760×540 snapshot (CSS translate). */
@@ -170,6 +177,9 @@ export function parseSceneFile(
         throw new Error(`placement ${obj.id}: ${bag} must be an object`);
       }
     }
+    // A parsed scene can go straight to ProviderHub.setBindings, which throws on malformed bindings.
+    const bindingProblems = placementBindingProblems(obj.id, obj.bindings);
+    if (bindingProblems.length) throw new Error(bindingProblems.join('; '));
     objects.push(migrateLegacyPlacement(def, obj));
   }
   const ids = objects.map((o) => o.id);

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "holodeck.package.v1",
+  "id": "holodeck.iso",
+  "name": "Holodeck 2.5D engine",
+  "description": "React Three Fiber isometric canvas with the built-in process parts (tank, mixer, valve, pipe, elbow, area, label …), the default and dark themes, and the built-in animators.",
+  "version": "1.0.0",
+  "license": "MIT",
+  "engine": { "id": "holodeck.iso", "apiVersion": "1.0.0", "documentFormat": "holodeck.iso.scene.v1" },
+  "contributes": ["holodeck.iso.part", "holodeck.iso.theme", "holodeck.iso.animator", "holodeck.iso.inspector"],
+  "engines": { "holodeck.iso": "^1.0" },
+  "entry": "dist/holodeck-package.mjs",
+  "assets": "assets",
+  "homepage": "https://github.com/hyperdrive-technology/holodeck/tree/main/packages/editor-2.5d-react#readme",
+  "repository": "github:hyperdrive-technology/holodeck",
+  "keywords": ["engine", "isometric", "r3f", "process"]
+}
