@@ -12,11 +12,12 @@
  *   empty        start empty, for first-placement fitting
  *   latePack     leave the pump unresolved until __embed.installPump()
  *   canvas       mount a standalone IsoCanvas for host-resize checks
+ *   directModel  with canvas, load the public HolodeckModel in a null fallback
  *   selected=id  show the inspector for this placement
  *
  * Exposes window.__embed.rendered: every revision `onRendered` reported.
  */
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { HOLODECK_KINDS } from '@holodeck/sdk';
 import pumpUrl from '../../assets/models/pump.glb?url';
@@ -27,6 +28,7 @@ import { GlbPart } from '../registry/GlbPart';
 import type { IsoPartDefinition } from '../registry/types';
 import { ProcessEditor } from './ProcessEditor';
 import { IsoCanvas } from '../iso/IsoCanvas';
+import { HolodeckModel } from '../index';
 
 const params = new URLSearchParams(location.search);
 const layout = params.get('layout') ?? 'flex';
@@ -55,6 +57,8 @@ const initial: IsoSceneFile = {
 
 const embed = {
   rendered: [] as number[],
+  modelReady: false,
+  renderedBeforeModel: false,
   installPump,
 };
 (window as unknown as { __embed: typeof embed }).__embed = embed;
@@ -62,7 +66,18 @@ const embed = {
 function Editor() {
   const [scene, setScene] = useState(initial);
   if (params.has('canvas')) {
-    return <IsoCanvas registry={registry} showControls={false} onRendered={(revision) => embed.rendered.push(revision)} />;
+    return (
+      <IsoCanvas registry={registry} showControls={false} onRendered={(revision) => {
+        embed.rendered.push(revision);
+        if (params.has('directModel') && !embed.modelReady) embed.renderedBeforeModel = true;
+      }}>
+        {params.has('directModel') ? (
+          <Suspense fallback={null}>
+            <HolodeckModel url={pumpUrl} onReady={() => { embed.modelReady = true; }} />
+          </Suspense>
+        ) : null}
+      </IsoCanvas>
+    );
   }
   return (
     <ProcessEditor

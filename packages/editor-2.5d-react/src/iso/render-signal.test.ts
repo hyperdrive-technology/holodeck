@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { createRenderTracker, nextRevision, RenderGate, renderState } from './render-signal';
+import { describe, expect, it, vi } from 'vitest';
+import { confirmAssetMounted, createRenderTracker, holdPendingAsset, MOUNT_HANDOFF_TIMEOUT_MS, nextRevision, RenderGate, renderState } from './render-signal';
 
 describe('createRenderTracker', () => {
   it('counts overlapping holds and releases each once', () => {
@@ -13,6 +13,91 @@ describe('createRenderTracker', () => {
     expect(t.pending).toBe(1);
     b();
     expect(t.pending).toBe(0);
+  });
+});
+
+describe('holdPendingAsset', () => {
+  it('deduplicates retries and shared loads within each canvas', async () => {
+    const a = createRenderTracker();
+    const b = createRenderTracker();
+    let resolve!: () => void;
+    const load = new Promise<void>((done) => { resolve = done; });
+    holdPendingAsset(a, load);
+    holdPendingAsset(a, load);
+    holdPendingAsset(b, load);
+    expect(a.pending).toBe(1);
+    expect(b.pending).toBe(1);
+    resolve();
+    await load;
+    expect(a.pending).toBe(0);
+    expect(b.pending).toBe(0);
+  });
+
+  it('keeps overlapping loads held until all have settled', async () => {
+    const tracker = createRenderTracker();
+    let finishFirst!: () => void;
+    let finishSecond!: () => void;
+    const first = new Promise<void>((done) => { finishFirst = done; });
+    const second = new Promise<void>((done) => { finishSecond = done; });
+    holdPendingAsset(tracker, first);
+    holdPendingAsset(tracker, second);
+    expect(tracker.pending).toBe(2);
+    finishFirst();
+    await first;
+    expect(tracker.pending).toBe(1);
+    finishSecond();
+    await second;
+    expect(tracker.pending).toBe(0);
+  });
+
+  it('releases rejected loads without requiring a suspended component to mount', async () => {
+    const tracker = createRenderTracker();
+    let fail!: (reason: Error) => void;
+    const load = new Promise<void>((_, reject) => { fail = reject; });
+    holdPendingAsset(tracker, load);
+    expect(tracker.pending).toBe(1);
+    fail(new Error('GLB failed'));
+    await expect(load).rejects.toThrow('GLB failed');
+    expect(tracker.pending).toBe(0);
+  });
+});
+
+describe('holdPendingAsset mount handoff', () => {
+  it('keeps the hold after a successful load until the model mounts', async () => {
+    const tracker = createRenderTracker();
+    const load = Promise.resolve();
+    holdPendingAsset(tracker, load, 'a.glb');
+    await load;
+    expect(tracker.pending).toBe(1);
+    confirmAssetMounted(tracker, 'other.glb');
+    expect(tracker.pending).toBe(1);
+    confirmAssetMounted(tracker, 'a.glb');
+    expect(tracker.pending).toBe(0);
+    confirmAssetMounted(tracker, 'a.glb'); // idempotent
+    expect(tracker.pending).toBe(0);
+  });
+
+  it('releases a failed load immediately', async () => {
+    const tracker = createRenderTracker();
+    const load = Promise.reject(new Error('GLB failed'));
+    holdPendingAsset(tracker, load, 'a.glb');
+    await load.catch(() => undefined);
+    expect(tracker.pending).toBe(0);
+  });
+
+  it('releases an abandoned mount after the safety timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const tracker = createRenderTracker();
+      const load = Promise.resolve();
+      holdPendingAsset(tracker, load, 'a.glb');
+      await load;
+      expect(tracker.pending).toBe(1);
+      vi.advanceTimersByTime(MOUNT_HANDOFF_TIMEOUT_MS);
+      expect(tracker.pending).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
