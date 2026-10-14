@@ -1,5 +1,5 @@
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
-import { validateSceneFile, type IsoPlacement, type IsoSceneFile } from '../iso/scene';
+import { validatePlacementGeometry, validatePlacementPart, validateSceneGeometry, type IsoPlacement, type IsoSceneFile } from '../iso/scene';
 import { getDefaultIsoRegistry } from '../registry/default';
 import type { IsoPartDefinition } from '../registry/types';
 import type { Heading } from '../routing/grid';
@@ -295,12 +295,31 @@ function numberParam(obj: IsoPlacement, param: string, fallback: unknown): numbe
 export function editorReducer(state: EditorState, action: EditorAction): EditorState {
   let next = reduce(state, action);
   // Reject the whole edit, preserving scene, selection, history and revision.
-  // Validate live drag/resize frames as well as commits: transient geometry
-  // is rendered/routed and can be committed by a subsequent inspector edit.
-  // This gate also covers pipes, host patches, params, load, undo and redo.
+  // Pointer previews only change one placement's geometry, never its id/type.
+  // Validate that placement each frame; commits still validate the whole scene.
   if (next.scene !== state.scene || next.revision !== state.revision) {
     try {
-      validateSceneFile(next.scene, state.registry);
+      if (action.type === 'drag-move' || action.type === 'resize-move') {
+        for (let i = 0; i < next.scene.objects.length; i += 1) {
+          const placement = next.scene.objects[i]!;
+          if (placement !== state.scene.objects[i]) {
+            validatePlacementGeometry(placement, state.registry);
+          }
+        }
+      } else {
+        validateSceneGeometry(next.scene, state.registry);
+        // History restores placements already admitted to this document. Other
+        // edits (including controlled loads) must check new ids and part types,
+        // while keeping existing placements usable after a pack is uninstalled.
+        if (action.type !== 'undo' && action.type !== 'redo') {
+          const previousParts = new Map(state.scene.objects.map((o) => [o.id, o.object]));
+          for (const placement of next.scene.objects) {
+            if (previousParts.get(placement.id) !== placement.object) {
+              validatePlacementPart(placement, state.registry);
+            }
+          }
+        }
+      }
     } catch (error) {
       return { ...state, notice: `Edit rejected: ${error instanceof Error ? error.message : String(error)}` };
     }

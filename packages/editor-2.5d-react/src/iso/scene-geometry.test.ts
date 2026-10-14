@@ -6,7 +6,7 @@ import { MAX_CELL_COORD, MAX_GRID_COORD } from '../routing/grid';
 import { buildOccupancy } from '../routing/occupancy';
 import { createIsoRegistryWithBuiltins, getDefaultIsoRegistry } from '../registry/default';
 import type { IsoPartDefinition } from '../registry/types';
-import { parseSceneFile, type IsoPlacement } from './scene';
+import { parseSceneFile, validateSceneFile, validateSceneGeometry, type IsoPlacement } from './scene';
 
 const scene = (obj: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
   id: 's',
@@ -123,5 +123,33 @@ describe('parseSceneFile geometry bounds', () => {
     const occ = buildOccupancy(parsed, getDefaultIsoRegistry());
     expect(occ.skipped).toEqual([]);
     expect(occ.blocked.size).toBe(2 * MAX_GRID_COORD + 1);
+  });
+});
+
+
+describe('large scene validation', () => {
+  const registry = getDefaultIsoRegistry();
+  const file = {
+    id: 'large', name: 'Large', gridCellSize: 1,
+    objects: Array.from({ length: 10_000 }, (_, i) => ({ id: `tank-${i}`, object: 'tank', x: i, y: 0 })),
+  };
+
+  it.each([['geometry', validateSceneGeometry], ['import', validateSceneFile]] as const)('%s validates 10,000 placements in under 50 ms', (_name, validate) => {
+    // Warm up first, then use the median to tolerate occasional GC/scheduler
+    // pauses. This includes effective footprint checks and duplicate IDs.
+    validate(file, registry);
+    const times: number[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const start = performance.now();
+      const validated = validate(file, registry);
+      times.push(performance.now() - start);
+      expect(validated.objects).toHaveLength(10_000);
+    }
+    expect(times.sort((a, b) => a - b)[2]).toBeLessThan(50);
+  });
+
+  it('rejects a duplicate at the end of a large scene', () => {
+    const duplicate = { ...file, objects: [...file.objects, { ...file.objects[0]! }] };
+    expect(() => validateSceneGeometry(duplicate, registry)).toThrow(/duplicate placement ids: tank-0/);
   });
 });

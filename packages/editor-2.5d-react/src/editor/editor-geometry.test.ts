@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { HOLODECK_KINDS } from '@holodeck/sdk';
 import { parseSceneFile, type IsoPlacement } from '../iso/scene';
 import { createIsoRegistryWithBuiltins } from '../registry/default';
@@ -241,5 +241,112 @@ describe('mutation audit', () => {
     expect(next.revision).toBe(state.revision);
     expect(next.notice).toBe(REROUTE_FAILED_NOTICE);
     reopen(next);
+  });
+});
+
+
+describe('editing after a part pack is uninstalled', () => {
+  function uninstalledScene() {
+    const reg = createIsoRegistryWithBuiltins();
+    reg.install({ id: 'removable', version: '1', contributions: { [HOLODECK_KINDS.isoPart]: [sized] } });
+    const state = createEditorState(parseSceneFile({
+      ...emptyScene('doc'), objects: [
+        { id: 'missing-a', object: 'sized', x: 0, y: 0 },
+        { id: 'missing-b', object: 'sized', x: 4, y: 0 },
+        { id: 'installed', object: 'tank', x: 8, y: 0 },
+      ],
+    }, reg), { registry: reg });
+    reg.uninstall('removable');
+    return state;
+  }
+
+  it.each(['missing-a', 'missing-b'])('can select and delete %s while another missing placement remains', (id) => {
+    const state = editorReducer(uninstalledScene(), { type: 'select', id });
+    expect(state.selectedId).toBe(id);
+    const next = editorReducer(state, { type: 'delete' });
+    expect(next.scene.objects.map((o) => o.id)).toEqual(id === 'missing-a' ? ['missing-b', 'installed'] : ['missing-a', 'installed']);
+    expect(next.revision).toBe(state.revision + 1);
+    expect(next.notice).toBeNull();
+    const restored = editorReducer(next, { type: 'undo' });
+    expect(restored.scene).toEqual(state.scene);
+    expect(restored.notice).toBeNull();
+    expect(editorReducer(restored, { type: 'redo' }).scene).toEqual(next.scene);
+  });
+
+  it('can edit an installed part while both missing placements remain', () => {
+    const state = editorReducer(uninstalledScene(), { type: 'select', id: 'installed' });
+    const next = editorReducer(state, { type: 'set-param', param: 'level', value: 0.5 });
+    expect(next.scene.objects[2]?.params).toEqual({ level: 0.5 });
+    expect(next.scene.objects.slice(0, 2)).toEqual(state.scene.objects.slice(0, 2));
+    expect(next.revision).toBe(state.revision + 1);
+    expect(next.notice).toBeNull();
+  });
+
+  it('can move a missing placement within bounds and rejects unsafe previews and patches', () => {
+    const start = editorReducer(uninstalledScene(), { type: 'drag-start', id: 'missing-a', x: 0, y: 0 });
+    const moved = editorReducer(start, { type: 'drag-move', x: MAX_GRID_COORD, y: 0 });
+    expect(moved.scene.objects[0]?.x).toBe(MAX_GRID_COORD);
+    expect(moved.notice).toBeNull();
+    const invalid = editorReducer(moved, { type: 'drag-move', x: MAX_GRID_COORD + 0.5, y: 0 });
+    expect(invalid.scene).toBe(moved.scene);
+    expect(invalid.notice).toMatch(/Edit rejected:.*finite number within/);
+    const end = editorReducer(moved, { type: 'drag-end' });
+    expect(end.revision).toBe(start.revision + 1);
+    expect(end.notice).toBeNull();
+    for (const patch of [{ x: Infinity }, { width: MAX_GRID_COORD + 1 }]) {
+      const bad = editorReducer(end, { type: 'patch-selected', patch });
+      expect(bad.scene).toBe(end.scene);
+      expect(bad.revision).toBe(end.revision);
+      expect(bad.notice).toMatch(/^Edit rejected:/);
+    }
+  });
+
+  it('rejects stamping another missing part, replacing a part type, and loading a new unknown placement', () => {
+    const state = uninstalledScene();
+    const placing = editorReducer(state, { type: 'place-mode', object: 'sized' });
+    const stamped = editorReducer(placing, { type: 'floor-click', x: 12, y: 0 });
+    expect(stamped.scene).toBe(placing.scene);
+    expect(stamped.revision).toBe(placing.revision);
+    expect(stamped.notice).toMatch(/unknown library object/);
+    const selected = editorReducer(state, { type: 'select', id: 'installed' });
+    const patched = editorReducer(selected, { type: 'patch-selected', patch: { object: 'sized' } });
+    expect(patched.scene).toBe(selected.scene);
+    expect(patched.notice).toMatch(/unknown library object/);
+    const loaded = editorReducer(state, { type: 'load', scene: {
+      ...state.scene, objects: [...state.scene.objects, { id: 'new', object: 'sized', x: 12, y: 0 }],
+    } });
+    expect(loaded.scene).toBe(state.scene);
+    expect(loaded.notice).toMatch(/unknown library object/);
+    // A controlled host echo may still contain the existing missing parts.
+    const echo = editorReducer(state, { type: 'load', scene: structuredClone(state.scene) });
+    expect(echo.scene).toEqual(state.scene);
+    expect(echo.notice).toBeNull();
+    expect(() => parseSceneFile(state.scene, state.registry)).toThrow(/unknown library object/);
+  });
+});
+
+describe('pointer preview validation cost', () => {
+  it.each(['drag', 'resize'] as const)('%s validates only the changed footprint, then all footprints on commit', (kind) => {
+    const reg = createIsoRegistryWithBuiltins();
+    const footprintOf = vi.fn(sized.footprintOf!);
+    const part: IsoPartDefinition = { ...sized, footprintOf };
+    reg.install({ id: 'preview', version: '1', contributions: { [HOLODECK_KINDS.isoPart]: [part] } });
+    const state = createEditorState(parseSceneFile({
+      ...emptyScene('doc'), objects: Array.from({ length: 100 }, (_, i) => ({ id: `p-${i}`, object: 'sized', x: i, y: 0 })),
+    }, reg), { registry: reg });
+    const start = editorReducer(state, kind === 'drag'
+      ? { type: 'drag-start', id: 'p-50', x: 0, y: 0 }
+      : { type: 'resize-start', id: 'p-50', handle: 'radius' });
+    footprintOf.mockClear();
+    const preview = editorReducer(start, kind === 'drag'
+      ? { type: 'drag-move', x: 1, y: 0 }
+      : { type: 'resize-move', value: 3 });
+    expect(preview.notice).toBeNull();
+    expect(footprintOf).toHaveBeenCalledTimes(1);
+    expect(footprintOf.mock.calls[0]?.[0].id).toBe('p-50');
+    footprintOf.mockClear();
+    const end = editorReducer(preview, { type: kind === 'drag' ? 'drag-end' : 'resize-end' });
+    expect(end.revision).toBe(start.revision + 1);
+    expect(footprintOf).toHaveBeenCalledTimes(100);
   });
 });
