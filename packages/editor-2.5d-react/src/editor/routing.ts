@@ -76,7 +76,7 @@ export function planRoute(
   }
   const { pipes, elbow } = manhattanRoute(from.cell, to.cell);
   const points = pipes.length === 0 ? [] : elbow ? [from.cell, elbow, to.cell] : [from.cell, to.cell];
-  return { ...collapsePath(points), points, fallback: true, noRoute: onGrid || occ.skipped.length > 0 };
+  return { ...collapsePath(points), points, fallback: true, noRoute: onGrid || Boolean(occ.skipped?.length) };
 }
 
 /**

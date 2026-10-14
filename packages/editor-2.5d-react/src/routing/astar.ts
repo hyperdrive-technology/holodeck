@@ -136,7 +136,7 @@ class Heap {
 
 export function routePipe(from: RouteEnd, to: RouteEnd, occ: Occupancy, opts: RouteOptions = {}): RoutePath | null {
   // An incomplete obstacle grid cannot prove any route clear, even a zero-length one.
-  if (occ.skipped.length > 0) return null;
+  if (occ.skipped?.length) return null;
   const bendPenalty = opts.bendPenalty ?? 4;
   const clearancePenalty = opts.clearancePenalty ?? 2;
   const spacing = Math.max(1, opts.minBendSpacing ?? defaultMinBendSpacing());

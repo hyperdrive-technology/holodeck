@@ -15,6 +15,7 @@ import { GRID_CELL_SIZE, gridToWorld, worldToGrid } from './grid';
 import { getDefaultIsoRegistry } from '../registry/default';
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoPartDefinition } from '../registry/types';
+import { isRunPlacement } from '../registry/geometry';
 import { MAX_GRID_COORD } from '../routing/grid';
 import { footprintBounds, GeometryRangeError, NON_OBSTACLE_PARTS, rotatedFootprint } from '../routing/occupancy';
 
@@ -69,7 +70,10 @@ export type SceneFile = IsoSceneFile;
 /** @deprecated use `IsoPlacement` */
 export type ScenePlacement = IsoPlacement;
 
-export function sceneBounds(objects: readonly IsoPlacement[]): {
+export function sceneBounds(
+  objects: readonly IsoPlacement[],
+  registry: ContributionRegistry = getDefaultIsoRegistry(),
+): {
   minX: number;
   minY: number;
   maxX: number;
@@ -84,13 +88,16 @@ export function sceneBounds(objects: readonly IsoPlacement[]): {
     minY = Math.min(minY, obj.y);
     maxX = Math.max(maxX, obj.x);
     maxY = Math.max(maxY, obj.y);
-    if (typeof obj.toX === 'number') {
-      minX = Math.min(minX, obj.toX);
-      maxX = Math.max(maxX, obj.toX);
-    }
-    if (typeof obj.toY === 'number') {
-      minY = Math.min(minY, obj.toY);
-      maxY = Math.max(maxY, obj.toY);
+    const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, obj.object);
+    if (isRunPlacement(obj, def)) {
+      if (typeof obj.toX === 'number') {
+        minX = Math.min(minX, obj.toX);
+        maxX = Math.max(maxX, obj.toX);
+      }
+      if (typeof obj.toY === 'number') {
+        minY = Math.min(minY, obj.toY);
+        maxY = Math.max(maxY, obj.toY);
+      }
     }
     if (typeof obj.width === 'number') {
       minX = Math.min(minX, obj.x - obj.width / 2);
@@ -198,7 +205,7 @@ export function validatePlacementGeometry(raw: unknown, registry: ContributionRe
   }
   const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, raw.object);
   const placement = def ? migrateLegacyPlacement(def, raw) : raw as unknown as IsoPlacement;
-  const isRun = def?.draw === 'run' || (typeof placement.toX === 'number' && typeof placement.toY === 'number');
+  const isRun = isRunPlacement(placement, def);
   if (!NON_OBSTACLE_PARTS.has(placement.object) && !isRun) {
     try {
       const { w, h } = rotatedFootprint(def, placement.rotation, placement);

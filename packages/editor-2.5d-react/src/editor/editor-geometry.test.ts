@@ -158,6 +158,21 @@ for (const b of boundaries) {
 }
 
 describe('mutation audit', () => {
+  it.each([Infinity, NaN, -1, 256])('vessel endpoints cannot bypass param, patch or resize footprint checks for %s', (value) => {
+    const state = selected({ id: 's', object: 'sized', x: 0, y: 0, toX: 1, toY: 0 });
+    rejected(state, editorReducer(state, { type: 'set-param', param: 'w', value: value === 256 ? 65536 : value }));
+    rejected(state, editorReducer(state, { type: 'patch-selected', patch: { params: { w: value, h: value } } }));
+    const resizing = editorReducer(state, { type: 'resize-start', id: 's', handle: 'radius' });
+    rejected(resizing, editorReducer(resizing, { type: 'resize-move', value: 65536 }));
+  });
+
+  it('rejects a patch that adds endpoints and an invalid vessel footprint together', () => {
+    const state = selected({ id: 's', object: 'sized', x: 0, y: 0 });
+    rejected(state, editorReducer(state, {
+      type: 'patch-selected', patch: { toX: 1, toY: 0, params: { w: Infinity } },
+    }));
+  });
+
   it.each([NaN, Infinity, -Infinity])('rejects non-finite resize value %s with a notice', (value) => {
     const state = editorReducer(selected({ id: 's', object: 'sized', x: 0, y: 0 }), { type: 'resize-start', id: 's', handle: 'radius' });
     const invalid = editorReducer(state, { type: 'resize-move', value });

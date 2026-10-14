@@ -27,6 +27,7 @@
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import type { IsoPartDefinition } from '../registry/types';
+import { isRunPlacement } from '../registry/geometry';
 import { cellKey, MAX_CELL_COORD, MAX_GRID_COORD, quarterTurns, type GridPoint } from './grid';
 
 /** Floor annotations: drawn on the ground, pipes may run across them. */
@@ -51,9 +52,10 @@ export interface Occupancy {
    * the safe geometry limits or bigger than `MAX_FOOTPRINT_CELLS` (see
    * `GeometryRangeError`). The parser validates effective footprints too, but
    * live edits or changed part definitions can still produce invalid geometry.
-   * Routing must fail whenever this list is nonempty.
+   * Routing must fail whenever this list is nonempty. Optional for custom
+   * occupancy providers; buildOccupancy always populates it.
    */
-  readonly skipped: readonly string[];
+  readonly skipped?: readonly string[];
   isBlocked(x: number, y: number): boolean;
   isNearVessel(x: number, y: number): boolean;
 }
@@ -203,7 +205,7 @@ export function buildOccupancy(
       continue;
     }
     const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, obj.object);
-    const isRun = def?.draw === 'run' || (typeof obj.toX === 'number' && typeof obj.toY === 'number');
+    const isRun = isRunPlacement(obj, def);
     let cells: GridPoint[];
     try {
       if (isRun) {

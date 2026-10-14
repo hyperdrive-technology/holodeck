@@ -6,7 +6,7 @@ import { MAX_CELL_COORD, MAX_GRID_COORD } from '../routing/grid';
 import { buildOccupancy } from '../routing/occupancy';
 import { createIsoRegistryWithBuiltins, getDefaultIsoRegistry } from '../registry/default';
 import type { IsoPartDefinition } from '../registry/types';
-import { parseSceneFile, validateSceneFile, validateSceneGeometry, type IsoPlacement } from './scene';
+import { parseSceneFile, sceneBounds, validateSceneFile, validateSceneGeometry, type IsoPlacement } from './scene';
 
 const scene = (obj: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
   id: 's',
@@ -28,6 +28,17 @@ describe('parseSceneFile geometry bounds', () => {
   sizedRegistry.install({
     id: 'geometry-test', version: '1',
     contributions: { [HOLODECK_KINDS.isoPart]: [sizedDef] },
+  });
+
+  it('scene bounds use installed part definitions and retain endpoint inference for missing parts', () => {
+    const placement = { id: 'v', object: 'sized', x: 0, y: 0, toX: 100, toY: 50 };
+    expect(sceneBounds([placement], sizedRegistry)).toEqual({ minX: 0, minY: 0, maxX: 0, maxY: 0 });
+    for (const object of ['pipe', 'missing-run']) {
+      expect(sceneBounds([{ ...placement, object }], sizedRegistry))
+        .toEqual({ minX: 0, minY: 0, maxX: 100, maxY: 50 });
+    }
+    expect(sceneBounds([{ ...placement, object: 'tank' }]))
+      .toEqual({ minX: 0, minY: 0, maxX: 0, maxY: 0 });
   });
 
   it.each([
@@ -56,6 +67,34 @@ describe('parseSceneFile geometry bounds', () => {
   it.each([Infinity, NaN, -1, 256])('rejects an effective footprint size of %s', (size) => {
     expect(() => parseSceneFile(scene({ object: 'sized', params: { w: size, h: size } }), sizedRegistry))
       .toThrow(/placement o: footprint/);
+  });
+
+  it.each([Infinity, NaN, -1, 256])('endpoint fields cannot bypass vessel footprint validation for size %s', (size) => {
+    const raw = scene({ object: 'sized', params: { w: size, h: size }, toX: 1, toY: 0 });
+    expect(() => parseSceneFile(raw, sizedRegistry)).toThrow(/placement o: footprint/);
+    const occ = buildOccupancy(raw, sizedRegistry);
+    expect(occ.skipped).toEqual(['o']);
+    expect(occ.blocked.size).toBe(0);
+  });
+
+  it('an installed run uses run geometry even if its default footprint is invalid', () => {
+    const registry = createIsoRegistryWithBuiltins();
+    const run: IsoPartDefinition = { ...sizedDef, id: 'custom-run', draw: 'run' };
+    registry.install({ id: 'run-test', version: '1', contributions: { [HOLODECK_KINDS.isoPart]: [run] } });
+    const parsed = parseSceneFile(scene({ object: run.id, params: { w: Infinity }, toX: 3, toY: 0 }), registry);
+    const occ = buildOccupancy(parsed, registry);
+    expect(occ.skipped).toEqual([]);
+    expect(occ.blocked.size).toBe(4);
+    expect(occ.near.size).toBe(0);
+  });
+
+  it('missing parts infer runs from endpoints during geometry validation and occupancy', () => {
+    const raw = scene({ object: 'missing-run', toX: 3, toY: 0 });
+    const parsed = validateSceneGeometry(raw, sizedRegistry);
+    const occ = buildOccupancy(parsed, sizedRegistry);
+    expect(occ.skipped).toEqual([]);
+    expect(occ.blocked.size).toBe(4);
+    expect(occ.isBlocked(2, 0)).toBe(true);
   });
 
   it('validates the rotated, param-sized footprint against the safe cell-key range', () => {
