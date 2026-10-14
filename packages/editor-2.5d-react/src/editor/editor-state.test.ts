@@ -621,6 +621,45 @@ describe('auto-routed pipes', () => {
         expect(r.revision).toBe(s.revision);
       });
 
+      it.each([false, true])('rejects the half-cell fixed-valve fallback atomically (reversed: %s)', (reversed) => {
+        const objects: IsoPlacement[] = [
+          { id: 'a', object: 'pipe', x: 0, y: 0, toX: 5, toY: 0 },
+          { id: 'b', object: 'pipe', x: 5, y: 0, toX: 5, toY: 5 },
+          { id: 'c', object: 'pipe', x: 5, y: 5, toX: 0, toY: 5 },
+          { id: 'valve', object: 'valve', x: 2.5, y: 0, onPipe: 'a', at: 0.5 },
+          { id: 'branch', object: 'pipe', x: 2.5, y: 0, toX: 2.5, toY: -3 },
+        ];
+        if (reversed) objects.splice(0, 3, ...objects.slice(0, 3).map((o) => ({
+          ...o, x: o.toX!, y: o.toY!, toX: o.x, toY: o.y,
+        })));
+        const s = { ...createEditorState({ ...emptyScene(), objects }), selectedId: 'a',
+          past: [emptyScene('past')], future: [emptyScene('future')], revision: 7 };
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBe(RETAINED_CONNECTIONS_NO_ROUTE_NOTICE);
+        expect(r).toEqual({ ...s, notice: RETAINED_CONNECTIONS_NO_ROUTE_NOTICE });
+        expect(r.scene).toBe(s.scene);
+        expect(r.past).toBe(s.past);
+        expect(r.future).toBe(s.future);
+        expect(committedScene(s, r)).toBeNull();
+      });
+
+      it('discards earlier routed sections when a later fixed section falls back off-grid', () => {
+        const objects: IsoPlacement[] = [
+          { id: 'main', object: 'pipe', x: 0, y: 0, toX: 10, toY: 0 },
+          ...[2, 7.5].map((x) => ({ id: `v${x}`, object: 'valve', x, y: 0, onPipe: 'main', at: x / 10 })),
+          ...[2, 7.5].map((x) => ({ id: `branch${x}`, object: 'pipe', x, y: 0, toX: x, toY: -3 })),
+        ];
+        const s = { ...createEditorState({ ...emptyScene(), objects }), selectedId: 'main',
+          past: [emptyScene('past')], future: [emptyScene('future')] };
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBe(RETAINED_CONNECTIONS_NO_ROUTE_NOTICE);
+        expect(r.scene).toBe(s.scene);
+        expect(r.past).toBe(s.past);
+        expect(r.future).toBe(s.future);
+        expect(r.revision).toBe(s.revision);
+        expect(committedScene(s, r)).toBeNull();
+      });
+
       it.each([false, true])('reserves endpoint valve bodies when shortening the run (reversed: %s)', (reversed) => {
         let s = endpointRun();
         if (reversed) s.scene.objects = s.scene.objects.map((o) => o.object === 'pipe'
@@ -708,8 +747,6 @@ describe('auto-routed pipes', () => {
 
       // The case from the issue: tests/scene.json draws its valves on top of one long pipe.
       it.each([
-        ['valve-holding-out', 'pipe-holding-mixer-x'],
-        ['valve-packaging', 'pipe-packaging'],
         ['valve-a-in', 'pipe-a-in'],
       ])('tests/scene.json: %s is carried when %s is rerouted', (valveId, pipeId) => {
         let s = createEditorState(PROCESS_SCENE, { registry });
@@ -725,6 +762,19 @@ describe('auto-routed pipes', () => {
         for (const o of r.past[0]!.objects.filter((o) => o.object === 'tank' || o.object === 'mixer')) {
           expect(r.scene.objects.find((n) => n.id === o.id)).toEqual(o);
         }
+      });
+
+      it.each(['pipe-holding-mixer-x', 'pipe-packaging'])('tests/scene.json: rejects the unverified port fallback on %s', (pipeId) => {
+        // These sample runs resolve a vessel port heading and previously
+        // committed unverified Ls (off-grid endpoints) while carrying valves.
+        const s = { ...createEditorState(PROCESS_SCENE, { registry }), selectedId: pipeId };
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBe(RETAINED_CONNECTIONS_NO_ROUTE_NOTICE);
+        expect(r.scene).toBe(s.scene);
+        expect(r.past).toBe(s.past);
+        expect(r.future).toBe(s.future);
+        expect(r.revision).toBe(s.revision);
+        expect(committedScene(s, r)).toBeNull();
       });
 
       it('rotates a carried valve onto a perpendicular straight', () => {
@@ -821,6 +871,37 @@ describe('auto-routed pipes', () => {
         expect(pipeArmsAt(r.scene.objects, joint).map((arm) => arm.heading).sort()).toEqual(vertical ? ['n', 's'] : ['e', 'w']);
         expect(pipeArmsAt(rerouted, point(id === 'pipe-a' ? 0 : far))).toHaveLength(1);
       });
+    });
+
+    it.each([false, true])('rejects fallbacks at retained inline endpoints (off-grid: %s)', (offGrid) => {
+      const x = offGrid ? 0.5 : 0;
+      const objects: IsoPlacement[] = [
+        { id: 'a', object: 'pipe', x: 0, y: 0, toX: 5, toY: 0 },
+        { id: 'b', object: 'pipe', x: 5, y: 0, toX: 5, toY: 5 },
+        { id: 'c', object: 'pipe', x: 5, y: 5, toX: x, toY: 5 },
+        stamp(registry, 'valve', x, 5, 'valve'),
+        { id: 'retained', object: 'pipe', x, y: 5, toX: -3, toY: 5 },
+        // On-grid: block the required eastward approach. Off-grid skips A*.
+        ...(offGrid ? [] : [stamp(registry, 'tank', 2, 5, 'tank')]),
+      ];
+      const s = { ...createEditorState({ ...emptyScene(), objects }), selectedId: 'a' };
+      const r = editorReducer(s, { type: 'reroute-selected' });
+      expect(r.notice).toBe(RETAINED_CONNECTIONS_NO_ROUTE_NOTICE);
+      expect(r.scene).toBe(s.scene);
+      expect(r.past).toBe(s.past);
+      expect(r.future).toBe(s.future);
+      expect(r.revision).toBe(s.revision);
+      expect(committedScene(s, r)).toBeNull();
+      expect(pipeArmsAt(r.scene.objects, { x, y: 5 }).map((arm) => arm.heading).sort()).toEqual(['e', 'w']);
+    });
+
+    it('keeps the half-cell fallback for an unconstrained run', () => {
+      const s = { ...drawPipe(blank(), [0, 0], [5.5, 3]), selectedId: 'pipe-1' };
+      expect(s.notice).toBeNull(); // Drawing also intentionally accepts half-cell Ls.
+      const r = editorReducer(s, { type: 'reroute-selected' });
+      expect(r.notice).toBeNull();
+      expect(r.revision).toBe(s.revision + 1);
+      expect(r.scene.objects).toEqual(s.scene.objects);
     });
 
     it('flags the fallback when no route exists', () => {

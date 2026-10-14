@@ -20,7 +20,7 @@ export const NO_ROUTE_NOTICE = 'No clear route — drew a straight L';
 /** Rerouting is atomic when the carried parts cannot fit on the new run. */
 export const INLINE_PARTS_NO_ROUTE_NOTICE = 'No clear route — inline parts do not fit';
 
-export const RETAINED_CONNECTIONS_NO_ROUTE_NOTICE = 'No clear route — retained connections cannot be preserved';
+export const RETAINED_CONNECTIONS_NO_ROUTE_NOTICE = 'Reroute rejected — could not verify retained connections';
 
 /** `run` = view only; `edit` = place / drag / delete. Set by the host via `ProcessEditor`'s `mode`. */
 export type EditorHostMode = 'run' | 'edit';
@@ -300,9 +300,13 @@ function rerouteSelected(state: EditorState): EditorState {
     const route = routeToPlacements(without, state.registry, from, to, nextId, {
       band, reservedObjects: [...reservedObjects, ...placements],
     });
-    // A fallback L can violate a fixed joint's heading. Keep the entire
-    // scene and history when any section cannot preserve its connections.
-    if (route.noRoute && fixed.length > 0) return { ...state, notice: RETAINED_CONNECTIONS_NO_ROUTE_NOTICE };
+    // Both blocked and off-grid fallbacks skip heading/obstacle guarantees:
+    // half-cell endpoints set fallback=true but noRoute=false. Conservatively
+    // reject them for fixed sections and retained endpoint ports/flanges;
+    // staged placements must never partially replace the original run.
+    if (route.fallback && (fixed.length > 0 || from.heading !== undefined || to.heading !== undefined)) {
+      return { ...state, notice: RETAINED_CONNECTIONS_NO_ROUTE_NOTICE };
+    }
     const endpointLength = (cell: GridPoint) => rest.some((o) => sameCell(o, cell) && isInlinePart(o, state.registry))
       ? INLINE_PART_LENGTH : 0;
     const parts = carryHostedParts(
