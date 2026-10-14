@@ -116,9 +116,13 @@ jobs:
       - name: Install Chromium for the Vite consumer check
         if: matrix.package == 'editor-2.5d-react'
         working-directory: holodeck/packages/${{ matrix.package }}
-        run: pnpm exec playwright install --with-deps chromium
+        # No --with-deps: GitHub's ubuntu runners already ship Chromium's system libraries, and the
+        # apt-get step it adds hung for hours on two runs (2026-10-14). Time-box it either way.
+        timeout-minutes: 10
+        run: pnpm exec playwright install chromium
 
       - name: Vite consumer check (GLB URLs resolve)
         if: matrix.package == 'editor-2.5d-react'
         working-directory: holodeck/packages/${{ matrix.package }}
+        timeout-minutes: 15
         run: pnpm check:vite-consumer
