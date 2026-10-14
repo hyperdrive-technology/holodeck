@@ -6,6 +6,7 @@
  * never on `waitForTimeout`: the attribute flips only after a presented frame
  * shows the current revision with every GLB loaded.
  */
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { chromium, type Browser, type Locator, type Page } from 'playwright';
 import { createServer, type ViteDevServer } from 'vite';
@@ -116,3 +117,15 @@ export async function settle(page: Page, timeout = 60_000): Promise<void> {
   await animationFrames(page, 2);
   await waitForPageRendered(page, timeout);
 }
+
+/**
+ * ImageMagick's CLI: `magick` (v7, macOS/Homebrew) or `convert` (v6, which is
+ * what GitHub's ubuntu runners ship; `magick` does not exist there, found from
+ * a CI failure). Both take the same options for the crop/compose calls we use.
+ */
+export const IMAGEMAGICK = (() => {
+  for (const bin of ['magick', 'convert']) {
+    if (spawnSync(bin, ['-version'], { stdio: 'ignore' }).status === 0) return bin;
+  }
+  return 'magick'; // absent: the command fails with a clear "not found"
+})();

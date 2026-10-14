@@ -8,7 +8,7 @@ import { createServer, type ViteDevServer } from 'vite';
 import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM, RENDER_ARGS } from '../test-support/chromium';
-import { waitForPageRendered } from '../test-support/render-harness';
+import { IMAGEMAGICK, waitForPageRendered } from '../test-support/render-harness';
 import { PROCESS_SCENE } from './load-process-scene';
 import { REFERENCE_CANVAS } from '../editor/ProcessSceneView';
 
@@ -111,7 +111,7 @@ describe.skipIf(!CHROMIUM)('renders scene.json', () => {
       const diff = path.join(snapDir, 'diff.png');
       const { width, height, cropX } = REFERENCE_CANVAS;
       execSync(
-        `magick ${JSON.stringify(ref)} -crop ${width}x${height}+${cropX}+0 +repage ${JSON.stringify(refCanvas)} && magick ${JSON.stringify(refCanvas)} ${JSON.stringify(oursPath)} -gravity center -compose blend -define compose:args=50,50 -composite ${JSON.stringify(overlay)} && magick ${JSON.stringify(refCanvas)} ${JSON.stringify(oursPath)} -compose difference -composite -auto-level ${JSON.stringify(diff)}`,
+        `${IMAGEMAGICK} ${JSON.stringify(ref)} -crop ${width}x${height}+${cropX}+0 +repage ${JSON.stringify(refCanvas)} && ${IMAGEMAGICK} ${JSON.stringify(refCanvas)} ${JSON.stringify(oursPath)} -gravity center -compose blend -define compose:args=50,50 -composite ${JSON.stringify(overlay)} && ${IMAGEMAGICK} ${JSON.stringify(refCanvas)} ${JSON.stringify(oursPath)} -compose difference -composite -auto-level ${JSON.stringify(diff)}`,
         { stdio: 'pipe' },
       );
     } finally {

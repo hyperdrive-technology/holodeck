@@ -12,7 +12,7 @@ import { createServer, type ViteDevServer } from 'vite';
 import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM, RENDER_ARGS } from '../test-support/chromium';
-import { waitForPageRendered } from '../test-support/render-harness';
+import { IMAGEMAGICK, waitForPageRendered } from '../test-support/render-harness';
 import { TANK_PRESETS } from '../../assets/process/tank-presets';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
@@ -71,7 +71,7 @@ describe.skipIf(!CHROMIUM)('vessel family workbench', () => {
       for (const [i, name] of names.entries()) {
         const out = path.join(snapDir, `brewhouse-vessel-${name}.png`);
         execSync(
-          `magick ${JSON.stringify(snapPath)} -crop ${Math.round(stride)}x${VIEW.height * 2}+${Math.round(i * stride)}+0 +repage ${JSON.stringify(out)}`,
+          `${IMAGEMAGICK} ${JSON.stringify(snapPath)} -crop ${Math.round(stride)}x${VIEW.height * 2}+${Math.round(i * stride)}+0 +repage ${JSON.stringify(out)}`,
           { stdio: 'pipe' },
         );
       }
