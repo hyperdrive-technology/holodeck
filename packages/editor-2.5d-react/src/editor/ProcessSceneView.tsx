@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { Vector3Tuple } from 'three';
-import { IsoCanvas } from '../iso/IsoCanvas';
+import { IsoCanvas, type IsoCanvasProps } from '../iso/IsoCanvas';
 import type { ContributionRegistry } from '@holodeck/sdk';
 import { gridToWorld } from '../iso/grid';
 import { sceneBounds, type IsoSceneFile } from '../iso/scene';
@@ -57,6 +57,9 @@ export function ProcessSceneView({
   cursor,
   children,
   registry,
+  revision,
+  holdRender,
+  onRendered,
 }: {
   scene: IsoSceneFile;
   zoom?: number;
@@ -73,7 +76,7 @@ export function ProcessSceneView({
   children?: ReactNode;
   /** Resolves `scene.theme`. Default: registry from context. */
   registry?: ContributionRegistry;
-}) {
+} & Pick<IsoCanvasProps, 'revision' | 'holdRender' | 'onRendered'>) {
   const holodeckStyle = useIsoThemeStyle(scene.theme, registry);
   const lookAt = target ?? sceneTarget(scene);
   return (
@@ -90,6 +93,9 @@ export function ProcessSceneView({
       cursor={cursor}
       holodeckStyle={holodeckStyle}
       registry={registry}
+      revision={revision}
+      holdRender={holdRender}
+      onRendered={onRendered}
     >
       {children}
     </IsoCanvas>

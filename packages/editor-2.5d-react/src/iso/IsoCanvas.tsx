@@ -6,6 +6,8 @@
 import { OrthographicCamera } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import {
+  useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -22,6 +24,13 @@ import { FloorGrid } from './FloorGrid';
 import { useWebGPUSupport, WebGPUMissing } from './use-webgpu';
 import { createWebGPURenderer } from './webgpu-renderer';
 import { cameraOffset } from './pan';
+import {
+  createRenderTracker,
+  RenderSignal,
+  RenderTrackerContext,
+  renderState,
+  useRevision,
+} from './render-signal';
 import { useViewPan } from './use-view-pan';
 import {
   initialIsoPose,
@@ -47,6 +56,10 @@ function IsoRig({
   target: Vector3Tuple;
 }) {
   const camera = useThree((state) => state.camera) as OrthoCam;
+  // A pose animation holds the rendered signal until it lands (render-signal.tsx).
+  const tracker = useContext(RenderTrackerContext);
+  const releaseHold = useRef<(() => void) | null>(null);
+  useEffect(() => () => releaseHold.current?.(), []);
   const from = useRef(pose);
   const to = useRef(pose);
   const started = useRef(0);
@@ -85,7 +98,8 @@ function IsoRig({
     to.current = pose;
     started.current = performance.now();
     animating.current = true;
-  }, [pose, camera, zoom, target]);
+    releaseHold.current ??= tracker?.hold() ?? null;
+  }, [pose, camera, zoom, target, tracker]);
 
   useFrame(() => {
     camera.zoom = zoom;
@@ -106,6 +120,8 @@ function IsoRig({
     if (t >= 1) {
       animating.current = false;
       from.current = to.current;
+      releaseHold.current?.();
+      releaseHold.current = null;
     }
   });
 
@@ -140,6 +156,22 @@ export interface IsoCanvasProps {
   holodeckStyle?: HolodeckStyle;
   /** Registry for hooks inside the canvas. Default: the one from context, else the built-ins. */
   registry?: ContributionRegistry;
+  /**
+   * Content revision for the rendered signal (render-signal.tsx). Bump it whenever
+   * anything that changes the picture changes; `ProcessEditor` does. When omitted,
+   * IsoCanvas derives one from its own inputs (zoom, target, pose, style, grid,
+   * registry and `children` identity), so a re-render with new children counts
+   * as a new revision.
+   */
+  revision?: number;
+  /** Holds the rendered signal (e.g. while the host has not fitted the view yet). */
+  holdRender?: boolean;
+  /**
+   * Called after a presented frame shows `revision` with every GLB loaded and no
+   * camera animation running. Also mirrored as `data-holodeck-rendered` and
+   * `data-render-state` on the canvas container.
+   */
+  onRendered?: (revision: number) => void;
 }
 
 export function IsoCanvas({
@@ -157,6 +189,9 @@ export function IsoCanvas({
   showGrid = true,
   holodeckStyle,
   registry: registryProp,
+  revision: revisionProp,
+  holdRender = false,
+  onRendered,
 }: IsoCanvasProps) {
   const contextRegistry = useIsoRegistry();
   const registry = registryProp ?? contextRegistry;
@@ -168,6 +203,17 @@ export function IsoCanvas({
   const [ox, oy, oz] = posePosition(home);
   const webgpu = useWebGPUSupport();
   const container = useRef<HTMLDivElement>(null);
+  const [tracker] = useState(createRenderTracker);
+  const targetKey = target.join(',');
+  const autoRevision = useRevision([zoom, targetKey, pose, children, holodeckStyle, showGrid, registry]);
+  const revision = revisionProp ?? autoRevision;
+  const [renderedRevision, setRenderedRevision] = useState<number | null>(null);
+  const onRenderedRef = useRef(onRendered);
+  onRenderedRef.current = onRendered;
+  const reportRendered = useCallback((rev: number) => {
+    setRenderedRevision(rev);
+    onRenderedRef.current?.(rev);
+  }, []);
   const { onPointerDown, panning } = useViewPan(container, {
     zoom,
     target,
@@ -183,6 +229,9 @@ export function IsoCanvas({
       className={className}
       data-iso-target={target.map((v) => v.toFixed(3)).join(',')}
       data-panning={panning ? 'true' : 'false'}
+      data-holodeck-revision={revision}
+      data-holodeck-rendered={renderedRevision ?? ''}
+      data-render-state={webgpu === 'pending' ? 'pending' : renderState(revision, renderedRevision, webgpu === 'ready')}
       style={{
         position: 'relative',
         width: '100%',
@@ -206,6 +255,8 @@ export function IsoCanvas({
       >
         <color attach="background" args={['#ffffff']} />
         <OrthographicCamera makeDefault near={0.5} far={4000} position={[ox + target[0], oy + target[1], oz + target[2]]} zoom={zoom} />
+        <RenderTrackerContext.Provider value={tracker}>
+        <RenderSignal revision={revision} hold={holdRender} onRendered={reportRendered} />
         <IsoRig pose={pose} zoom={zoom} target={target} />
         {/* Key from the camera-right so the leftmost tank segment is
             darkest, the right is a bit lighter, and the interior back
@@ -223,6 +274,7 @@ export function IsoCanvas({
         <IsoRegistryProvider registry={registry}>
           {holodeckStyle ? <HolodeckStyleProvider style={holodeckStyle}>{children}</HolodeckStyleProvider> : children}
         </IsoRegistryProvider>
+        </RenderTrackerContext.Provider>
       </Canvas>
       ) : null}
       {showControls ? <div

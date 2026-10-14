@@ -12,6 +12,7 @@ import { createRoot } from 'react-dom/client';
 import { HolodeckModel } from '../../assets/process/HolodeckModel';
 import { Valve } from '../../assets/process/Valve';
 import { IsoCanvas } from './IsoCanvas';
+import { PendingAsset } from './render-signal';
 
 const MODELS = import.meta.glob('../../assets/models/*.glb', {
   query: '?url',
@@ -77,7 +78,7 @@ function PartRow({ name, url, onLoaded }: { name: string; url: string; onLoaded:
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
         <Panel title="Blender GLB + style layer">
           <IsoCanvas zoom={view.zoom} target={view.target} showControls={false}>
-            <Suspense fallback={null}>
+            <Suspense fallback={<PendingAsset />}>
               <HolodeckModel url={url} onReady={onReady} />
             </Suspense>
           </IsoCanvas>

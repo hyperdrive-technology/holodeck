@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
 import { HolodeckModel } from '../anim/HolodeckModel';
 import { gridToWorld } from '../iso/grid';
+import { PendingAsset } from '../iso/render-signal';
 import { partScale } from './part-scale';
 import type { IsoPartProps } from './types';
 
@@ -19,7 +20,8 @@ export function GlbPart({ placement, params, style, def }: IsoPartProps) {
   const [wx, , wz] = gridToWorld(placement.x, placement.y);
   return (
     // useLoader suspends; without a boundary one slow GLB would blank the whole scene.
-    <Suspense fallback={null}>
+    // The fallback holds the canvas's rendered signal until the model is in.
+    <Suspense fallback={<PendingAsset />}>
       <HolodeckModel
         url={def.model}
         position={[wx, 0, wz]}
