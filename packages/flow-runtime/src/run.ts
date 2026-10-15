@@ -24,6 +24,15 @@
  * a `good`, non-null reading, holds (writes nothing) otherwise, and writes the
  * current value again when its reading turns good.
  *
+ * State carries value, not quality. Block state (`initialState`/`state`) and a
+ * `flow.delay` on a feedback loop hand their value to the next scan, but the
+ * quality of what they feed is decided by that scan's own readings: a loop
+ * delay reads `good` once it holds a non-null value (`uncertain` while null).
+ * Otherwise one non-good scan would circulate in the loop forever and every
+ * latch, seal-in or integrator behind it would stop writing until the next
+ * deploy. A delay *outside* any loop is a plain time shift of a reading, so it
+ * carries the quality with the value (a bad sample stays bad one scan later).
+ *
  * Everything the run hands out (scans, readings, snapshots) is frozen, and it
  * never keeps objects that callers or blocks gave it: values are scalars,
  * block state is deep-copied and frozen after every `evaluate`.
@@ -271,7 +280,8 @@ type Evaluated =
       /**
        * Worst quality of the readings the node consumed, captured when it was
        * evaluated. Delays are evaluated before any delay commits, so a delay
-       * carries the quality its input had together with the value it delays.
+       * outside a loop carries the quality its input had together with the
+       * value it delays (a loop delay ignores it; see `outputQuality`).
        */
       readonly quality: SignalQuality;
     };
@@ -348,9 +358,9 @@ class Run implements FlowRun {
     for (const node of program.nodes) {
       for (const output of node.outputs) {
         if (node.role === 'delay') {
-          // A delay's `initial` is configuration, as trustworthy as a constant,
-          // so loops through it can start `good`. An unset (null) initial is
-          // "unknown": readers that need a typed value get a bad substitute.
+          // A delay's `initial` is configuration, as trustworthy as a constant.
+          // An unset (null) initial is "unknown": readers that need a typed
+          // value get a bad substitute until the delay holds a real value.
           const initial = node.plan.params.initial as FlowValue;
           this.values[output.slot] = initial;
           this.quality[output.slot] = initial === null ? 'uncertain' : 'good';
@@ -630,9 +640,15 @@ class Run implements FlowRun {
    * `bad` while a fault is reported from outside (`reportFault`), and for
    * `signal.in` also the sample's quality. A `signal.in` that holds `null` (no
    * sample yet) is at best `uncertain`: "no value" is never `good`.
+   *
+   * A delay on a feedback loop is state: its output is `good` when it holds a
+   * non-null value and `uncertain` while it holds null. It does not carry its
+   * input's quality, so the loop's quality comes from this scan's real inputs
+   * and recovers as soon as they are good (see the header comment).
    */
   private outputQuality(node: ProgramNode, inputs: SignalQuality): SignalQuality {
     if (this.external[node.index] !== null) return 'bad';
+    if (node.feedback) return node.outputs.some((o) => this.values[o.slot] === null) ? 'uncertain' : 'good';
     if (node.role !== 'signal-in') return inputs;
     const sample = this.signalQuality[node.index] as SignalQuality;
     const quality = worstQuality(inputs, sample);

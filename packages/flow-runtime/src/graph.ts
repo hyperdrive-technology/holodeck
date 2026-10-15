@@ -580,17 +580,37 @@ function checkParams(node: GraphNode, problems: Problems): void {
  * Cycles that do not pass through a `flow.delay` node ("algebraic loops").
  * Delay nodes are removed; every strongly connected component left with more
  * than one node, or with a self-wire, is one problem, reported with a
- * shortest cycle through its first node (document order). Iterative Tarjan,
- * so a 10 000-node chain cannot overflow the call stack.
+ * shortest cycle through its first node (document order).
  */
 function findAlgebraicLoops(nodes: readonly GraphNode[], wires: readonly GraphWire[], problems: Problems): void {
-  const n = nodes.length;
   const isDelay = nodes.map((node) => node.snap.block === FLOW_DELAY_BLOCK);
   const adj: number[][] = nodes.map(() => []);
   for (const wire of wires) {
     if (isDelay[wire.from.order] || isDelay[wire.to.order]) continue;
     adj[wire.from.order]!.push(wire.to.order);
   }
+  const components = cyclicComponents(adj, isDelay);
+  // Report in document order of each loop's first node.
+  const first = (component: readonly number[]) => component.reduce((m, i) => (i < m ? i : m), Number.POSITIVE_INFINITY);
+  components.sort((a, b) => first(a) - first(b));
+  for (const component of components) {
+    const path = cycleThrough(component, adj).map((i) => nodes[i]!.snap.id);
+    problems.error('CYCLE_WITHOUT_DELAY', `cycle without a ${FLOW_DELAY_BLOCK} block: ${describePath(path)}`, {
+      node: path[0],
+      path,
+    });
+  }
+}
+
+/**
+ * The strongly connected components of a directed graph that contain a cycle:
+ * more than one node, or one node with an edge to itself. `adj[u]` lists the
+ * successors of node `u`; nodes with `skip[u]` set are left out (callers drop
+ * their edges from `adj` too). Iterative Tarjan, so a 10 000-node chain cannot
+ * overflow the call stack. Components come in no particular order.
+ */
+export function cyclicComponents(adj: readonly (readonly number[])[], skip?: readonly boolean[]): number[][] {
+  const n = adj.length;
   const index = new Int32Array(n).fill(-1);
   const low = new Int32Array(n);
   const onStack = new Uint8Array(n);
@@ -599,7 +619,7 @@ function findAlgebraicLoops(nodes: readonly GraphNode[], wires: readonly GraphWi
   const components: number[][] = [];
   let counter = 0;
   for (let root = 0; root < n; root++) {
-    if (isDelay[root] || index[root] !== -1) continue;
+    if (skip?.[root] || index[root] !== -1) continue;
     index[root] = low[root] = counter++;
     stack.push(root);
     onStack[root] = 1;
@@ -635,16 +655,7 @@ function findAlgebraicLoops(nodes: readonly GraphNode[], wires: readonly GraphWi
       }
     }
   }
-  // Report in document order of each loop's first node.
-  const first = (component: readonly number[]) => component.reduce((m, i) => (i < m ? i : m), Number.POSITIVE_INFINITY);
-  components.sort((a, b) => first(a) - first(b));
-  for (const component of components) {
-    const path = cycleThrough(component, adj).map((i) => nodes[i]!.snap.id);
-    problems.error('CYCLE_WITHOUT_DELAY', `cycle without a ${FLOW_DELAY_BLOCK} block: ${describePath(path)}`, {
-      node: path[0],
-      path,
-    });
-  }
+  return components;
 }
 
 /** Shortest cycle through the component's first node (BFS inside the component). */

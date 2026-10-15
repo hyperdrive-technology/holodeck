@@ -18,6 +18,7 @@ import type { BlockInfo, FlowParams } from './block';
 import { FLOW_DELAY_BLOCK, SIGNAL_IN_BLOCK, SIGNAL_OUT_BLOCK } from './builtins';
 import {
   analyzeFlowGraph,
+  cyclicComponents,
   FLOW_GRAPH_FORMAT,
   isDeployable,
   type AnalyzedGraph,
@@ -115,6 +116,14 @@ export interface ProgramNode {
   readonly plan: FlowPlanNode;
   readonly info: BlockInfo;
   readonly role: ProgramRole;
+  /**
+   * `flow.delay` only: the delay sits on a feedback loop (its output reaches
+   * its own input, possibly through other delays). Such a delay is *state*: it
+   * carries its value into the next scan but not its quality (README "Quality
+   * and the write gate"). A delay outside any loop is a plain time shift and
+   * carries both. Always `false` for other roles.
+   */
+  readonly feedback: boolean;
   readonly inputs: readonly ProgramInput[];
   /** Output port → value slot. */
   readonly outputSlots: ReadonlyMap<string, number>;
@@ -196,8 +205,28 @@ function evaluationOrder(graph: AnalyzedGraph): GraphNode[] {
   return order;
 }
 
+/**
+ * The delays that lie on a feedback loop: strongly connected components of
+ * the full wire graph (delays included) that contain a cycle. Validation
+ * already rejected every cycle without a delay, so each such component holds
+ * at least one delay.
+ */
+function feedbackDelays(graph: AnalyzedGraph): Set<GraphNode> {
+  const adj: number[][] = graph.nodes.map(() => []);
+  for (const wire of graph.wires) adj[wire.from.order]!.push(wire.to.order);
+  const result = new Set<GraphNode>();
+  for (const component of cyclicComponents(adj)) {
+    for (const i of component) {
+      const node = graph.nodes[i]!;
+      if (node.snap.block === FLOW_DELAY_BLOCK) result.add(node);
+    }
+  }
+  return result;
+}
+
 function build(graph: AnalyzedGraph, problems: readonly FlowProblem[]): FlowPlan {
   const order = evaluationOrder(graph);
+  const feedback = feedbackDelays(graph);
 
   // Output slots in evaluation order.
   const slotOf = new Map<GraphNode, Map<string, number>>();
@@ -265,6 +294,7 @@ function build(graph: AnalyzedGraph, problems: readonly FlowProblem[]): FlowPlan
       plan: planNode,
       info,
       role: roleOf(info.id),
+      feedback: feedback.has(node),
       inputs: Object.freeze(programInputs),
       outputSlots: nodeSlots,
       outputs: Object.freeze(outputs),

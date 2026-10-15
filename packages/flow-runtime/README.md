@@ -93,7 +93,7 @@ there is always a free one.
 | Block | Ports | Params | Behaviour |
 |---|---|---|---|
 | `flow.const` | → `value: any` | `type` (`bool`/`number`/`string`, default `number`), `value` | A constant, converted to `type` |
-| `flow.delay` | `in: any` → `out: any` | `initial` (default `null`) | One-scan delay of the value and its quality. **This is the only legal way to close a loop.** |
+| `flow.delay` | `in: any` → `out: any` | `initial` (default `null`) | One-scan delay of the value (quality: see [Quality](#quality-and-the-write-gate)). **This is the only legal way to close a loop.** |
 | `signal.in` | → `value: any` | `connection`, `source` (required) | Latest value of a provider signal; `null` until the first sample |
 | `signal.out` | `value: any` → | `connection`, `source` (required) | Writes its input to a provider signal when it changes, **only while the input is `good` and non-null** (see [Quality](#quality-and-the-write-gate)); an unwired one never writes |
 
@@ -182,7 +182,8 @@ stale or faulted data. Every output carries a quality, ordered `good` < `uncerta
 | An unconnected input, `flow.const`, a block with no inputs | Counts as `good` |
 | An `any` value converted to a typed input with a *substitute* (table above) | That reading counts as `bad` |
 | `signal.in` | The sample's quality. A `null` value (no sample yet, or a provider reporting "no value") is at best `uncertain` |
-| `flow.delay` | The quality its input had in the previous scan, delayed with the value. A non-null `initial` is `good` before the first scan; `initial: null` is `uncertain` |
+| `flow.delay` on a feedback loop (its output reaches its own input) | **State:** `good` while it holds a non-null value, `uncertain` while it holds `null`. It does **not** carry its input's quality |
+| `flow.delay` outside any loop | A plain time shift: the quality its input had in the previous scan, delayed with the value. Before the first scan, a non-null `initial` is `good` and `initial: null` is `uncertain` |
 
 `signal.out` (`FlowScan.writes` / `holds`) follows these rules:
 
@@ -196,8 +197,25 @@ stale or faulted data. Every output carries a quality, ordered `good` < `uncerta
    may have changed while the flow was not in control). After that it writes on every change, as before.
 
 So a connection that goes down (the hub bridge holds the last value as `uncertain`) stops every write derived from
-it, on any connection, until the connection is back. Give a `flow.delay` in a feedback loop a non-null `initial`:
-otherwise the loop starts from "unknown", typed blocks in it read a substitute, and the loop stays `bad`.
+it, on any connection, until the connection is back.
+
+**State carries value, not quality.** Block state (`initialState` / `state`, e.g. timers and counters) and a
+`flow.delay` on a feedback loop hand their *value* to the next scan, but never their quality: what they feed is as
+good as the readings consumed *in this scan*. Without this rule one non-good scan anywhere in a loop (the startup
+scan before the first samples, a one-scan connection blip, a one-scan block fault) would circulate forever, and
+every latch, seal-in, integrator or state machine behind it would stop writing until the next deploy. With it:
+
+- Startup stays safe: in the first scan a latch reads its `signal.in`s, which are not `good` yet, so nothing it
+  drives is written. Once the samples are good it writes.
+- A loop recovers in the scan its outside inputs are `good` again, and `signal.out` re-sends the current value
+  (rule 3). The loop's state is kept across the blip, as in a PLC: a latch stays latched.
+- A loop delay with `initial: null` costs one scan: typed readers get a `bad` substitute in the first scan, after
+  which the delay holds a real value. A non-null `initial` avoids even that.
+- A `flow.delay` outside any loop is not state but a time shift, so a `bad` reading stays `bad` one scan later and
+  is never written then.
+- The flip side, also as in a PLC: state built while an input was not `good` (a latch set by an `uncertain`
+  sample, a timer that ran on one) is kept, and is written once this scan's inputs are `good`. Anything that must
+  not trust such state needs explicit logic for it (e.g. reset on a quality edge), not the propagation rule.
 
 `step()` runs one scan, which makes tests deterministic with an injected `now`. `start()` / `stop()` drive scans
 with `schedule`, which defaults to `setInterval`; `createManualSchedule()` from the SDK fits. `dispose()` is final.

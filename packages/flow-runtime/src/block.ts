@@ -11,6 +11,11 @@
  * frozen, so mutation throws and faults the node). Timers, latches and edge
  * detectors keep what they need in `state`; the runtime snapshots it.
  *
+ * State carries value, not quality: a node's output quality is the worst of
+ * the readings it consumed *this scan* (README "Quality and the write gate"),
+ * whatever the readings were when its state was built. A timer that ran on an
+ * uncertain input is `good` again as soon as its input is.
+ *
  * Item shapes live with the package that registers the kind (SDK
  * `registry.ts`), so this file, not the SDK, defines `FlowBlockDefinition`.
  *
@@ -117,7 +122,10 @@ export type FlowState = null | boolean | number | string | readonly FlowState[] 
 export interface FlowEvalArgs<S extends FlowState = FlowState> {
   inputs: FlowInputs;
   params: FlowParams;
-  /** The node's state: `initialState(params)` (or `null`) on the first scan, then whatever `evaluate` last returned. */
+  /**
+   * The node's state: `initialState(params)` (or `null`) on the first scan, then whatever `evaluate` last returned.
+   * It has no quality of its own: outputs take the quality of this scan's inputs.
+   */
   state: S;
   /** Milliseconds since the previous scan of this run; 0 on the first scan and if the clock goes backwards. */
   dtMs: number;

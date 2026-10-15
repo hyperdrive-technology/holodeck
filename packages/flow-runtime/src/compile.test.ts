@@ -32,6 +32,33 @@ describe('compileFlow', () => {
     expect(compileFlow(body, registry).nodes.map((n) => n.id)).toEqual(['one', 'add', 'd']);
   });
 
+  it('marks delays on a feedback loop (through other delays, or wired to themselves); feed-forward delays are not', () => {
+    const body = graph(
+      [
+        node('n', 'test.not'),
+        node('loop1', 'flow.delay', { initial: false }),
+        node('loop2', 'flow.delay', { initial: false }), // n → loop1 → loop2 → n
+        node('self', 'flow.delay'), // self.out → self.in
+        node('after', 'flow.delay'), // reads the loop, is not on it
+        node('chain1', 'flow.delay'),
+        node('chain2', 'flow.delay'), // chain1 → chain2, no loop
+        node('k', 'test.not'),
+      ],
+      [
+        wire('w1', 'n.out', 'loop1.in'),
+        wire('w2', 'loop1.out', 'loop2.in'),
+        wire('w3', 'loop2.out', 'n.in'),
+        wire('w4', 'self.out', 'self.in'),
+        wire('w5', 'n.out', 'after.in'),
+        wire('w6', 'k.out', 'chain1.in'),
+        wire('w7', 'chain1.out', 'chain2.in'),
+      ],
+    );
+    const program = programOf(compileFlow(body, registry))!;
+    const feedback = Object.fromEntries(program.nodes.map((n) => [n.plan.id, n.feedback]));
+    expect(feedback).toEqual({ n: false, k: false, loop1: true, loop2: true, self: true, after: false, chain1: false, chain2: false });
+  });
+
   it('describes ports, wiring, params and sources', () => {
     const body = graph(
       [node('a', 'flow.const', { type: 'bool', value: true }), node('and', 'test.and', undefined, { label: 'Both' })],
