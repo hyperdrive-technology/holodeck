@@ -1,20 +1,22 @@
 /**
  * Renders vessels.html (the base-Tank preset family at brewhouse spacing)
- * in a real WebGPU canvas and saves tests/snapshots/brewhouse-vessels.png
+ * in a real WebGPU canvas and saves artifacts/render/brewhouse-vessels.png
  * plus a close-up crop per vessel. Visual check: all vessels must read as
  * the same object (cutaway, solid liquid, no lines inside the window) with
  * different radius / height / closures.
  */
-import { mkdirSync, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
 import { launchRenderBrowser, waitForRendered } from '../test-support/render-harness';
+import { artifactsDir } from '../visual/io';
 import { TANK_PRESETS } from '../../assets/process/tank-presets';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
-const snapDir = path.join(pkgRoot, 'tests/snapshots');
+/** Review shots: gitignored, uploaded by CI's render-artifacts step (holodeck#73). */
+const snapDir = artifactsDir('render');
 const snapPath = path.join(snapDir, 'brewhouse-vessels.png');
 const VIEW = { width: 1400, height: 520 };
 
@@ -54,7 +56,6 @@ describe.skipIf(!CHROMIUM)('vessel family workbench', () => {
       await waitForRendered(page);
       expect(await root.getAttribute('data-vessels')).toBe(Object.keys(TANK_PRESETS).join(','));
       expect(logs.filter((l) => l.startsWith('pageerror'))).toEqual([]);
-      mkdirSync(snapDir, { recursive: true });
       await page.screenshot({ path: snapPath, type: 'png' });
       if (statSync(snapPath).size < 20_000) {
         throw new Error(`blank snapshot (${statSync(snapPath).size} bytes)\n${logs.join('\n')}`);

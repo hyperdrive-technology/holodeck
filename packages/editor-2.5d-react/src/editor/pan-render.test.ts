@@ -5,20 +5,21 @@
  * pinch zooms, and a pan stops auto-fit on resize. Needs local Chromium +
  * WebGPU like the other *-render tests.
  */
-import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
 import { launchRenderBrowser, settle, waitForRendered } from '../test-support/render-harness';
+import { artifactsDir } from '../visual/io';
 import type { Vector3Tuple } from 'three';
 import type { IsoSceneFile } from '../iso/scene';
 import { panTarget } from '../iso/pan';
 import { initialIsoPose } from '../iso/pose';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
-const snapDir = path.join(pkgRoot, 'tests/snapshots');
+/** Review shots: gitignored, uploaded by CI's render-artifacts step (holodeck#73). */
+const snapDir = artifactsDir('render');
 
 
 let server: ViteDevServer;
@@ -96,7 +97,6 @@ describe.skipIf(!CHROMIUM)('view pan', () => {
       await page.setViewportSize({ width: 1100, height: 700 });
       await settle(page);
       expect(await target(page)).toEqual(after);
-      mkdirSync(snapDir, { recursive: true });
       await page.screenshot({ path: path.join(snapDir, 'pan-edit.png') });
     } finally {
       await page.close();

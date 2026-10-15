@@ -13,14 +13,16 @@
  *
  *   node scripts/make-reference-canvas.mjs [--out <file>]
  *
- * Chromium: same resolution as src/test-support/chromium.ts ($HOLODECK_CHROMIUM,
- * Playwright's full Chromium, the macOS chromium-1193 build). Playwright's
- * default headless-shell is usually not installed on dev machines.
+ * Chromium: the shared resolver in src/test-support/chromium.ts (imported
+ * directly; Node 26 strips the TypeScript types), so this script and the render
+ * tests always agree: $HOLODECK_CHROMIUM, then Playwright's pinned Chromium,
+ * then system Chrome (holodeck#74).
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { chromium } from 'playwright';
+import { CHROMIUM_RESOLUTION } from '../src/test-support/chromium.ts';
 
 const CROP = { x: 200, y: 0, width: 760, height: 540 };
 const pkgRoot = path.resolve(import.meta.dirname, '..');
@@ -28,22 +30,10 @@ const { values } = parseArgs({ options: { out: { type: 'string' } } });
 const src = path.join(pkgRoot, 'tests/snapshots/reference.jpg');
 const out = path.resolve(values.out ?? path.join(pkgRoot, 'tests/snapshots/reference-canvas.png'));
 
-function resolveChromium() {
-  const candidates = [process.env.HOLODECK_CHROMIUM];
-  try {
-    candidates.push(chromium.executablePath());
-  } catch {
-    // no Playwright build for this platform
-  }
-  candidates.push(
-    path.join(process.env.HOME ?? '', 'Library/Caches/ms-playwright/chromium-1193/chrome-mac/Chromium.app/Contents/MacOS/Chromium'),
-  );
-  const found = candidates.find((p) => p && existsSync(p));
-  if (!found) throw new Error('no Chromium found: set HOLODECK_CHROMIUM or run `pnpm exec playwright install chromium`');
-  return found;
-}
+if (!CHROMIUM_RESOLUTION.path) throw new Error(`no Chromium: ${CHROMIUM_RESOLUTION.reason}`);
+console.log(`Chromium: ${CHROMIUM_RESOLUTION.reason}`);
 
-const browser = await chromium.launch({ executablePath: resolveChromium(), headless: true });
+const browser = await chromium.launch({ executablePath: CHROMIUM_RESOLUTION.path, headless: true });
 try {
   const page = await browser.newPage();
   const dataUrl = await page.evaluate(

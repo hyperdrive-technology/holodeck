@@ -3,7 +3,7 @@
  * Vessel family workbench: the base `Tank` presets (HLT, mash tun, kettle,
  * whirlpool, fermenter, brite) side by side at the brewhouse's spacing and
  * copper liquid, so the family reads as one object with different params.
- * vessels-render.test.ts snapshots it to tests/snapshots/brewhouse-vessels.png.
+ * vessels-render.test.ts snapshots it to artifacts/render/brewhouse-vessels.png.
  *
  * URL params: level=<0..1> (default 0.5), agitate=1 (spin the agitators).
  */

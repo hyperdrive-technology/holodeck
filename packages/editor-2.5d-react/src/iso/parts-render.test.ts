@@ -1,16 +1,18 @@
 /**
  * Renders parts.html (Blender GLBs + style layer beside their code twins)
- * in a real WebGPU canvas and saves tests/snapshots/parts.png.
+ * in a real WebGPU canvas and saves artifacts/render/parts.png.
  */
-import { mkdirSync, readdirSync, statSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
 import { launchRenderBrowser, waitForRendered } from '../test-support/render-harness';
+import { artifactsDir } from '../visual/io';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
-const snapDir = path.join(pkgRoot, 'tests/snapshots');
+/** Review shots: gitignored, uploaded by CI's render-artifacts step (holodeck#73). */
+const snapDir = artifactsDir('render');
 const snapPath = path.join(snapDir, 'parts.png');
 const modelNames = readdirSync(path.join(pkgRoot, 'assets/models'))
   .filter((f) => f.endsWith('.glb'))
@@ -69,7 +71,6 @@ describe.skipIf(!CHROMIUM)('parts workbench', () => {
       expect(logs.filter((l) => l.includes('applyHolodeckStyle')), logs.join('\n')).toEqual([]);
       expect(logs.filter((l) => l.startsWith('pageerror') || l.startsWith('http ')), logs.join('\n')).toEqual([]);
 
-      mkdirSync(snapDir, { recursive: true });
       await page.screenshot({ path: snapPath, type: 'png', fullPage: true });
     } finally {
       await browser.close();

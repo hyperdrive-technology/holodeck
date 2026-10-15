@@ -6,7 +6,7 @@
  */
 import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { CHROMIUM } from './chromium';
+import { CHROMIUM, CHROMIUM_RESOLUTION } from './chromium';
 import { launchRenderBrowser, settle, waitForRendered } from './render-harness';
 
 let browser: Browser;
@@ -37,6 +37,17 @@ function signal(id: string, state: string, revision?: number): Promise<void> {
     [id, state, revision ?? null] as const,
   );
 }
+
+// Runs everywhere, including when every render suite below skips: in CI the
+// render tests (and the Arcentry fidelity ratchet) must not skip silently
+// because the "Select browser" step was dropped or HOLODECK_CHROMIUM points at
+// nothing (holodeck#78). Opt out explicitly with HOLODECK_SKIP_RENDER_TESTS=1.
+describe('render browser', () => {
+  it('is available whenever render tests are required (CI)', () => {
+    const { required, path, reason } = CHROMIUM_RESOLUTION;
+    expect(required && !path, `render tests are required here but cannot run: ${reason}`).toBe(false);
+  });
+});
 
 describe.skipIf(!CHROMIUM)('waitForRendered', () => {
   it('page scope waits until every signalling element is ready', async () => {
