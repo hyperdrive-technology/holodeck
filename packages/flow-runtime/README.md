@@ -93,9 +93,9 @@ there is always a free one.
 | Block | Ports | Params | Behaviour |
 |---|---|---|---|
 | `flow.const` | → `value: any` | `type` (`bool`/`number`/`string`, default `number`), `value` | A constant, converted to `type` |
-| `flow.delay` | `in: any` → `out: any` | `initial` (default `null`) | One-scan delay. **This is the only legal way to close a loop.** |
+| `flow.delay` | `in: any` → `out: any` | `initial` (default `null`) | One-scan delay of the value and its quality. **This is the only legal way to close a loop.** |
 | `signal.in` | → `value: any` | `connection`, `source` (required) | Latest value of a provider signal; `null` until the first sample |
-| `signal.out` | `value: any` → | `connection`, `source` (required) | Writes its input to a provider signal when it changes; `null` is never written, an unwired one never writes |
+| `signal.out` | `value: any` → | `connection`, `source` (required) | Writes its input to a provider signal when it changes, **only while the input is `good` and non-null** (see [Quality](#quality-and-the-write-gate)); an unwired one never writes |
 
 The runtime always uses these definitions for these ids. A registry entry with the same id never replaces them.
 
@@ -156,15 +156,48 @@ Values from `any` outputs are converted into typed inputs as follows:
 
 | to \ from | boolean | number | string | null |
 |---|---|---|---|---|
-| `bool` | itself | `n !== 0` | `"true"` → true; `"false"`, `""` → false; numeric → `n !== 0`; else false | false |
-| `number` | 1 / 0 | itself | `Number(s)` if finite, else 0 | 0 |
-| `string` | `"true"` / `"false"` | `String(n)` | itself | `""` |
+| `bool` | itself | `n !== 0` | `"true"` → true; `"false"` → false; numeric → `n !== 0`; else false *(subst.)* | false *(subst.)* |
+| `number` | 1 / 0 | itself | `Number(s)` if non-empty and finite, else 0 *(subst.)* | 0 *(subst.)* |
+| `string` | `"true"` / `"false"` | `String(n)` | itself | `""` *(subst.)* |
+
+A block always receives a value of its input's type, but a cell marked *(subst.)* is a **substitute** for a value
+that is not there: the reading's quality becomes `bad`, so it can never be written as if it were real
+(`convertReading(type, value)` returns `{ value, exact }`; `convertTo` is its value part).
 
 A node whose `evaluate` throws, returns a promise, returns an unknown output, or returns a value of the wrong type
 (including `NaN` and strings over 64 KiB) is **faulted** for that scan. None of its outputs or state change, its
 outputs' quality becomes `bad`, and `flow:<id>.$fault` carries the message. The other nodes keep running, and the
-next good scan clears the fault. Output quality is `uncertain` before the first scan, then `good` (`signal.in`
-outputs carry the sample's quality).
+next good scan clears the fault. Output quality is `uncertain` before the first scan; after that it follows the
+rules below.
+
+### Quality and the write gate
+
+`signal.out` writes into real PLC and provider tags, so the runtime never writes a value derived from unknown,
+stale or faulted data. Every output carries a quality, ordered `good` < `uncertain` < `bad`:
+
+| Output of | Quality |
+|---|---|
+| A faulted node (`evaluate` failed, `initialState` failed, or `reportFault` set) | `bad` (its held value is kept) |
+| Any other block | The **worst** quality among the readings it consumed this scan (every wired input instance, variadic ones included) |
+| An unconnected input, `flow.const`, a block with no inputs | Counts as `good` |
+| An `any` value converted to a typed input with a *substitute* (table above) | That reading counts as `bad` |
+| `signal.in` | The sample's quality. A `null` value (no sample yet, or a provider reporting "no value") is at best `uncertain` |
+| `flow.delay` | The quality its input had in the previous scan, delayed with the value. A non-null `initial` is `good` before the first scan; `initial: null` is `uncertain` |
+
+`signal.out` (`FlowScan.writes` / `holds`) follows these rules:
+
+1. It writes only a reading that is `good` **and** non-null. The first scan of a deploy therefore writes nothing
+   until the inputs it depends on have real, good samples.
+2. While the reading is anything else, it **holds**: nothing is written, the target keeps the last value written
+   to it, and no substitute is ever written. The scan in which a node starts holding lists it once in
+   `FlowScan.holds`. The provider then drops that node's pending or retried write, so a failed write of a value
+   that is now in doubt is not retried.
+3. When the reading is `good` again, it writes the current value, even if that equals the last write (the target
+   may have changed while the flow was not in control). After that it writes on every change, as before.
+
+So a connection that goes down (the hub bridge holds the last value as `uncertain`) stops every write derived from
+it, on any connection, until the connection is back. Give a `flow.delay` in a feedback loop a non-null `initial`:
+otherwise the loop starts from "unknown", typed blocks in it read a substitute, and the loop stays `bad`.
 
 `step()` runs one scan, which makes tests deterministic with an injected `now`. `start()` / `stop()` drive scans
 with `schedule`, which defaults to `setInterval`; `createManualSchedule()` from the SDK fits. `dispose()` is final.
@@ -238,7 +271,8 @@ so a flow and the diagram next to it share one session per connection. It handle
 - Dispose the bridge before, or together with, the hub.
 
 `signal.out` keeps at most one write in flight. The newest value wins, and a value equal to the last successful
-write is not sent again. If the value returns to the last successful write after a failed one, the fault clears
+write is not sent again (a hold resets this: after a hold the value is sent again, and a write still in flight
+during the hold does not count as the target's value). If the value returns to the last successful write after a failed one, the fault clears
 without a write, because the failed value never landed. One bridge subscription serves every `signal.in` that reads the same signal. Without a
 bridge, `signal.in` reads `null`/`bad`, `signal.out` is faulted, and deploy warns `NO_SIGNAL_BRIDGE`.
 

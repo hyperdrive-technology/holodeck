@@ -16,6 +16,14 @@
  * becomes `bad`, and its `$fault` source carries the message. The other nodes
  * keep running; the next successful scan clears the fault.
  *
+ * Quality (the safety contract; README "Quality"): every output carries the
+ * worst quality (good < uncertain < bad) of the readings its node consumed
+ * this scan, or `bad` when the node is faulted. Constants and unconnected
+ * inputs read `good`; an `any` value converted to a typed input that had to be
+ * substituted (null, unparsable string) reads `bad`. `signal.out` writes only
+ * a `good`, non-null reading, holds (writes nothing) otherwise, and writes the
+ * current value again when its reading turns good.
+ *
  * Everything the run hands out (scans, readings, snapshots) is frozen, and it
  * never keeps objects that callers or blocks gave it: values are scalars,
  * block state is deep-copied and frozen after every `evaluate`.
@@ -25,7 +33,7 @@ import type { SignalQuality } from '@holodeck/sdk';
 import type { FlowEvalArgs, FlowState } from './block';
 import { programOf, type FlowPlan, type Program, type ProgramNode, type ProgramSlot } from './compile';
 import {
-  convertTo,
+  convertReading,
   DEFAULT_SCAN_MS,
   dict,
   errorMessage,
@@ -37,6 +45,7 @@ import {
   matchesType,
   quote,
   typeDefault,
+  worstQuality,
   type FlowValue,
 } from './values';
 
@@ -63,12 +72,37 @@ export interface FlowValueChange {
   readonly quality: SignalQuality;
 }
 
-/** A `signal.out` input that changed this scan (never `null`; unwired `signal.out` nodes never write). */
+/**
+ * A `signal.out` write requested by this scan. Listed when the node's input
+ * reading is `good` and non-null and either its value changed or the
+ * previous scan's reading was not writable (recovery). Never `null`; unwired
+ * `signal.out` nodes never write.
+ */
 export interface FlowWrite {
   readonly node: string;
   readonly connection: string;
   readonly source: string;
   readonly value: FlowValue;
+}
+
+/**
+ * A `signal.out` node whose input stopped being writable this scan (quality
+ * dropped below `good`, or the value became `null`). The target keeps the
+ * last value written to it; consumers must drop any pending or retried write
+ * of an older value. Listed once per transition, not every scan.
+ */
+export interface FlowHold {
+  readonly node: string;
+  readonly connection: string;
+  readonly source: string;
+  /** Quality of the input reading that caused the hold. */
+  readonly quality: SignalQuality;
+}
+
+/** One input reading: the value a block sees and how trustworthy it is. */
+interface Reading {
+  readonly value: FlowValue;
+  readonly quality: SignalQuality;
 }
 
 export interface FlowFault {
@@ -84,6 +118,8 @@ export interface FlowScan {
   /** Outputs (and `$fault`s) whose value or quality changed in this scan. */
   readonly changes: readonly FlowValueChange[];
   readonly writes: readonly FlowWrite[];
+  /** `signal.out` nodes that stopped writing in this scan. */
+  readonly holds: readonly FlowHold[];
   /** Every node faulted after this scan. */
   readonly faults: readonly FlowFault[];
 }
@@ -228,7 +264,17 @@ function describe(value: unknown): string {
 
 type Evaluated =
   | { readonly node: ProgramNode; readonly fault: string }
-  | { readonly node: ProgramNode; readonly updates: ReadonlyArray<readonly [slot: number, value: FlowValue]>; readonly state: FlowState };
+  | {
+      readonly node: ProgramNode;
+      readonly updates: ReadonlyArray<readonly [slot: number, value: FlowValue]>;
+      readonly state: FlowState;
+      /**
+       * Worst quality of the readings the node consumed, captured when it was
+       * evaluated. Delays are evaluated before any delay commits, so a delay
+       * carries the quality its input had together with the value it delays.
+       */
+      readonly quality: SignalQuality;
+    };
 
 class Run implements FlowRun {
   readonly plan: FlowPlan;
@@ -254,8 +300,13 @@ class Run implements FlowRun {
   private readonly published: (string | null)[];
   /** `signal.in`: quality of the external value. */
   private readonly signalQuality: SignalQuality[];
-  /** `signal.out`: input value seen by the previous scan (`undefined` before the first). */
-  private readonly lastOut: (FlowValue | undefined)[];
+  /**
+   * `signal.out`: input reading seen by the previous scan (`undefined` before
+   * the first), and whether it was writable (good and non-null). A write is
+   * due when the reading is writable and either the value changed or the
+   * previous one was not writable.
+   */
+  private readonly lastOut: ({ value: FlowValue; writable: boolean } | undefined)[];
   /** Value/quality last listed in a scan's `changes`, per output slot (`undefined` before the first scan). */
   private readonly publishedOut: ({ value: FlowValue; quality: SignalQuality } | undefined)[];
 
@@ -292,11 +343,20 @@ class Run implements FlowRun {
     this.external = new Array<string | null>(n).fill(null);
     this.published = new Array<string | null>(n).fill(null);
     this.signalQuality = new Array<SignalQuality>(n).fill('uncertain');
-    this.lastOut = new Array<FlowValue | undefined>(n).fill(undefined);
+    this.lastOut = new Array<{ value: FlowValue; writable: boolean } | undefined>(n).fill(undefined);
     this.publishedOut = new Array<{ value: FlowValue; quality: SignalQuality } | undefined>(program.slotCount).fill(undefined);
     for (const node of program.nodes) {
       for (const output of node.outputs) {
-        this.values[output.slot] = node.role === 'delay' ? (node.plan.params.initial as FlowValue) : typeDefault(output.type);
+        if (node.role === 'delay') {
+          // A delay's `initial` is configuration, as trustworthy as a constant,
+          // so loops through it can start `good`. An unset (null) initial is
+          // "unknown": readers that need a typed value get a bad substitute.
+          const initial = node.plan.params.initial as FlowValue;
+          this.values[output.slot] = initial;
+          this.quality[output.slot] = initial === null ? 'uncertain' : 'good';
+        } else {
+          this.values[output.slot] = typeDefault(output.type);
+        }
       }
       if (node.info.initialState) {
         try {
@@ -463,6 +523,7 @@ class Run implements FlowRun {
 
     const faults: FlowFault[] = [];
     const writes: FlowWrite[] = [];
+    const holds: FlowHold[] = [];
     for (const node of nodes) {
       const fault = this.faults[node.index] ?? this.external[node.index] ?? null;
       if (fault !== this.published[node.index]) {
@@ -470,7 +531,7 @@ class Run implements FlowRun {
         changes.push(Object.freeze({ node: node.plan.id, port: FAULT_PORT, source: node.plan.faultSource, value: fault, quality: 'good' as const }));
       }
       if (fault !== null) faults.push(Object.freeze({ node: node.plan.id, message: fault }));
-      if (node.role === 'signal-out') this.collectWrite(node, writes);
+      if (node.role === 'signal-out') this.collectWrite(node, writes, holds);
     }
     return Object.freeze({
       scan: this.scanCount,
@@ -478,6 +539,7 @@ class Run implements FlowRun {
       dtMs,
       changes: Object.freeze(changes),
       writes: Object.freeze(writes),
+      holds: Object.freeze(holds),
       faults: Object.freeze(faults),
     });
   }
@@ -491,18 +553,32 @@ class Run implements FlowRun {
     }
   }
 
-  private read1(slot: ProgramSlot): FlowValue {
-    if ('value' in slot) return slot.value;
+  /**
+   * Read one input instance. Constants (unconnected inputs) are `good`. A
+   * converted value that had to be substituted is `bad`: it is made up, so it
+   * must never be written as if it were real.
+   */
+  private readSlot(slot: ProgramSlot): Reading {
+    if ('value' in slot) return { value: slot.value, quality: 'good' };
     const value = this.values[slot.slot] as FlowValue;
-    return slot.convert ? convertTo(slot.convert, value) : value;
+    const quality = this.quality[slot.slot] as SignalQuality;
+    if (!slot.convert) return { value, quality };
+    const converted = convertReading(slot.convert, value);
+    return { value: converted.value, quality: converted.exact ? quality : 'bad' };
   }
 
   private evaluate(node: ProgramNode, dtMs: number, nowMs: number): Evaluated {
     const initFault = this.initFaults[node.index];
     if (initFault) return { node, fault: initFault };
     const inputs = dict<FlowValue | readonly FlowValue[]>();
+    let quality: SignalQuality = 'good';
+    const take = (slot: ProgramSlot): FlowValue => {
+      const reading = this.readSlot(slot);
+      quality = worstQuality(quality, reading.quality);
+      return reading.value;
+    };
     for (const input of node.inputs) {
-      inputs[input.name] = input.variadic ? Object.freeze(input.slots.map((slot) => this.read1(slot))) : this.read1(input.slots[0]!);
+      inputs[input.name] = input.variadic ? Object.freeze(input.slots.map(take)) : take(input.slots[0]!);
     }
     const state = this.states[node.index] as FlowState;
     const args: FlowEvalArgs = Object.freeze({ inputs: Object.freeze(inputs), params: node.plan.params, state, dtMs, nowMs });
@@ -529,7 +605,7 @@ class Run implements FlowRun {
         updates.push([output.slot, value]);
       }
       const next = result.state;
-      return { node, updates, state: next === undefined || next === state ? state : snapshotState(next) };
+      return { node, updates, state: next === undefined || next === state ? state : snapshotState(next), quality };
     } catch (error) {
       return { node, fault: errorMessage(error) };
     }
@@ -545,8 +621,22 @@ class Run implements FlowRun {
     this.faults[node.index] = null;
     this.states[node.index] = result.state;
     for (const [slot, value] of result.updates) this.values[slot] = value;
-    const quality: SignalQuality = node.role === 'signal-in' ? (this.signalQuality[node.index] as SignalQuality) : 'good';
+    const quality = this.outputQuality(node, result.quality);
     for (const output of node.outputs) this.setOutput(node, output, this.values[output.slot] as FlowValue, quality, changes);
+  }
+
+  /**
+   * Quality of a healthy node's outputs: the worst of its inputs' readings,
+   * `bad` while a fault is reported from outside (`reportFault`), and for
+   * `signal.in` also the sample's quality. A `signal.in` that holds `null` (no
+   * sample yet) is at best `uncertain`: "no value" is never `good`.
+   */
+  private outputQuality(node: ProgramNode, inputs: SignalQuality): SignalQuality {
+    if (this.external[node.index] !== null) return 'bad';
+    if (node.role !== 'signal-in') return inputs;
+    const sample = this.signalQuality[node.index] as SignalQuality;
+    const quality = worstQuality(inputs, sample);
+    return this.states[node.index] === null ? worstQuality(quality, 'uncertain') : quality;
   }
 
   /** Record `value`/`quality` for an output and list a change when either differs from what was last published. */
@@ -558,17 +648,30 @@ class Run implements FlowRun {
     changes.push(Object.freeze({ node: node.plan.id, port: output.port, source: output.source, value, quality }));
   }
 
-  private collectWrite(node: ProgramNode, writes: FlowWrite[]): void {
+  /**
+   * The write gate. Only a `good`, non-null reading is ever written: anything
+   * else is unknown data, and writing it (or a substitute for it) to a real
+   * target is exactly what this runtime must never do. While the reading is
+   * not writable the node holds: no write, and the target keeps the last
+   * value written to it. When it becomes writable again the current value is
+   * written even if it equals the last one, because the target may have
+   * changed while the flow was not in control.
+   */
+  private collectWrite(node: ProgramNode, writes: FlowWrite[], holds: FlowHold[]): void {
     const slot = node.inputs[0]!.slots[0]!;
     if ('value' in slot) return; // unwired: inert
-    const value = this.read1(slot);
+    const { value, quality } = this.readSlot(slot);
+    const writable = quality === 'good' && value !== null;
     const previous = this.lastOut[node.index];
-    this.lastOut[node.index] = value;
-    if (previous !== undefined && Object.is(previous, value)) return;
-    if (value === null) return; // null means "no value" and is never written
-    writes.push(
-      Object.freeze({ node: node.plan.id, connection: String(node.plan.params.connection), source: String(node.plan.params.source), value }),
-    );
+    this.lastOut[node.index] = { value, writable };
+    const connection = String(node.plan.params.connection);
+    const source = String(node.plan.params.source);
+    if (!writable) {
+      if (previous?.writable) holds.push(Object.freeze({ node: node.plan.id, connection, source, quality: value === null ? worstQuality(quality, 'uncertain') : quality }));
+      return;
+    }
+    if (previous?.writable && Object.is(previous.value, value)) return;
+    writes.push(Object.freeze({ node: node.plan.id, connection, source, value }));
   }
 
   private tick(): void {

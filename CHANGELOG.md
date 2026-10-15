@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`@holodeck/flow-runtime`**: `holodeck.flow.block` contract (`FlowBlockDefinition`), `holodeck.flow.graph.v1` validation, cyclic dataflow compiler and scheduler, built-in `flow.const` / `flow.delay` / `signal.in` / `signal.out` blocks, and the `holodeck.flow.local` deploy provider with hub signal bridges (#44)
+- **`@holodeck/flow-runtime`**: `holodeck.flow.block` contract (`FlowBlockDefinition`), `holodeck.flow.graph.v1` validation, cyclic dataflow compiler and scheduler, built-in `flow.const` / `flow.delay` / `signal.in` / `signal.out` blocks, and the `holodeck.flow.local` deploy provider with hub signal bridges. Output quality propagates (worst of inputs, `bad` on fault, carried through `flow.delay`) and `signal.out` writes only good, non-null values, holding otherwise (#44)
 - **`@holodeck/editor-2.5d-react`**: deterministic rendered signal (holodeck#34). `ProcessEditor` and `IsoCanvas` expose `data-holodeck-revision`, `data-holodeck-rendered` and `data-render-state` (`pending` / `ready` / `unsupported`) plus an `onRendered(revision)` callback, fired after a presented frame shows the current revision with every GLB part loaded, no camera animation running and (editor) the scene fitted.
 
 ### Fixed

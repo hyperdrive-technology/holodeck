@@ -10,14 +10,16 @@ export {
   FLOW_SOURCE_PREFIX,
   FAULT_PORT,
   DEFAULT_SCAN_MS,
+  convertReading,
   convertTo,
   flowSource,
   isFlowValue,
   matchesType,
   typeDefault,
   typesCompatible,
+  worstQuality,
 } from './values';
-export type { FlowPortType, FlowValue } from './values';
+export type { FlowConversion, FlowPortType, FlowValue } from './values';
 
 export {
   DEFAULT_VARIADIC_MAX,
@@ -72,6 +74,7 @@ export type {
   FlowScan,
   FlowSchedule,
   FlowValueChange,
+  FlowHold,
   FlowWrite,
 } from './run';
 

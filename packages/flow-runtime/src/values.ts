@@ -126,42 +126,68 @@ export function typesCompatible(from: FlowPortType, to: FlowPortType): boolean {
   return from === to || from === 'any' || to === 'any';
 }
 
+/** Result of converting an `any` value to a typed input. */
+export interface FlowConversion {
+  readonly value: FlowValue;
+  /**
+   * `false` when the input carried no usable value of the target type (`null`,
+   * or a string that is not a boolean/number) and `value` is a *substitute*
+   * (the type default). The runtime then marks the reading `bad`, so a
+   * substitute can never reach a `signal.out` write as if it were real data.
+   */
+  readonly exact: boolean;
+}
+
 /**
  * Convert a value arriving from an `any` output into a typed input. Typed
  * outputs are checked when the block returns them, so only `any` sources ever
- * need this. The rules are deliberately small and total (never throw):
+ * need this. The rules are small and total (never throw). A cell marked
+ * *(subst.)* is a substitute: `exact` is false and the runtime degrades the
+ * reading's quality to `bad`.
  *
  * | to \ from | boolean        | number         | string                                   | null  |
  * |-----------|----------------|----------------|------------------------------------------|-------|
- * | bool      | itself         | `n !== 0`      | `"true"` → true, `"false"`/`""` → false, numeric → `n !== 0`, else false | false |
- * | number    | 1 / 0          | itself         | `Number(s)` when finite, else 0          | 0     |
- * | string    | "true"/"false" | `String(n)`    | itself                                   | ""    |
+ * | bool      | itself         | `n !== 0`      | `"true"` → true, `"false"` → false, numeric → `n !== 0`, else false *(subst.)* | false *(subst.)* |
+ * | number    | 1 / 0          | itself         | `Number(s)` when non-empty and finite, else 0 *(subst.)* | 0 *(subst.)* |
+ * | string    | "true"/"false" | `String(n)`    | itself                                   | "" *(subst.)* |
  * | any       | itself         | itself         | itself                                   | null  |
  */
-export function convertTo(type: FlowPortType, value: FlowValue): FlowValue {
-  if (type === 'any') return value;
-  if (value === null) return typeDefault(type);
+export function convertReading(type: FlowPortType, value: FlowValue): FlowConversion {
+  const exact = (v: FlowValue): FlowConversion => ({ value: v, exact: true });
+  const substitute = (): FlowConversion => ({ value: typeDefault(type), exact: false });
+  if (type === 'any') return exact(value);
+  if (value === null) return substitute();
   switch (type) {
     case 'bool': {
-      if (typeof value === 'boolean') return value;
-      if (typeof value === 'number') return value !== 0;
+      if (typeof value === 'boolean') return exact(value);
+      if (typeof value === 'number') return exact(value !== 0);
       const text = value.trim().toLowerCase();
-      if (text === 'true') return true;
-      if (text === 'false' || text === '') return false;
+      if (text === 'true') return exact(true);
+      if (text === 'false') return exact(false);
+      if (text === '') return substitute();
       const n = Number(text);
-      return Number.isFinite(n) ? n !== 0 : false;
+      return Number.isFinite(n) ? exact(n !== 0) : substitute();
     }
     case 'number': {
-      if (typeof value === 'number') return value;
-      if (typeof value === 'boolean') return value ? 1 : 0;
+      if (typeof value === 'number') return exact(value);
+      if (typeof value === 'boolean') return exact(value ? 1 : 0);
       const text = value.trim();
-      if (text === '') return 0;
+      if (text === '') return substitute();
       const n = Number(text);
-      return Number.isFinite(n) ? n : 0;
+      return Number.isFinite(n) ? exact(n) : substitute();
     }
     case 'string':
-      return typeof value === 'string' ? value : String(value);
+      return exact(typeof value === 'string' ? value : String(value));
   }
+}
+
+/**
+ * The value part of `convertReading`. Use it only where a substitute is
+ * harmless (e.g. a constant's unset value). The runtime itself always uses
+ * `convertReading`, so substitutes degrade quality.
+ */
+export function convertTo(type: FlowPortType, value: FlowValue): FlowValue {
+  return convertReading(type, value).value;
 }
 
 /**
@@ -218,6 +244,14 @@ export const QUALITIES: readonly SignalQuality[] = Object.freeze(['good', 'uncer
 
 export function isQuality(v: unknown): v is SignalQuality {
   return typeof v === 'string' && (QUALITIES as readonly string[]).includes(v);
+}
+
+/** Severity order: good < uncertain < bad. */
+const QUALITY_RANK: Readonly<Record<SignalQuality, number>> = Object.freeze({ good: 0, uncertain: 1, bad: 2 });
+
+/** The worse of two qualities (bad beats uncertain beats good). */
+export function worstQuality(a: SignalQuality, b: SignalQuality): SignalQuality {
+  return QUALITY_RANK[b] > QUALITY_RANK[a] ? b : a;
 }
 
 /** Port and param names: identifiers. `__proto__` is refused so names are safe keys anywhere. */

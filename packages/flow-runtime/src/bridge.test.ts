@@ -20,7 +20,7 @@ import { flowDoc, graph, node, TEST_BLOCKS, wire } from './test-helpers';
 const PROVIDER_EXT = 'test.providers';
 
 /** A provider whose sessions we can drive by hand: status, deliveries, subscription count. */
-function controllableProvider(id = 'test.ctl') {
+function controllableProvider(id = 'test.ctl', options: { writes?: Array<{ source: string; value: unknown }> } = {}) {
   const sessions: Array<{
     session: ProviderSession;
     subscribers: Set<(samples: readonly Sample[]) => void>;
@@ -59,6 +59,13 @@ function controllableProvider(id = 'test.ctl') {
           close: async () => {
             entry.closed = true;
           },
+          ...(options.writes
+            ? {
+                write: async (source: string, value: unknown) => {
+                  options.writes!.push({ source, value });
+                },
+              }
+            : {}),
         } as ProviderSession,
       };
       sessions.push(entry);
@@ -400,7 +407,9 @@ describe('end to end: host + hub + flow.local + sim', () => {
     expect(result).toMatchObject({ ok: true, diagnostics: [] });
     await new Promise((resolve) => setTimeout(resolve, 0));
     const sim = hub.session('sim')!;
-    expect((await sim.read!(['mem:out']))[0]?.value).toBe(true); // NOT(null → false)
+    // The sim delivers the unset mem:in as null: no value, so nothing is written (review P1 repro).
+    expect((await sim.read!(['mem:out']))[0]?.value).toBeNull();
+    expect((await hub.session('flow')!.read!(['flow:n.out']))[0]).toMatchObject({ quality: 'bad' });
     await sim.write!('mem:in', true);
     manual.tick(); // sim delivers mem:in = true, the flow scans
     manual.tick();
@@ -411,6 +420,80 @@ describe('end to end: host + hub + flow.local + sim', () => {
     expect(hub.getSnapshot().metrics.lamp?.on).toBe(false);
     await hub.dispose();
     expect(manual.active).toBe(0);
+  });
+});
+
+describe('end to end: quality through the hub bridge (review P1)', () => {
+  it('a source connection going down stops writes to another connection; recovery writes again', async () => {
+    const manual = createManualSchedule();
+    const src = controllableProvider('test.src');
+    const writes: Array<{ source: string; value: unknown }> = [];
+    const sink = controllableProvider('test.sink', { writes });
+    const host = new HolodeckHost({ name: 'e2e' });
+    host.registry.registerKind(FLOW_BLOCK_KIND);
+    let hub!: ProviderHub;
+    host.registry.install({
+      id: 'e2e.providers',
+      version: '1.0.0',
+      contributions: {
+        [HOLODECK_KINDS.provider]: [
+          src.provider,
+          sink.provider,
+          createLocalFlowProvider({ schedule: manual.schedule, signals: () => createHubSignalBridge(hub) }),
+        ],
+        [FLOW_BLOCK_KIND.kind]: [...TEST_BLOCKS],
+      },
+    });
+    hub = host.createProviderHub();
+    const connections = [
+      { id: 'level', provider: 'test.src' },
+      { id: 'pump', provider: 'test.sink' },
+      { id: 'flow', provider: 'holodeck.flow.local' },
+    ];
+    hub.setConnections(connections);
+    await hub.settled();
+    const doc = flowDoc(
+      graph(
+        [node('lvl', 'signal.in', { connection: 'level', source: 'HighLevel' }), node('n', 'test.not'), node('run', 'signal.out', { connection: 'pump', source: 'PumpRun' })],
+        [wire('w1', 'lvl.value', 'n.in'), wire('w2', 'n.out', 'run.value')],
+      ),
+      connections,
+    );
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const scan = async () => {
+      manual.tick();
+      await settle();
+    };
+    expect(await hub.session('flow')!.deploy!(doc)).toMatchObject({ ok: true });
+    await settle();
+    // Startup: the first scan ran before any sample. PumpRun = NOT(nothing) must not be written.
+    await scan();
+    expect(writes).toEqual([]);
+    const level = src.sessions[0]!;
+    level.deliver([{ source: 'HighLevel', value: false, ts: 1, quality: 'good' }]);
+    await scan();
+    expect(writes).toEqual([{ source: 'PumpRun', value: true }]);
+    // The level connection drops: the bridge holds HighLevel = false as uncertain, the pump write stops.
+    level.setStatus('disconnected');
+    await scan();
+    await scan();
+    expect(writes).toHaveLength(1);
+    expect((await hub.session('flow')!.read!(['flow:lvl.value', 'flow:n.out']))).toMatchObject([
+      { value: false, quality: 'uncertain' },
+      { value: true, quality: 'uncertain' },
+    ]);
+    // Recovery: a fresh subscription delivers the current value, and the pump is written again.
+    level.setStatus('live');
+    level.deliver([{ source: 'HighLevel', value: false, ts: 2, quality: 'good' }]);
+    await scan();
+    expect(writes).toEqual([
+      { source: 'PumpRun', value: true },
+      { source: 'PumpRun', value: true },
+    ]);
+    level.deliver([{ source: 'HighLevel', value: true, ts: 3, quality: 'good' }]);
+    await scan();
+    expect(writes.at(-1)).toEqual({ source: 'PumpRun', value: false });
+    await hub.dispose();
   });
 });
 

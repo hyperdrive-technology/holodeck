@@ -310,9 +310,17 @@ describe('signals', () => {
     expect((await session.read!(['flow:in.value']))[0]).toMatchObject({ value: true, quality: 'good' });
     await Promise.resolve();
     expect(bridge.get('plc', 'b')).toBe(false);
+    // An uncertain sample is not written through: NOT(false) = true would be a guess.
     bridge.set('plc', 'a', false, 'uncertain');
     manual.tick();
-    expect((await session.read!(['flow:in.value']))[0]).toMatchObject({ value: false, quality: 'uncertain' });
+    expect((await session.read!(['flow:in.value', 'flow:n.out']))).toMatchObject([
+      { value: false, quality: 'uncertain' },
+      { value: true, quality: 'uncertain' },
+    ]);
+    await Promise.resolve();
+    expect(bridge.get('plc', 'b')).toBe(false); // held
+    bridge.set('plc', 'a', false); // good again
+    manual.tick();
     await Promise.resolve();
     expect(bridge.get('plc', 'b')).toBe(true);
     expect(bridge.writes.map((w) => w.value)).toEqual([false, true]);
@@ -405,9 +413,10 @@ describe('writes', () => {
 
   it('keeps one write in flight and sends only the newest value next', async () => {
     const { bridge, pending } = deferredBridge();
+    bridge.set('plc', 'a', false);
     const { session, manual } = await connect({ signals: bridge });
     await session.deploy!(flowDoc(signalBody(), [plc]));
-    expect(pending.map((p) => p.value)).toEqual([true]); // NOT(null → false)
+    expect(pending.map((p) => p.value)).toEqual([true]); // NOT(false)
     for (const v of [true, false, true]) {
       bridge.set('plc', 'a', v);
       manual.tick();
@@ -422,6 +431,7 @@ describe('writes', () => {
 
   it('does not resend a value equal to the last successful write', async () => {
     const { bridge, pending } = deferredBridge();
+    bridge.set('plc', 'a', false); // → true, written on the first scan
     const { session, manual } = await connect({ signals: bridge });
     await session.deploy!(flowDoc(signalBody(), [plc]));
     bridge.set('plc', 'a', true); // → false
@@ -442,6 +452,7 @@ describe('writes', () => {
         if (fail) throw new Error('PLC offline');
       },
     });
+    bridge.set('plc', 'a', false);
     const { session, manual, time, logs } = await connect({ signals: bridge, writeRetryMs: 1000 });
     await session.deploy!(flowDoc(signalBody(), [plc]));
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -494,6 +505,7 @@ describe('writes', () => {
   it('a write with no answer times out, faults the node, retries, and ignores the late answer', async () => {
     const pending: Array<{ value: FlowValue; resolve: () => void }> = [];
     const bridge = createMemorySignalBridge({ write: (_c, _s, value) => new Promise<void>((resolve) => pending.push({ value, resolve })) });
+    bridge.set('plc', 'a', false);
     const { session, manual, time } = await connect({ signals: bridge, writeTimeoutMs: 5000, writeRetryMs: 1000 });
     await session.deploy!(flowDoc(signalBody(), [plc]));
     expect(pending).toHaveLength(1);
@@ -519,9 +531,73 @@ describe('writes', () => {
     expect((await session.read!(['flow:out.$fault']))[0]?.value).toBeNull();
   });
 
+  it('quality drop holds: a failing write is not retried while the input is not good (review P1)', async () => {
+    let fail = true;
+    const attempts: FlowValue[] = [];
+    const bridge = createMemorySignalBridge({
+      write: async (_c, _s, value) => {
+        attempts.push(value);
+        if (fail) throw new Error('PLC offline');
+      },
+    });
+    bridge.set('plc', 'a', false);
+    const { session, manual, time } = await connect({ signals: bridge, writeRetryMs: 100 });
+    await session.deploy!(flowDoc(signalBody(), [plc]));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(attempts).toEqual([true]); // failed
+    bridge.set('plc', 'a', false, 'uncertain'); // the input goes stale
+    manual.tick();
+    for (let i = 0; i < 5; i++) {
+      time.advance(1000);
+      manual.tick();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(attempts).toEqual([true]); // no retry of a value computed from data now in doubt
+    expect((await session.read!(['flow:out.$fault']))[0]?.value).toMatch(/PLC offline/); // the failure stays visible
+    fail = false;
+    bridge.set('plc', 'a', false); // good again
+    manual.tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    manual.tick();
+    expect(attempts).toEqual([true, true]);
+    expect((await session.read!(['flow:out.$fault']))[0]?.value).toBeNull();
+  });
+
+  it('after a hold, recovery re-sends a value equal to the last successful write', async () => {
+    const bridge = createMemorySignalBridge();
+    bridge.set('plc', 'a', false);
+    const { session, manual } = await connect({ signals: bridge });
+    await session.deploy!(flowDoc(signalBody(), [plc]));
+    await Promise.resolve();
+    bridge.set('plc', 'a', false, 'uncertain');
+    manual.tick();
+    bridge.set('plc', 'a', false);
+    manual.tick();
+    await Promise.resolve();
+    expect(bridge.writes.map((w) => w.value)).toEqual([true, true]);
+  });
+
+  it('a write in flight that lands after a hold is not remembered as the target value', async () => {
+    const { bridge, pending } = deferredBridge();
+    bridge.set('plc', 'a', false);
+    const { session, manual } = await connect({ signals: bridge });
+    await session.deploy!(flowDoc(signalBody(), [plc]));
+    expect(pending.map((p) => p.value)).toEqual([true]);
+    bridge.set('plc', 'a', false, 'uncertain');
+    manual.tick(); // hold while `true` is in flight
+    pending[0]!.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    bridge.set('plc', 'a', false);
+    manual.tick();
+    expect(pending.map((p) => p.value)).toEqual([true, true]); // sent again, not deduplicated
+  });
+
   it('a write that throws synchronously is a failure, not an exception', async () => {
     const bridge: SignalBridge = {
-      subscribe: () => () => {},
+      subscribe: (_c, source, onSample) => {
+        onSample({ source, value: false, ts: 0, quality: 'good' });
+        return () => {};
+      },
       write: () => {
         throw new Error('sync boom');
       },
@@ -535,6 +611,7 @@ describe('writes', () => {
 
   it('a write finishing after a redeploy or close touches nothing', async () => {
     const { bridge, pending } = deferredBridge();
+    bridge.set('plc', 'a', false);
     const { session, manual } = await connect({ signals: bridge });
     await session.deploy!(flowDoc(signalBody(), [plc]));
     await session.deploy!(flowDoc(counterBody()));
@@ -860,6 +937,7 @@ describe('hazards', () => {
           throw new Error('backend down');
         },
       });
+      failing.set('plc', 'a', false); // a good sample, so the first scan writes
       const dispose = vi.fn();
       const throwingLog = () => {
         throw new Error('logger exploded');

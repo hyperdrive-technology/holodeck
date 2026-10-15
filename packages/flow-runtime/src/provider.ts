@@ -203,15 +203,22 @@ interface Deployment {
  * - after a failure the node is faulted and the latest value is retried no
  *   sooner than `retryMs` later;
  * - a write with no answer after `timeoutMs` counts as failed (its late
- *   answer is ignored), so a hung backend cannot block the node for good.
+ *   answer is ignored), so a hung backend cannot block the node for good;
+ * - `hold()` (the run's input reading stopped being `good`) drops the pending
+ *   value, so nothing computed from data that is now in doubt is retried, and
+ *   forgets the last successful write, so the value is sent again once the
+ *   reading is good. A write already in flight cannot be recalled; if it
+ *   succeeds after the hold it is not remembered as written.
  * Time is the provider's clock and every check runs on a request or a scan.
  */
 class SignalWriter {
   private desired: FlowValue | undefined;
   private written: FlowValue | undefined;
-  /** The write in flight: its token (late answers of older ones are ignored) and start time. */
-  private attempt: { token: number; startedAt: number } | undefined;
+  /** The write in flight: its token (late answers of older ones are ignored), start time and hold epoch. */
+  private attempt: { token: number; startedAt: number; holds: number } | undefined;
   private tokens = 0;
+  /** Bumped by every `hold()`. */
+  private holds = 0;
   private failedAt: number | undefined;
   private retired = false;
 
@@ -230,6 +237,13 @@ class SignalWriter {
     this.pump();
   }
 
+  /** Stop writing: drop the pending value and forget the last write (see the class comment). The fault, if any, stays. */
+  hold(): void {
+    this.desired = undefined;
+    this.written = undefined;
+    this.holds++;
+  }
+
   /** Called on every request and once per scan. */
   pump(): void {
     if (this.retired || this.desired === undefined) return;
@@ -245,7 +259,7 @@ class SignalWriter {
     if (this.failedAt !== undefined && this.now() - this.failedAt < this.retryMs) return;
     const value = this.desired;
     const token = ++this.tokens;
-    this.attempt = { token, startedAt: this.now() };
+    this.attempt = { token, startedAt: this.now(), holds: this.holds };
     let writing: Promise<void>;
     try {
       writing = Promise.resolve(this.bridge.write(this.ref.connection, this.ref.source, value));
@@ -268,12 +282,13 @@ class SignalWriter {
   private settle(token: number, value: FlowValue, error: unknown): void {
     // Retired, timed out, or superseded: this answer no longer matters.
     if (this.retired || this.attempt?.token !== token) return;
+    const heldSince = this.attempt.holds !== this.holds;
     this.attempt = undefined;
     if (error !== undefined) {
       this.fail(error);
       return;
     }
-    this.written = value;
+    if (!heldSince) this.written = value;
     this.clearFault();
     this.pump();
   }
@@ -579,6 +594,8 @@ class LocalFlowSession implements ProviderSession {
   }
 
   private forwardWrites(deployment: Deployment, scan: FlowScan): void {
+    // Holds first: a node is never in both lists in one scan, but order makes the intent explicit.
+    for (const hold of scan.holds) deployment.writers.get(hold.node)?.hold();
     for (const write of scan.writes) deployment.writers.get(write.node)?.request(write.value);
     // Retries of failed writes are due-checked once per scan.
     for (const writer of deployment.writers.values()) writer.pump();

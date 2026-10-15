@@ -5,9 +5,9 @@
  * | id          | ports                  | params                    | semantics |
  * |-------------|------------------------|---------------------------|-----------|
  * | `flow.const`| out `value: any`       | `type`, `value`           | A constant, converted to `type` (bool / number / string). |
- * | `flow.delay`| in `in: any` → out `out: any` | `initial`          | One-scan delay: `out` is the value `in` had at the end of the previous scan (`initial` before that). The only legal way to close a loop. |
+ * | `flow.delay`| in `in: any` → out `out: any` | `initial`          | One-scan delay: `out` is the value (and quality) `in` had at the end of the previous scan (`initial` before that). The only legal way to close a loop. |
  * | `signal.in` | out `value: any`       | `connection`, `source`    | The latest value of a provider signal (via the provider's `SignalBridge`). `null` until the first sample. |
- * | `signal.out`| in `value: any`        | `connection`, `source`    | Writes its input to a provider signal when it changes. |
+ * | `signal.out`| in `value: any`        | `connection`, `source`    | Writes its input to a provider signal when it changes, only while its quality is `good` (holds otherwise). |
  *
  * The logic library (AND/OR/timers…) is `@holodeck/library-logic` (lane F3).
  *
@@ -90,7 +90,7 @@ export const flowDelayBlock: FlowBlockDefinition = {
   inputs: [{ name: 'in', type: 'any', label: 'In' }],
   outputs: [{ name: 'out', type: 'any', label: 'Out' }],
   params: {
-    initial: { type: 'any', label: 'Initial value', description: 'Output before the first scan completes.' },
+    initial: { type: 'any', label: 'Initial value', description: 'Output before the first scan completes. Set it in feedback loops: null is "unknown" and keeps the loop from ever turning good.' },
   },
   // Runs in the delay phase: its output is published for the *next* scan.
   evaluate({ inputs }) {
@@ -118,7 +118,7 @@ export const signalOutBlock: FlowBlockDefinition = {
   id: SIGNAL_OUT_BLOCK,
   label: 'Signal out',
   category: 'Signals',
-  description: 'Writes its input to a provider signal when the value changes (null is never written).',
+  description: 'Writes its input to a provider signal when it changes, only while the input quality is good; holds the last write otherwise.',
   inputs: [{ name: 'value', type: 'any', label: 'Value' }],
   outputs: [],
   params: signalParams,
