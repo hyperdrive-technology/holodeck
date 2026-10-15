@@ -7,12 +7,11 @@ as the first live-data provider. Other clouds follow as more packs. The second e
 
 How the pieces are packaged and installed: [holodeck-sdk `docs/PACKAGING.md`](https://github.com/hyperdrive-technology/holodeck-sdk/blob/main/docs/PACKAGING.md).
 
-Reference: the Arcentry app bundle and an HMI prototype video in `~/dev/hyperdrive/reference/arcentry/`
-(webpack dev bundle with readable module names). Its object model is `component`, `line-group`, `label`,
-`icon`, `area`, `image`, `widget` (`chart`, `scale-group`), plus `layer` meta objects. Edits are transactions
-(`create` / `update` / `delete` / `set`). Its plugin system has one plugin, AWS CloudWatch monitoring.
-Its component catalogue is ~340 components over 62 archetype models (server, database, cache, queue, load balancer …),
-each with a brand logo and colours on top.
+Target feature set (parity with what Arcentry offers its users): scene objects for components, connector
+lines, labels, icons, areas, images and live widgets (charts, scales), organised in layers; edits as undoable
+transactions (create / update / delete / set); a live-monitoring plugin for AWS CloudWatch; and a large
+component catalogue (a few hundred cloud components built from a few dozen archetypes such as server, database,
+cache, queue and load balancer), each with brand logos and colours.
 
 ## Package map
 
