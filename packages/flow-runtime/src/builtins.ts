@@ -18,11 +18,12 @@
  *   other node, and all delays commit their outputs together (so chains of
  *   delays shift by one scan each). Its outputs therefore act as sources in
  *   the topological order, which is what makes feedback legal.
- *   Quality: a delay on a feedback loop is state, so it carries the value but
- *   not the quality (`good` once it holds a non-null value, `uncertain` while
- *   it holds null), and a loop recovers as soon as its inputs from outside the
- *   loop are good again. A delay outside any loop is a plain time shift and
- *   carries its input's quality with the value.
+ *   Quality: a delay outside any loop is a plain time shift and carries its
+ *   input's quality with the value. A delay on a feedback loop shows the
+ *   loop's *health* in the scan that stored its value (worst reading the loop
+ *   took from outside, `bad` on any fault or substitute on it), so the loop's
+ *   state survives a bad scan without ever reading as good from bad data
+ *   (run.ts header, README "Quality and the write gate").
  * - `signal.in`'s state *is* the latest external value: the runtime replaces
  *   it when a sample arrives (`FlowRun.setSignal`), and `evaluate` publishes it.
  * - `signal.out`'s input is forwarded to the bridge by the provider when it
@@ -95,7 +96,7 @@ export const flowDelayBlock: FlowBlockDefinition = {
   inputs: [{ name: 'in', type: 'any', label: 'In' }],
   outputs: [{ name: 'out', type: 'any', label: 'Out' }],
   params: {
-    initial: { type: 'any', label: 'Initial value', description: 'Output before the first scan completes. null is "unknown": readers that need a typed value get a bad substitute until the delay holds a real value (one scan in a loop).' },
+    initial: { type: 'any', label: 'Initial value', description: 'Output before the first scan completes, trusted like a constant. null is "unknown": readers that need a typed value get a bad substitute, and a loop with a null initial is not healthy until it has stored a real value.' },
   },
   // Runs in the delay phase: its output is published for the *next* scan.
   evaluate({ inputs }) {

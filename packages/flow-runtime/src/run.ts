@@ -6,9 +6,10 @@
  *   2. main phase: evaluate every non-delay node in topological order; each
  *      node reads the current values of the outputs wired to it (unconnected
  *      inputs read their default) and its outputs are updated at once;
- *   3. delay phase: evaluate every `flow.delay` node against the values of
- *      step 2, then commit all their outputs together;
- *   4. publish: changed outputs, changed faults, and `signal.out` values that
+ *   3. quality pass: give every main-phase output its quality (below);
+ *   4. delay phase: evaluate every `flow.delay` node against the values of
+ *      step 2, then commit all their outputs (and qualities) together;
+ *   5. publish: changed outputs, changed faults, and `signal.out` values that
  *      changed (`writes`), to every listener, synchronously.
  *
  * A node whose `evaluate` throws or returns something invalid is *faulted*
@@ -16,22 +17,55 @@
  * becomes `bad`, and its `$fault` source carries the message. The other nodes
  * keep running; the next successful scan clears the fault.
  *
- * Quality (the safety contract; README "Quality"): every output carries the
- * worst quality (good < uncertain < bad) of the readings its node consumed
- * this scan, or `bad` when the node is faulted. Constants and unconnected
- * inputs read `good`; an `any` value converted to a typed input that had to be
- * substituted (null, unparsable string) reads `bad`. `signal.out` writes only
- * a `good`, non-null reading, holds (writes nothing) otherwise, and writes the
- * current value again when its reading turns good.
+ * ## Quality: the safety contract (README "Quality and the write gate")
  *
- * State carries value, not quality. Block state (`initialState`/`state`) and a
- * `flow.delay` on a feedback loop hand their value to the next scan, but the
- * quality of what they feed is decided by that scan's own readings: a loop
- * delay reads `good` once it holds a non-null value (`uncertain` while null).
- * Otherwise one non-good scan would circulate in the loop forever and every
- * latch, seal-in or integrator behind it would stop writing until the next
- * deploy. A delay *outside* any loop is a plain time shift of a reading, so it
- * carries the quality with the value (a bad sample stays bad one scan later).
+ * A value reaches `signal.out` only if every external reading that influenced
+ * it, along any path (delays and loop state included), was `good` when it was
+ * consumed, and no node on that path faulted (or substituted a missing value)
+ * since — with one deliberate exception: a feedback loop's *state* may survive
+ * a non-good period (PLC latch behaviour), but nothing read from the loop is
+ * `good` until every input the loop takes from outside has been `good` (and no
+ * node on the loop faulted) for at least one whole scan after the disturbance.
+ *
+ * Rules that implement it:
+ *   - a node outside any loop: worst quality (good < uncertain < bad) of the
+ *     readings it consumed this scan; `bad` when faulted. Constants and
+ *     unconnected inputs read `good`; a substituted conversion reads `bad`.
+ *     Block state (`initialState`/`state`) is the one-node case of the loop
+ *     exception: the outputs follow this scan's readings only.
+ *   - a `flow.delay` outside any loop is a time shift: it carries the quality
+ *     its input had, one scan later, with the value.
+ *   - a feedback loop (a cycle through delays) computes one *health* per scan:
+ *     the worst of every reading its nodes take from outside the loop, `bad`
+ *     for any fault or substitution on the loop, `uncertain` for a `null` read
+ *     inside the loop. Readings *inside* the loop count as `good` otherwise.
+ *     Every non-delay node on the loop publishes this scan's health; a loop
+ *     delay publishes the health of the scan that stored its value.
+ *   - `signal.out` writes only a `good`, non-null reading, holds otherwise, and
+ *     writes the current value again when its reading turns good.
+ *
+ * Why loop health, and not the alternatives (re-reviews of #62):
+ *   - v1 carried quality through every delay: one non-good scan circulated in
+ *     a loop forever and every latch, seal-in or integrator stopped writing
+ *     until the next deploy.
+ *   - v2 made a loop delay `good` whenever it held a value: its readers then
+ *     saw `good` for values built only from bad readings (an integrator's
+ *     `prev.out` kept writing while its only input was bad).
+ *   - Laundering only the loop's own delay edges is not enough either: in a
+ *     loop through two delays a node can be fed this scan only by the loop
+ *     state while a bad reading enters elsewhere on the loop and reaches it one
+ *     scan later. Everything on a loop influences everything else on it, so
+ *     the loop as a whole is the unit of trust: that is the health.
+ *   - Of the two options proposed in review, this is (a) — a loop delay
+ *     publishes the health of the scan its value was *stored* in — extended
+ *     to every node on the loop, computed in a compile-time topological order
+ *     of the loops (b's compile-time in-wire set) so a loop's health is known
+ *     before anything downstream reads it. (b) alone, the *current* quality of
+ *     the loop's in-wires, cannot be evaluated when a loop delay's output is
+ *     read: the delay is a source, read before this scan's in-wires settle.
+ *
+ * The property test in `quality.property.test.ts` checks this contract on
+ * random graphs against an independent taint simulation.
  *
  * Everything the run hands out (scans, readings, snapshots) is frozen, and it
  * never keeps objects that callers or blocks gave it: values are scalars,
@@ -40,7 +74,7 @@
 
 import type { SignalQuality } from '@holodeck/sdk';
 import type { FlowEvalArgs, FlowState } from './block';
-import { programOf, type FlowPlan, type Program, type ProgramNode, type ProgramSlot } from './compile';
+import { programOf, type FlowPlan, type Program, type ProgramLoop, type ProgramNode, type ProgramSlot } from './compile';
 import {
   convertReading,
   DEFAULT_SCAN_MS,
@@ -105,12 +139,6 @@ export interface FlowHold {
   readonly connection: string;
   readonly source: string;
   /** Quality of the input reading that caused the hold. */
-  readonly quality: SignalQuality;
-}
-
-/** One input reading: the value a block sees and how trustworthy it is. */
-interface Reading {
-  readonly value: FlowValue;
   readonly quality: SignalQuality;
 }
 
@@ -277,13 +305,8 @@ type Evaluated =
       readonly node: ProgramNode;
       readonly updates: ReadonlyArray<readonly [slot: number, value: FlowValue]>;
       readonly state: FlowState;
-      /**
-       * Worst quality of the readings the node consumed, captured when it was
-       * evaluated. Delays are evaluated before any delay commits, so a delay
-       * outside a loop carries the quality its input had together with the
-       * value it delays (a loop delay ignores it; see `outputQuality`).
-       */
-      readonly quality: SignalQuality;
+      /** Some input read a substitute for a missing value (`convertReading` not exact). */
+      readonly substituted: boolean;
     };
 
 class Run implements FlowRun {
@@ -310,6 +333,10 @@ class Run implements FlowRun {
   private readonly published: (string | null)[];
   /** `signal.in`: quality of the external value. */
   private readonly signalQuality: SignalQuality[];
+  /** Per node, this scan: some input read a substitute (set by `apply`). */
+  private readonly substituted: boolean[];
+  /** Per loop (`Program.loops`): health computed by this scan's quality pass. */
+  private readonly loopHealth: SignalQuality[];
   /**
    * `signal.out`: input reading seen by the previous scan (`undefined` before
    * the first), and whether it was writable (good and non-null). A write is
@@ -353,6 +380,8 @@ class Run implements FlowRun {
     this.external = new Array<string | null>(n).fill(null);
     this.published = new Array<string | null>(n).fill(null);
     this.signalQuality = new Array<SignalQuality>(n).fill('uncertain');
+    this.substituted = new Array<boolean>(n).fill(false);
+    this.loopHealth = new Array<SignalQuality>(program.loops.length).fill('uncertain');
     this.lastOut = new Array<{ value: FlowValue; writable: boolean } | undefined>(n).fill(undefined);
     this.publishedOut = new Array<{ value: FlowValue; quality: SignalQuality } | undefined>(program.slotCount).fill(undefined);
     for (const node of program.nodes) {
@@ -524,12 +553,28 @@ class Run implements FlowRun {
     this.snapshotCache = undefined;
 
     const changes: FlowValueChange[] = [];
-    const { nodes, delayStart } = this.program;
-    for (let i = 0; i < delayStart; i++) this.commit(this.evaluate(nodes[i]!, dtMs, nowMs), changes);
-    // Delays read the main phase's values, then commit together (chains shift one scan each).
-    const delayed: Evaluated[] = [];
-    for (let i = delayStart; i < nodes.length; i++) delayed.push(this.evaluate(nodes[i]!, dtMs, nowMs));
-    for (const result of delayed) this.commit(result, changes);
+    const { nodes, delayStart, qualityOrder } = this.program;
+    // Main phase: values. Blocks never see quality, so it is computed after.
+    for (let i = 0; i < delayStart; i++) this.apply(this.evaluate(nodes[i]!, dtMs, nowMs));
+    // Quality pass, upstream first (a loop as one unit; see the header).
+    for (const step of qualityOrder) {
+      if ('loop' in step) this.loopQuality(step.loop);
+      else this.setQuality(step.node, this.outputQuality(step.node, this.readingsQuality(step.node)));
+    }
+    for (let i = 0; i < delayStart; i++) this.publishOutputs(nodes[i]!, changes);
+    // Delays read the main phase's values and qualities, then commit together
+    // (chains shift one scan each). A delay outside a loop carries the quality
+    // its input had, so it is captured before any delay commits.
+    const delayed: Array<readonly [Evaluated, SignalQuality]> = [];
+    for (let i = delayStart; i < nodes.length; i++) {
+      const result = this.evaluate(nodes[i]!, dtMs, nowMs);
+      delayed.push([result, 'fault' in result ? 'bad' : this.readingsQuality(result.node, result.substituted)]);
+    }
+    for (const [result, readings] of delayed) {
+      this.apply(result);
+      this.setQuality(result.node, this.outputQuality(result.node, readings));
+      this.publishOutputs(result.node, changes);
+    }
 
     const faults: FlowFault[] = [];
     const writes: FlowWrite[] = [];
@@ -564,27 +609,24 @@ class Run implements FlowRun {
   }
 
   /**
-   * Read one input instance. Constants (unconnected inputs) are `good`. A
-   * converted value that had to be substituted is `bad`: it is made up, so it
-   * must never be written as if it were real.
+   * Read one input instance's value. `exact` is false when a converted value
+   * had to be substituted (null, unparsable string): it is made up, so the
+   * reading is `bad` and must never be written as if it were real.
    */
-  private readSlot(slot: ProgramSlot): Reading {
-    if ('value' in slot) return { value: slot.value, quality: 'good' };
+  private readValue(slot: ProgramSlot): { value: FlowValue; exact: boolean } {
+    if ('value' in slot) return { value: slot.value, exact: true };
     const value = this.values[slot.slot] as FlowValue;
-    const quality = this.quality[slot.slot] as SignalQuality;
-    if (!slot.convert) return { value, quality };
-    const converted = convertReading(slot.convert, value);
-    return { value: converted.value, quality: converted.exact ? quality : 'bad' };
+    return slot.convert ? convertReading(slot.convert, value) : { value, exact: true };
   }
 
   private evaluate(node: ProgramNode, dtMs: number, nowMs: number): Evaluated {
     const initFault = this.initFaults[node.index];
     if (initFault) return { node, fault: initFault };
     const inputs = dict<FlowValue | readonly FlowValue[]>();
-    let quality: SignalQuality = 'good';
+    let substituted = false;
     const take = (slot: ProgramSlot): FlowValue => {
-      const reading = this.readSlot(slot);
-      quality = worstQuality(quality, reading.quality);
+      const reading = this.readValue(slot);
+      if (!reading.exact) substituted = true;
       return reading.value;
     };
     for (const input of node.inputs) {
@@ -615,53 +657,107 @@ class Run implements FlowRun {
         updates.push([output.slot, value]);
       }
       const next = result.state;
-      return { node, updates, state: next === undefined || next === state ? state : snapshotState(next), quality };
+      return { node, updates, state: next === undefined || next === state ? state : snapshotState(next), substituted };
     } catch (error) {
       return { node, fault: errorMessage(error) };
     }
   }
 
-  private commit(result: Evaluated, changes: FlowValueChange[]): void {
+  /** Store an evaluation's values, state and fault (quality comes later). A faulted node keeps its values and state. */
+  private apply(result: Evaluated): void {
     const { node } = result;
     if ('fault' in result) {
       this.faults[node.index] = result.fault;
-      for (const output of node.outputs) this.setOutput(node, output, this.values[output.slot] as FlowValue, 'bad', changes);
+      this.substituted[node.index] = false;
       return;
     }
     this.faults[node.index] = null;
+    this.substituted[node.index] = result.substituted;
     this.states[node.index] = result.state;
     for (const [slot, value] of result.updates) this.values[slot] = value;
-    const quality = this.outputQuality(node, result.quality);
-    for (const output of node.outputs) this.setOutput(node, output, this.values[output.slot] as FlowValue, quality, changes);
+  }
+
+  /** Faulted this scan: `evaluate` failed (or `initialState` did), or a fault is reported from outside. */
+  private isFaulted(node: ProgramNode): boolean {
+    return this.faults[node.index] !== null || this.external[node.index] !== null;
   }
 
   /**
-   * Quality of a healthy node's outputs: the worst of its inputs' readings,
-   * `bad` while a fault is reported from outside (`reportFault`), and for
-   * `signal.in` also the sample's quality. A `signal.in` that holds `null` (no
-   * sample yet) is at best `uncertain`: "no value" is never `good`.
-   *
-   * A delay on a feedback loop is state: its output is `good` when it holds a
-   * non-null value and `uncertain` while it holds null. It does not carry its
-   * input's quality, so the loop's quality comes from this scan's real inputs
-   * and recovers as soon as they are good (see the header comment).
+   * Worst quality of the readings `node` consumes, from the qualities stored
+   * now. Constants read `good`; a substitute (`substituted`, defaulting to
+   * what `apply` recorded this scan) reads `bad`. A reading *inside* the
+   * node's loop is the loop's own state and counts as `good`, or `uncertain`
+   * when it is `null` (no value is never good): the loop's health stands in
+   * for its quality (see `loopQuality`).
    */
-  private outputQuality(node: ProgramNode, inputs: SignalQuality): SignalQuality {
-    if (this.external[node.index] !== null) return 'bad';
-    if (node.feedback) return node.outputs.some((o) => this.values[o.slot] === null) ? 'uncertain' : 'good';
-    if (node.role !== 'signal-in') return inputs;
-    const sample = this.signalQuality[node.index] as SignalQuality;
-    const quality = worstQuality(inputs, sample);
+  private readingsQuality(node: ProgramNode, substituted = this.substituted[node.index]!): SignalQuality {
+    if (substituted) return 'bad';
+    let quality: SignalQuality = 'good';
+    for (const input of node.inputs) {
+      for (const slot of input.slots) {
+        if ('value' in slot) continue;
+        if (!slot.internal) quality = worstQuality(quality, this.quality[slot.slot] as SignalQuality);
+        else if (this.values[slot.slot] === null) quality = worstQuality(quality, 'uncertain');
+      }
+    }
+    return quality;
+  }
+
+  /**
+   * A loop's health for this scan: the worst reading any of its nodes took
+   * this scan (from outside the loop, or a null/substitute inside it), and
+   * `bad` while any node on it is faulted. Every non-delay node on the loop
+   * publishes it now; each loop delay publishes it when it commits, so
+   * readers see the health of the scan that stored the delay's value.
+   */
+  private loopQuality(loop: ProgramLoop): void {
+    let health: SignalQuality = 'good';
+    for (const member of loop.members) {
+      // A delay's only input is on the loop too, so it adds `uncertain` while it reads null
+      // (a ring of delays can circulate a null without any block reading it).
+      if (this.isFaulted(member)) health = 'bad';
+      else health = worstQuality(health, this.readingsQuality(member));
+      if (health === 'bad') break;
+    }
+    this.loopHealth[loop.index] = health;
+    for (const member of loop.members) if (member.role !== 'delay') this.setQuality(member, this.outputQuality(member, health));
+  }
+
+  /**
+   * Quality of a node's outputs after it ran, given its `readings`:
+   *   - `bad` while it is faulted (its held values are kept);
+   *   - on a loop: the loop's health this scan; a loop delay holding `null`
+   *     is at best `uncertain`;
+   *   - `signal.in`: also the sample's quality, and at best `uncertain` while
+   *     it holds `null` (no sample yet);
+   *   - anything else (a delay outside any loop included): `readings`.
+   */
+  private outputQuality(node: ProgramNode, readings: SignalQuality): SignalQuality {
+    if (this.isFaulted(node)) return 'bad';
+    if (node.loop !== undefined) {
+      const health = this.loopHealth[node.loop] as SignalQuality;
+      const empty = node.role === 'delay' && node.outputs.some((o) => this.values[o.slot] === null);
+      return empty ? worstQuality(health, 'uncertain') : health;
+    }
+    if (node.role !== 'signal-in') return readings;
+    const quality = worstQuality(readings, this.signalQuality[node.index] as SignalQuality);
     return this.states[node.index] === null ? worstQuality(quality, 'uncertain') : quality;
   }
 
-  /** Record `value`/`quality` for an output and list a change when either differs from what was last published. */
-  private setOutput(node: ProgramNode, output: ProgramNode['outputs'][number], value: FlowValue, quality: SignalQuality, changes: FlowValueChange[]): void {
-    this.quality[output.slot] = quality;
-    const before = this.publishedOut[output.slot];
-    if (before !== undefined && Object.is(before.value, value) && before.quality === quality) return;
-    this.publishedOut[output.slot] = { value, quality };
-    changes.push(Object.freeze({ node: node.plan.id, port: output.port, source: output.source, value, quality }));
+  private setQuality(node: ProgramNode, quality: SignalQuality): void {
+    for (const output of node.outputs) this.quality[output.slot] = quality;
+  }
+
+  /** List a change for every output whose value or quality differs from what was last published. */
+  private publishOutputs(node: ProgramNode, changes: FlowValueChange[]): void {
+    for (const output of node.outputs) {
+      const value = this.values[output.slot] as FlowValue;
+      const quality = this.quality[output.slot] as SignalQuality;
+      const before = this.publishedOut[output.slot];
+      if (before !== undefined && Object.is(before.value, value) && before.quality === quality) continue;
+      this.publishedOut[output.slot] = { value, quality };
+      changes.push(Object.freeze({ node: node.plan.id, port: output.port, source: output.source, value, quality }));
+    }
   }
 
   /**
@@ -676,7 +772,8 @@ class Run implements FlowRun {
   private collectWrite(node: ProgramNode, writes: FlowWrite[], holds: FlowHold[]): void {
     const slot = node.inputs[0]!.slots[0]!;
     if ('value' in slot) return; // unwired: inert
-    const { value, quality } = this.readSlot(slot);
+    const { value, exact } = this.readValue(slot);
+    const quality: SignalQuality = exact ? (this.quality[slot.slot] as SignalQuality) : 'bad';
     const writable = quality === 'good' && value !== null;
     const previous = this.lastOut[node.index];
     this.lastOut[node.index] = { value, writable };

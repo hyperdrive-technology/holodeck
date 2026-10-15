@@ -826,7 +826,7 @@ describe('quality and the write gate (review P1)', () => {
     expect(run.step().writes).toEqual([W(7)]);
   });
 
-  it('a feedback loop through a delay is good once the delay holds a value; a null initial costs one bad scan only', () => {
+  it('a feedback loop through a delay is good once the delay holds a value; a null initial costs one bad scan inside the loop, two outside', () => {
     const loop = (initial: FlowValue) =>
       runOf(
         graph(
@@ -840,10 +840,12 @@ describe('quality and the write gate (review P1)', () => {
     const unknown = loop(null);
     expect(unknown.read('flow:d.out')).toEqual({ value: null, quality: 'uncertain' });
     unknown.step();
-    // Scan 1: NOT reads a substitute for null (bad); the delay now holds a real value, so it is state, not unknown.
+    // Scan 1: NOT reads a substitute for null (bad), so the loop's health is bad, and the delay stores
+    // `true` with the health of the scan that produced it: still bad for anyone reading d.out.
     expect(unknown.read('flow:n.out')).toEqual({ value: true, quality: 'bad' });
-    expect(unknown.read('flow:d.out')).toEqual({ value: true, quality: 'good' });
+    expect(unknown.read('flow:d.out')).toEqual({ value: true, quality: 'bad' });
     unknown.step();
+    // Scan 2: every reading on the loop is real, so the loop is healthy and what it stores is good.
     expect([quality(unknown, 'flow:n.out'), quality(unknown, 'flow:d.out')]).toEqual(['good', 'good']);
   });
 });
@@ -1042,6 +1044,199 @@ describe('feedback loops recover: state carries value, not quality (re-review P1
     expect(run.read('flow:c.count')).toEqual({ value: 2, quality: 'uncertain' });
     run.setSignal('en', true, 'good');
     expect(run.step().writes).toEqual([M(3)]);
+  });
+});
+
+describe('loop health: nothing read from a loop is good until its outside inputs are (third review P1)', () => {
+  const T = (value: FlowValue) => ({ node: 'total', connection: 'io', source: 'Total', value });
+  const quality = (run: FlowRun, source: string) => run.read(source)?.quality;
+  /**
+   * Integrator / totalizer: sum = rate + prev; prev = delay(sum). `total` (signal.out) taps `tap`:
+   * `prev.out` (the loop delay's output) or `later.out`, a delay outside the loop fed by `prev.out`.
+   */
+  const integrator = (initial: FlowValue, tap: 'prev.out' | 'later.out' | 'add.sum' = 'prev.out') =>
+    runOf(
+      graph(
+        [
+          node('rate', 'signal.in', { connection: 'io', source: 'rate' }),
+          node('add', 'test.add'),
+          node('prev', 'flow.delay', initial === null ? {} : { initial }),
+          node('later', 'flow.delay', { initial: 0 }),
+          node('total', 'signal.out', { connection: 'io', source: 'Total' }),
+        ],
+        [
+          wire('w1', 'rate.value', 'add.a'),
+          wire('w2', 'prev.out', 'add.b'),
+          wire('w3', 'add.sum', 'prev.in'),
+          wire('w4', 'prev.out', 'later.in'),
+          wire('w5', tap, 'total.value'),
+        ],
+      ),
+    );
+
+  it('startup with initial: null and no sample writes nothing, however long the sample takes', () => {
+    const run = integrator(null);
+    for (let i = 0; i < 4; i++) {
+      expect(run.step().writes).toEqual([]);
+      expect(quality(run, 'flow:prev.out')).not.toBe('good');
+    }
+    run.setSignal('rate', 5);
+    // signal.out reads after the delays commit: prev.out then holds the sum stored by this scan, whose
+    // readings were all real. (Its state, 0, came from substitutes: the loop exception.)
+    expect(run.step().writes).toEqual([T(5)]);
+    expect(run.read('flow:prev.out')).toEqual({ value: 5, quality: 'good' });
+    expect(run.step().writes).toEqual([T(10)]);
+  });
+
+  it('a non-null initial is configuration: good until the delay stores, then the stored scan\'s health', () => {
+    const run = integrator(0);
+    expect(run.read('flow:prev.out')).toEqual({ value: 0, quality: 'good' });
+    const first = run.step(); // no sample yet
+    expect(first.writes).toEqual([]);
+    expect(run.read('flow:prev.out')).toEqual({ value: 0, quality: 'bad' }); // 0 = substitute + initial
+    // `later` read prev.out before it committed: the configured initial, trusted like a constant.
+    expect(run.read('flow:later.out')).toEqual({ value: 0, quality: 'good' });
+    run.step();
+    expect(run.read('flow:later.out')).toEqual({ value: 0, quality: 'bad' });
+  });
+
+  for (const blip of ['uncertain', 'bad'] as const) {
+    it(`an input that stays ${blip} writes nothing while it is ${blip}, from the loop delay or from inside the loop`, () => {
+      for (const tap of ['prev.out', 'add.sum'] as const) {
+        const run = integrator(0, tap);
+        run.setSignal('rate', 1);
+        run.step();
+        run.step();
+        run.setSignal('rate', 1000, blip);
+        for (let i = 0; i < 5; i++) {
+          expect(run.step().writes).toEqual([]);
+          expect(quality(run, `flow:${tap}`)).not.toBe('good');
+          if (i > 0) expect(quality(run, 'flow:prev.out')).toBe(blip === 'bad' ? 'bad' : 'uncertain');
+        }
+        // The loop's state kept integrating (PLC latch behaviour) …
+        expect(run.read('flow:add.sum')?.value).toBe(5002);
+        // … and is published again once the input has been good for a scan.
+        run.setSignal('rate', 1);
+        expect(run.step().writes).toEqual([T(5003)]);
+      }
+    });
+  }
+
+  it('loop delay → delay outside the loop → signal.out does not leak a bad sample', () => {
+    const run = integrator(0, 'later.out');
+    run.setSignal('rate', 1);
+    run.step();
+    run.step();
+    run.step();
+    expect(run.read('flow:later.out')).toEqual({ value: 2, quality: 'good' });
+    run.setSignal('rate', 1000, 'bad');
+    const scans = [run.step(), run.step(), run.step(), run.step()];
+    // later.out shows prev.out one scan late: the sum stored before the bad scan is still good for one scan.
+    expect(scans.map((s) => s.writes.map((w) => w.value))).toEqual([[3], [], [], []]);
+    expect(run.read('flow:later.out')?.quality).toBe('bad');
+    run.setSignal('rate', 1);
+    // Loop healthy again; later.out took prev.out before it committed, i.e. the bad scan's sum.
+    expect(run.step().writes).toEqual([]);
+    expect(run.read('flow:later.out')?.quality).toBe('bad');
+    expect(run.step().writes).toEqual([T(4004)]); // 3 + 1000 × 4 bad scans + 1 good: the kept state
+    expect(run.read('flow:later.out')?.quality).toBe('good');
+  });
+
+  it('recovery: in the first scan whose outside inputs are good, the loop writes again (from a loop node or a loop delay)', () => {
+    const inside = integrator(0, 'add.sum');
+    const delay = integrator(0, 'prev.out');
+    for (const run of [inside, delay]) {
+      run.setSignal('rate', 1, 'uncertain');
+      run.step();
+      run.step();
+      run.setSignal('rate', 1);
+    }
+    expect(inside.step().writes).toEqual([T(3)]);
+    expect(delay.step().writes).toEqual([T(3)]);
+  });
+
+  it('a bad reading entering a loop elsewhere is not laundered by the loop delays (two-delay ring)', () => {
+    // A = X + d2; d1 = delay(A); B = Y + d1; d2 = delay(B). B only sees X through d1, one scan late.
+    const run = runOf(
+      graph(
+        [
+          node('x', 'signal.in', { connection: 'io', source: 'x' }),
+          node('y', 'signal.in', { connection: 'io', source: 'y' }),
+          node('a', 'test.add'),
+          node('b', 'test.add'),
+          node('d1', 'flow.delay', { initial: 0 }),
+          node('d2', 'flow.delay', { initial: 0 }),
+          node('total', 'signal.out', { connection: 'io', source: 'Total' }),
+        ],
+        [
+          wire('w1', 'x.value', 'a.a'),
+          wire('w2', 'd2.out', 'a.b'),
+          wire('w3', 'a.sum', 'd1.in'),
+          wire('w4', 'y.value', 'b.a'),
+          wire('w5', 'd1.out', 'b.b'),
+          wire('w6', 'b.sum', 'd2.in'),
+          wire('w7', 'b.sum', 'total.value'),
+        ],
+      ),
+    );
+    run.setSignal('x', 1);
+    run.setSignal('y', 1);
+    expect(run.step().writes).toHaveLength(1);
+    run.setSignal('x', 100, 'bad');
+    for (let i = 0; i < 6; i++) {
+      expect(run.step().writes).toEqual([]);
+      expect(['b.sum', 'd1.out', 'd2.out'].map((s) => quality(run, `flow:${s}`))).not.toContain('good');
+    }
+    run.setSignal('x', 1);
+    expect(run.step().writes).toHaveLength(1);
+  });
+
+  it('a fault reported on a loop delay makes the whole loop bad until cleared', () => {
+    const run = integrator(0, 'add.sum');
+    run.setSignal('rate', 1);
+    run.step();
+    run.reportFault('prev', 'memory lost');
+    expect(run.step().writes).toEqual([]);
+    expect(quality(run, 'flow:add.sum')).toBe('bad');
+    expect(quality(run, 'flow:prev.out')).toBe('bad');
+    run.reportFault('prev', null);
+    expect(run.step().writes).toHaveLength(1);
+  });
+
+  it('a loop downstream of another loop is only as good as the upstream loop', () => {
+    // Loop 1: s1 = in + p1, p1 = delay(s1). Loop 2: s2 = p1 + p2, p2 = delay(s2). Total = s2.
+    const run = runOf(
+      graph(
+        [
+          node('total', 'signal.out', { connection: 'io', source: 'Total' }),
+          node('s2', 'test.add'),
+          node('p2', 'flow.delay', { initial: 0 }),
+          node('in', 'signal.in', { connection: 'io', source: 'in' }),
+          node('s1', 'test.add'),
+          node('p1', 'flow.delay', { initial: 0 }),
+        ],
+        [
+          wire('w1', 'in.value', 's1.a'),
+          wire('w2', 'p1.out', 's1.b'),
+          wire('w3', 's1.sum', 'p1.in'),
+          wire('w4', 'p1.out', 's2.a'),
+          wire('w5', 'p2.out', 's2.b'),
+          wire('w6', 's2.sum', 'p2.in'),
+          wire('w7', 's2.sum', 'total.value'),
+        ],
+      ),
+    );
+    run.setSignal('in', 1);
+    run.step();
+    run.step();
+    run.setSignal('in', 1, 'bad');
+    run.step(); // loop 1 bad; p1.out still holds the good scan's value
+    expect(quality(run, 'flow:s2.sum')).toBe('good');
+    expect(run.step().writes).toEqual([]); // p1.out now carries the bad scan's health into loop 2
+    expect(quality(run, 'flow:s2.sum')).toBe('bad');
+    run.setSignal('in', 1);
+    expect(run.step().writes).toEqual([]); // loop 1 healthy, p1.out still from the bad scan
+    expect(run.step().writes).toHaveLength(1);
   });
 });
 

@@ -1,7 +1,7 @@
 import { ContributionRegistry } from '@holodeck/sdk';
 import { describe, expect, it } from 'vitest';
 import { FLOW_BLOCK_KIND, type FlowBlockDefinition } from './block';
-import { analyzeFlowGraph, FLOW_GRAPH_FORMAT, flowGraphFormat, isDeployable, validateFlowGraph, type FlowProblem } from './graph';
+import { analyzeFlowGraph, cyclicComponents, FLOW_GRAPH_FORMAT, flowGraphFormat, isDeployable, stronglyConnectedComponents, validateFlowGraph, type FlowProblem } from './graph';
 import { graph, node, registryWith, wire } from './test-helpers';
 import { FLOW_LIMITS } from './values';
 
@@ -404,5 +404,28 @@ describe('structural mode', () => {
   it('still checks built-in blocks fully', () => {
     const { problems } = analyzeFlowGraph(graph([node('s', 'signal.in', { connection: 'c' })]), { structural: true });
     expect(codes(problems)).toEqual(['MISSING_PARAM']);
+  });
+});
+
+describe('stronglyConnectedComponents', () => {
+  it('returns every component, singletons included, in reverse topological order', () => {
+    // 0 → 1 ⇄ 2 → 3 → 3 (self), 4 → 1, 5 alone
+    const adj = [[1], [2], [1, 3], [3], [1], []];
+    const sccs = stronglyConnectedComponents(adj).map((c) => [...c].sort());
+    expect(sccs.flat().sort()).toEqual([0, 1, 2, 3, 4, 5]);
+    const at = (i: number) => sccs.findIndex((c) => c.includes(i));
+    // A component comes after every component it has an edge to.
+    for (let u = 0; u < adj.length; u++) for (const w of adj[u]!) if (at(u) !== at(w)) expect(at(u)).toBeGreaterThan(at(w));
+    expect(cyclicComponents(adj).map((c) => [...c].sort())).toEqual(expect.arrayContaining([[1, 2], [3]]));
+    expect(cyclicComponents(adj)).toHaveLength(2);
+  });
+
+  it('handles a 10 000-node chain without recursion, and skips nodes', () => {
+    const n = 10_000;
+    const adj = Array.from({ length: n }, (_, i) => (i + 1 < n ? [i + 1] : [0]));
+    expect(stronglyConnectedComponents(adj)).toHaveLength(1);
+    const skip = Array.from({ length: n }, (_, i) => i === n - 1);
+    adj[n - 2] = [];
+    expect(stronglyConnectedComponents(adj, skip)).toHaveLength(n - 1);
   });
 });

@@ -93,7 +93,7 @@ there is always a free one.
 | Block | Ports | Params | Behaviour |
 |---|---|---|---|
 | `flow.const` | → `value: any` | `type` (`bool`/`number`/`string`, default `number`), `value` | A constant, converted to `type` |
-| `flow.delay` | `in: any` → `out: any` | `initial` (default `null`) | One-scan delay of the value (quality: see [Quality](#quality-and-the-write-gate)). **This is the only legal way to close a loop.** |
+| `flow.delay` | `in: any` → `out: any` | `initial` (default `null`) | One-scan delay of the value. Quality: a time shift outside a loop, the loop's health on one (see [Quality](#quality-and-the-write-gate)). **This is the only legal way to close a loop.** |
 | `signal.in` | → `value: any` | `connection`, `source` (required) | Latest value of a provider signal; `null` until the first sample |
 | `signal.out` | `value: any` → | `connection`, `source` (required) | Writes its input to a provider signal when it changes, **only while the input is `good` and non-null** (see [Quality](#quality-and-the-write-gate)); an unwired one never writes |
 
@@ -148,9 +148,10 @@ Each scan of `createFlowRun(plan, { scanMs, now, schedule })`:
 1. reads the clock;
 2. evaluates every non-delay node in order. Each node reads the current value of the output wired to each input,
    or the input's default when it is unconnected;
-3. evaluates every delay against those values, then commits all delay outputs together. Readers therefore always
+3. gives every output of step 2 its quality (see [Quality](#quality-and-the-write-gate));
+4. evaluates every delay against those values, then commits all delay outputs together. Readers therefore always
    see the previous scan's value, and a chain of delays shifts by one scan per delay;
-4. tells listeners which outputs changed, which nodes are faulted, and which `signal.out` values changed.
+5. tells listeners which outputs changed, which nodes are faulted, and which `signal.out` values changed.
 
 Values from `any` outputs are converted into typed inputs as follows:
 
@@ -173,17 +174,37 @@ rules below.
 ### Quality and the write gate
 
 `signal.out` writes into real PLC and provider tags, so the runtime never writes a value derived from unknown,
-stale or faulted data. Every output carries a quality, ordered `good` < `uncertain` < `bad`:
+stale or faulted data. Every output carries a quality, ordered `good` < `uncertain` < `bad`.
+
+**The safety contract.** A value is written by `signal.out` only if every external reading that influenced it,
+along any path through the graph (through delays and loop state too), was `good` at the scan it was consumed,
+and no node on that path faulted (or substituted a missing value) since the influencing value was produced.
+There is **one deliberate exception**: a feedback loop's *state* may persist across a non-good period (PLC latch
+behaviour: a latch stays latched, an integrator keeps its total), but nothing read from the loop is `good` until
+every input the loop takes from outside has been `good`, and nothing on the loop has faulted, for at least one
+whole scan after the disturbance. A block's own state (`initialState` / `state`) is the one-node case of the
+same exception.
+
+The rules that implement it:
 
 | Output of | Quality |
 |---|---|
 | A faulted node (`evaluate` failed, `initialState` failed, or `reportFault` set) | `bad` (its held value is kept) |
-| Any other block | The **worst** quality among the readings it consumed this scan (every wired input instance, variadic ones included) |
+| Any other block outside a feedback loop | The **worst** quality among the readings it consumed this scan (every wired input instance, variadic ones included). Its own state does not count |
 | An unconnected input, `flow.const`, a block with no inputs | Counts as `good` |
 | An `any` value converted to a typed input with a *substitute* (table above) | That reading counts as `bad` |
 | `signal.in` | The sample's quality. A `null` value (no sample yet, or a provider reporting "no value") is at best `uncertain` |
-| `flow.delay` on a feedback loop (its output reaches its own input) | **State:** `good` while it holds a non-null value, `uncertain` while it holds `null`. It does **not** carry its input's quality |
-| `flow.delay` outside any loop | A plain time shift: the quality its input had in the previous scan, delayed with the value. Before the first scan, a non-null `initial` is `good` and `initial: null` is `uncertain` |
+| `flow.delay` outside any loop | A plain time shift: the quality its input had in the previous scan, delayed with the value. Before the first scan, a non-null `initial` is `good` (configuration) and `initial: null` is `uncertain` |
+| A node on a feedback loop (block or `flow.delay`) | The loop's **health** (below). A loop delay shows the health of the scan that stored its value, and is at best `uncertain` while it holds `null` |
+
+**Loop health.** A feedback loop is a strongly connected component of the wire graph (delays included): every
+node on it influences every other one, through the loop's delays. Each scan the loop gets one health: the worst
+of every reading its nodes take from **outside** the loop, `bad` if any node on it is faulted or reads a
+substitute, and `uncertain` if any node on it reads a `null` from inside the loop. Readings *inside* the loop
+count as `good` otherwise, which is what keeps one bad scan from circulating forever. Every node on the loop
+publishes that health, so a reader outside the loop, whether it taps a block on the loop or one of its delays,
+never sees `good` while anything feeding the loop is not good. Loops are handled upstream first, so a loop fed by
+another loop is only as good as that loop.
 
 `signal.out` (`FlowScan.writes` / `holds`) follows these rules:
 
@@ -196,26 +217,31 @@ stale or faulted data. Every output carries a quality, ordered `good` < `uncerta
 3. When the reading is `good` again, it writes the current value, even if that equals the last write (the target
    may have changed while the flow was not in control). After that it writes on every change, as before.
 
-So a connection that goes down (the hub bridge holds the last value as `uncertain`) stops every write derived from
-it, on any connection, until the connection is back.
+`signal.out` reads its input after the delay phase, so a `signal.out` wired to a delay sees the value that delay
+stored in this scan, with this scan's quality.
 
-**State carries value, not quality.** Block state (`initialState` / `state`, e.g. timers and counters) and a
-`flow.delay` on a feedback loop hand their *value* to the next scan, but never their quality: what they feed is as
-good as the readings consumed *in this scan*. Without this rule one non-good scan anywhere in a loop (the startup
-scan before the first samples, a one-scan connection blip, a one-scan block fault) would circulate forever, and
-every latch, seal-in, integrator or state machine behind it would stop writing until the next deploy. With it:
+What this means in practice:
 
-- Startup stays safe: in the first scan a latch reads its `signal.in`s, which are not `good` yet, so nothing it
-  drives is written. Once the samples are good it writes.
-- A loop recovers in the scan its outside inputs are `good` again, and `signal.out` re-sends the current value
-  (rule 3). The loop's state is kept across the blip, as in a PLC: a latch stays latched.
-- A loop delay with `initial: null` costs one scan: typed readers get a `bad` substitute in the first scan, after
-  which the delay holds a real value. A non-null `initial` avoids even that.
-- A `flow.delay` outside any loop is not state but a time shift, so a `bad` reading stays `bad` one scan later and
-  is never written then.
-- The flip side, also as in a PLC: state built while an input was not `good` (a latch set by an `uncertain`
-  sample, a timer that ran on one) is kept, and is written once this scan's inputs are `good`. Anything that must
-  not trust such state needs explicit logic for it (e.g. reset on a quality edge), not the propagation rule.
+- A connection that goes down (the hub bridge holds the last value as `uncertain`) stops every write derived
+  from it, on any connection, until the connection is back, including writes from loops that it feeds.
+- Startup is safe: the first scans read `signal.in`s with no sample yet, so the loops they feed are not healthy
+  and nothing derived from them is written, even from a loop delay with `initial: null` that has meanwhile stored
+  a substitute-built value.
+- A loop recovers in the first scan in which all its outside inputs are `good` (and nothing on it is faulted):
+  that scan's outputs, and the values its delays store, are `good`, and `signal.out` re-sends the current value
+  (rule 3). An input that stays bad keeps every output of the loop bad for as long as it is bad.
+- A delay outside any loop is a time shift, so a `bad` reading stays `bad` one scan later and is never written
+  then, including a loop delay's bad value shifted through one.
+- The flip side of the exception, as in a PLC: state built while an input was not `good` (a latch set by an
+  `uncertain` sample, a total that integrated a bad rate, a timer that ran on one) is kept and is written once the
+  loop is healthy again. Anything that must not trust such state needs explicit logic for it (e.g. reset on a
+  quality edge), not the propagation rule.
+- A non-null `initial` is configuration, trusted like a constant until the delay stores its first value. In a
+  loop with `initial: null`, typed readers get a `bad` substitute in the first scan, which costs one scan of health.
+
+This contract is checked by a property test (`src/quality.property.test.ts`) that runs random graphs (signals,
+blocks with and without state, delays, loops, chains, faults, substitutes, random per-scan qualities) against an
+independent taint simulation.
 
 `step()` runs one scan, which makes tests deterministic with an injected `now`. `start()` / `stop()` drive scans
 with `schedule`, which defaults to `setInterval`; `createManualSchedule()` from the SDK fits. `dispose()` is final.

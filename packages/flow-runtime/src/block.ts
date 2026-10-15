@@ -14,7 +14,9 @@
  * State carries value, not quality: a node's output quality is the worst of
  * the readings it consumed *this scan* (README "Quality and the write gate"),
  * whatever the readings were when its state was built. A timer that ran on an
- * uncertain input is `good` again as soon as its input is.
+ * uncertain input is `good` again as soon as its input is. This is the
+ * one-node case of the loop exception in the safety contract; a node on a
+ * feedback loop takes the loop's health instead.
  *
  * Item shapes live with the package that registers the kind (SDK
  * `registry.ts`), so this file, not the SDK, defines `FlowBlockDefinition`.
@@ -124,7 +126,7 @@ export interface FlowEvalArgs<S extends FlowState = FlowState> {
   params: FlowParams;
   /**
    * The node's state: `initialState(params)` (or `null`) on the first scan, then whatever `evaluate` last returned.
-   * It has no quality of its own: outputs take the quality of this scan's inputs.
+   * It has no quality of its own: outputs take the quality of this scan's inputs (or of the node's loop).
    */
   state: S;
   /** Milliseconds since the previous scan of this run; 0 on the first scan and if the clock goes backwards. */

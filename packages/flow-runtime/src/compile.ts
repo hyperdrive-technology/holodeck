@@ -18,7 +18,7 @@ import type { BlockInfo, FlowParams } from './block';
 import { FLOW_DELAY_BLOCK, SIGNAL_IN_BLOCK, SIGNAL_OUT_BLOCK } from './builtins';
 import {
   analyzeFlowGraph,
-  cyclicComponents,
+  stronglyConnectedComponents,
   FLOW_GRAPH_FORMAT,
   isDeployable,
   type AnalyzedGraph,
@@ -99,8 +99,14 @@ export class FlowGraphError extends Error {
 // Program (private executable form)
 // -----------------------------------------------------------------------------
 
-/** Where an input instance gets its value: an output slot (converted to `convert`), or a constant. */
-export type ProgramSlot = { readonly slot: number; readonly convert: FlowPortType | undefined } | { readonly value: FlowValue };
+/**
+ * Where an input instance gets its value: an output slot (converted to
+ * `convert`), or a constant. `internal`: the reader and the output's node are
+ * on the same feedback loop (see `ProgramLoop`).
+ */
+export type ProgramSlot =
+  | { readonly slot: number; readonly convert: FlowPortType | undefined; readonly internal: boolean }
+  | { readonly value: FlowValue };
 
 export interface ProgramInput {
   readonly name: string;
@@ -116,14 +122,8 @@ export interface ProgramNode {
   readonly plan: FlowPlanNode;
   readonly info: BlockInfo;
   readonly role: ProgramRole;
-  /**
-   * `flow.delay` only: the delay sits on a feedback loop (its output reaches
-   * its own input, possibly through other delays). Such a delay is *state*: it
-   * carries its value into the next scan but not its quality (README "Quality
-   * and the write gate"). A delay outside any loop is a plain time shift and
-   * carries both. Always `false` for other roles.
-   */
-  readonly feedback: boolean;
+  /** Index into `Program.loops` of the feedback loop this node is on, or `undefined`. */
+  readonly loop: number | undefined;
   readonly inputs: readonly ProgramInput[];
   /** Output port → value slot. */
   readonly outputSlots: ReadonlyMap<string, number>;
@@ -139,7 +139,34 @@ export interface Program {
   readonly bySource: ReadonlyMap<string, { readonly slot: number } | { readonly fault: ProgramNode }>;
   /** Index of the first delay node in `nodes` (`nodes.length` when there is none). */
   readonly delayStart: number;
+  /** Feedback loops, in topological order of the loops (upstream loops first). */
+  readonly loops: readonly ProgramLoop[];
+  /**
+   * Order of the quality pass (run.ts): every non-delay node outside a loop,
+   * and every loop as one unit, in topological order of the full wire graph
+   * with each loop collapsed to one vertex. A loop therefore comes after every
+   * node that feeds it from outside and before every node it feeds.
+   */
+  readonly qualityOrder: readonly QualityStep[];
 }
+
+/**
+ * A feedback loop: a strongly connected component of the *full* wire graph
+ * (delays included) that contains a cycle. Validation rejects every cycle
+ * without a delay, so each loop holds at least one `flow.delay`. A block's
+ * own state is not a loop here (it is handled per node; README "Quality").
+ *
+ * Everything on a loop shares one quality per scan, its *health* (run.ts),
+ * which is what lets loop state survive a non-good scan without either
+ * latching bad forever or laundering bad readings into good output.
+ */
+export interface ProgramLoop {
+  readonly index: number;
+  /** Every node on the loop, delays included, in evaluation order. */
+  readonly members: readonly ProgramNode[];
+}
+
+export type QualityStep = { readonly node: ProgramNode } | { readonly loop: ProgramLoop };
 
 const programs = new WeakMap<FlowPlan, Program>();
 
@@ -206,27 +233,26 @@ function evaluationOrder(graph: AnalyzedGraph): GraphNode[] {
 }
 
 /**
- * The delays that lie on a feedback loop: strongly connected components of
- * the full wire graph (delays included) that contain a cycle. Validation
- * already rejected every cycle without a delay, so each such component holds
- * at least one delay.
+ * Strongly connected components of the full wire graph (delays included), in
+ * topological order, and the loop index of every node on a cyclic one.
  */
-function feedbackDelays(graph: AnalyzedGraph): Set<GraphNode> {
+function components(graph: AnalyzedGraph): { sccs: number[][]; loopOf: Map<GraphNode, number> } {
   const adj: number[][] = graph.nodes.map(() => []);
   for (const wire of graph.wires) adj[wire.from.order]!.push(wire.to.order);
-  const result = new Set<GraphNode>();
-  for (const component of cyclicComponents(adj)) {
-    for (const i of component) {
-      const node = graph.nodes[i]!;
-      if (node.snap.block === FLOW_DELAY_BLOCK) result.add(node);
-    }
+  const sccs = stronglyConnectedComponents(adj).reverse();
+  const loopOf = new Map<GraphNode, number>();
+  let loops = 0;
+  for (const scc of sccs) {
+    if (scc.length === 1 && !adj[scc[0]!]!.includes(scc[0]!)) continue;
+    const index = loops++;
+    for (const i of scc) loopOf.set(graph.nodes[i]!, index);
   }
-  return result;
+  return { sccs, loopOf };
 }
 
 function build(graph: AnalyzedGraph, problems: readonly FlowProblem[]): FlowPlan {
   const order = evaluationOrder(graph);
-  const feedback = feedbackDelays(graph);
+  const { sccs, loopOf } = components(graph);
 
   // Output slots in evaluation order.
   const slotOf = new Map<GraphNode, Map<string, number>>();
@@ -270,7 +296,9 @@ function build(graph: AnalyzedGraph, problems: readonly FlowProblem[]): FlowPlan
         if (driver) {
           // Typed outputs are type-checked when produced; only `any` → typed needs converting.
           const convert = input.type !== 'any' && driver.type === 'any' ? input.type : undefined;
-          slots.push(Object.freeze({ slot: slotOf.get(driver.from)!.get(driver.port)!, convert }));
+          const loop = loopOf.get(node);
+          const internal = loop !== undefined && loopOf.get(driver.from) === loop;
+          slots.push(Object.freeze({ slot: slotOf.get(driver.from)!.get(driver.port)!, convert, internal }));
         } else slots.push(Object.freeze({ value: input.default }));
       }
       programInputs.push(Object.freeze({ name: input.name, variadic: input.variadic, slots: Object.freeze(slots) }));
@@ -294,7 +322,7 @@ function build(graph: AnalyzedGraph, problems: readonly FlowProblem[]): FlowPlan
       plan: planNode,
       info,
       role: roleOf(info.id),
-      feedback: feedback.has(node),
+      loop: loopOf.get(node),
       inputs: Object.freeze(programInputs),
       outputSlots: nodeSlots,
       outputs: Object.freeze(outputs),
@@ -322,6 +350,18 @@ function build(graph: AnalyzedGraph, problems: readonly FlowProblem[]): FlowPlan
     warnings: Object.freeze(problems.filter((p) => p.severity === 'warning')),
   });
   const delayStart = programNodes.findIndex((n) => n.role === 'delay');
+  const programOfNode = new Map(order.map((node, i) => [node, programNodes[i]!]));
+  const loops: ProgramLoop[] = [];
+  const qualityOrder: QualityStep[] = [];
+  for (const scc of sccs) {
+    const first = programOfNode.get(graph.nodes[scc[0]!]!)!;
+    if (first.loop !== undefined) {
+      const members = scc.map((i) => programOfNode.get(graph.nodes[i]!)!).sort((a, b) => a.index - b.index);
+      const loop: ProgramLoop = Object.freeze({ index: first.loop, members: Object.freeze(members) });
+      loops.push(loop);
+      qualityOrder.push(Object.freeze({ loop }));
+    } else if (first.role !== 'delay') qualityOrder.push(Object.freeze({ node: first }));
+  }
   programs.set(
     plan,
     Object.freeze({
@@ -330,6 +370,8 @@ function build(graph: AnalyzedGraph, problems: readonly FlowProblem[]): FlowPlan
       slotCount,
       bySource,
       delayStart: delayStart === -1 ? programNodes.length : delayStart,
+      loops: Object.freeze(loops),
+      qualityOrder: Object.freeze(qualityOrder),
     }),
   );
   return plan;

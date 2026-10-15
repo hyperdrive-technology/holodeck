@@ -606,10 +606,21 @@ function findAlgebraicLoops(nodes: readonly GraphNode[], wires: readonly GraphWi
  * The strongly connected components of a directed graph that contain a cycle:
  * more than one node, or one node with an edge to itself. `adj[u]` lists the
  * successors of node `u`; nodes with `skip[u]` set are left out (callers drop
- * their edges from `adj` too). Iterative Tarjan, so a 10 000-node chain cannot
- * overflow the call stack. Components come in no particular order.
+ * their edges from `adj` too). Same order as `stronglyConnectedComponents`.
  */
 export function cyclicComponents(adj: readonly (readonly number[])[], skip?: readonly boolean[]): number[][] {
+  return stronglyConnectedComponents(adj, skip).filter((c) => c.length > 1 || adj[c[0]!]!.includes(c[0]!));
+}
+
+/**
+ * Every strongly connected component of a directed graph (singletons too),
+ * in **reverse topological order**: a component comes after every component
+ * it has an edge to. That is the order Tarjan's algorithm closes them in, and
+ * the compiler relies on it (reversed) to order the quality pass. `adj[u]`
+ * lists the successors of node `u`; nodes with `skip[u]` set are left out.
+ * Iterative Tarjan, so a 10 000-node chain cannot overflow the call stack.
+ */
+export function stronglyConnectedComponents(adj: readonly (readonly number[])[], skip?: readonly boolean[]): number[][] {
   const n = adj.length;
   const index = new Int32Array(n).fill(-1);
   const low = new Int32Array(n);
@@ -651,7 +662,7 @@ export function cyclicComponents(adj: readonly (readonly number[])[], skip?: rea
           onStack[w] = 0;
           component.push(w);
         } while (w !== u);
-        if (component.length > 1 || edges.includes(u)) components.push(component);
+        components.push(component);
       }
     }
   }

@@ -55,8 +55,53 @@ describe('compileFlow', () => {
       ],
     );
     const program = programOf(compileFlow(body, registry))!;
-    const feedback = Object.fromEntries(program.nodes.map((n) => [n.plan.id, n.feedback]));
-    expect(feedback).toEqual({ n: false, k: false, loop1: true, loop2: true, self: true, after: false, chain1: false, chain2: false });
+    const loopOf = Object.fromEntries(program.nodes.map((n) => [n.plan.id, n.loop]));
+    const [a, b] = [loopOf.n, loopOf.self];
+    expect(a).not.toBe(b);
+    expect(loopOf).toEqual({ n: a, k: undefined, loop1: a, loop2: a, self: b, after: undefined, chain1: undefined, chain2: undefined });
+    expect(program.loops.map((l) => l.members.map((m) => m.plan.id)).sort()).toEqual([['n', 'loop1', 'loop2'], ['self']].sort());
+    for (const loop of program.loops) expect(loop.members.every((m) => m.loop === loop.index)).toBe(true);
+    // Readings inside a loop are marked internal; n reads loop2 (same loop).
+    const n = program.byId.get('n')!;
+    expect(n.inputs[0]!.slots[0]).toMatchObject({ internal: true });
+    const after = program.byId.get('after')!;
+    expect(after.inputs[0]!.slots[0]).toMatchObject({ internal: false });
+  });
+
+  it('orders the quality pass topologically with each loop as one unit, before everything it feeds', () => {
+    // in → a → [loop: b → d → b] → c → out ; e reads the loop delay directly.
+    const body = graph(
+      [
+        node('c', 'test.not'),
+        node('e', 'test.not'),
+        node('d', 'flow.delay', { initial: false }),
+        node('b', 'test.and'),
+        node('a', 'test.not'),
+        node('in', 'signal.in', { connection: 'x', source: 'i' }),
+        node('out', 'signal.out', { connection: 'x', source: 'o' }),
+        node('f', 'flow.delay', { initial: false }), // outside any loop: not a quality step
+      ],
+      [
+        wire('w1', 'in.value', 'a.in'),
+        wire('w2', 'a.out', 'b.in1'),
+        wire('w3', 'd.out', 'b.in2'),
+        wire('w4', 'b.out', 'd.in'),
+        wire('w5', 'b.out', 'c.in'),
+        wire('w6', 'c.out', 'out.value'),
+        wire('w7', 'd.out', 'e.in'),
+        wire('w8', 'e.out', 'f.in'),
+      ],
+    );
+    const program = programOf(compileFlow(body, registry))!;
+    const steps = program.qualityOrder.map((s) => ('loop' in s ? `[${s.loop.members.map((m) => m.plan.id).join(',')}]` : s.node.plan.id));
+    expect(steps).toHaveLength(6);
+    expect(new Set(steps)).toEqual(new Set(['in', 'a', '[b,d]', 'c', 'e', 'out']));
+    const at = (id: string) => steps.indexOf(id);
+    expect(at('in')).toBeLessThan(at('a'));
+    expect(at('a')).toBeLessThan(at('[b,d]'));
+    expect(at('[b,d]')).toBeLessThan(at('c'));
+    expect(at('[b,d]')).toBeLessThan(at('e'));
+    expect(at('c')).toBeLessThan(at('out'));
   });
 
   it('describes ports, wiring, params and sources', () => {
