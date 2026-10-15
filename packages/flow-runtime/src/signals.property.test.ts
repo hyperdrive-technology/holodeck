@@ -18,6 +18,8 @@
  *    quiet stretch (every outstanding write has answered, the backend is
  *    healthy, the input is good and steady), the remote holds the current
  *    value, the node is not faulted, and the writer has stopped sending.
+ *    Deploys happen mid-run too, so writes of a replaced deployment land
+ *    late on top of the new one's (issue #76).
  *
  * Parameters: FLOW_FUZZ_SEED, FLOW_FUZZ_RUNS (scaled down here), FLOW_FUZZ_SCANS.
  */
@@ -160,7 +162,7 @@ type Op = { value: FlowValue; resolve: () => void; reject: (error: unknown) => v
 const TIMEOUT_MS = 1000;
 const RETRY_MS = 200;
 
-async function writerRun(seed: number, run: number, stats: { ambiguous: number; orphans: number; reassertions: number }): Promise<string | undefined> {
+async function writerRun(seed: number, run: number, stats: { ambiguous: number; orphans: number; reassertions: number; redeploys: number }): Promise<string | undefined> {
   const rand = prng(seed ^ Math.imul(run + 1, 0xc2b2ae35));
   let remote: FlowValue = null;
   let healthy = false;
@@ -205,9 +207,18 @@ async function writerRun(seed: number, run: number, stats: { ambiguous: number; 
     op.reject(new Error(applied ? 'applied, but the ack was lost' : 'rejected'));
   };
   try {
+    let input = 0;
     if (!(await session.deploy!(doc)).ok) return where(0, 'deploy failed');
     for (let step = 1; step <= STEPS; step++) {
-      if (rand() < 0.4) bridge.set('plc', 'a', Math.floor(rand() * 4), rand() < 0.15 ? 'uncertain' : 'good');
+      if (rand() < 0.4) {
+        input = Math.floor(rand() * 4);
+        bridge.set('plc', 'a', input, rand() < 0.15 ? 'uncertain' : 'good');
+      }
+      // Replace the deployment while writes are in flight: the old writer's writes may land after the new one's.
+      if (rand() < 0.1) {
+        if (!(await session.deploy!(doc)).ok) return where(step, 'redeploy failed');
+        stats.redeploys++;
+      }
       // Answer a few outstanding writes in random order (newest-first is as likely as oldest-first).
       for (const op of ops) if (!op.done && rand() < 0.3) answer(op);
       time.advance(Math.floor(rand() * 1.5 * TIMEOUT_MS));
@@ -215,7 +226,8 @@ async function writerRun(seed: number, run: number, stats: { ambiguous: number; 
       await settle();
     }
     // Quiet stretch: input good and steady, every outstanding write (incl. orphans) answers, backend healthy.
-    const final = Math.floor(rand() * 4);
+    // Half the time the input does not change: then only a late (orphaned or replaced) write can leave the remote wrong.
+    const final = rand() < 0.5 ? input : Math.floor(rand() * 4);
     bridge.set('plc', 'a', final);
     const outstanding = ops.filter((op) => !op.done);
     stats.orphans += Math.max(0, outstanding.length - 1);
@@ -262,8 +274,8 @@ describe('signal edges (property tests)', () => {
     expect(stats.refusedWrites).toBeGreaterThan(RUNS / 2);
   }, 120_000);
 
-  it(`B: signal.out converges on the current value despite ambiguous and reordered writes (${RUNS} runs × ${STEPS} steps, seed ${SEED})`, async () => {
-    const stats = { ambiguous: 0, orphans: 0, reassertions: 0 };
+  it(`B: signal.out converges on the current value despite ambiguous, reordered and replaced writes (${RUNS} runs × ${STEPS} steps, seed ${SEED})`, async () => {
+    const stats = { ambiguous: 0, orphans: 0, reassertions: 0, redeploys: 0 };
     for (let run = 0; run < RUNS; run++) {
       const failure = await writerRun(SEED, run, stats);
       expect(failure, failure).toBeUndefined();
@@ -271,5 +283,6 @@ describe('signal edges (property tests)', () => {
     expect(stats.ambiguous).toBeGreaterThan(RUNS);
     expect(stats.orphans).toBeGreaterThan(RUNS / 4);
     expect(stats.reassertions).toBeGreaterThan(RUNS / 4);
+    expect(stats.redeploys).toBeGreaterThan(RUNS);
   }, 120_000);
 });

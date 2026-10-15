@@ -4,6 +4,7 @@ import {
   runProviderConformance,
   type HolodeckDocument,
   type HolodeckProvider,
+  type DeployResult,
   type ProviderContext,
   type ProviderSession,
   type Sample,
@@ -11,7 +12,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMemorySignalBridge, type SignalBridge } from './bridge';
 import { createLocalFlowProvider, LOCAL_FLOW_PROVIDER_ID, type LocalFlowProviderOptions } from './provider';
-import { clock, flowDoc, graph, node, registryWith, wire } from './test-helpers';
+import type { FlowBlockDefinition } from './block';
+import { clock, flowDoc, graph, node, registryWith, TEST_BLOCKS, wire } from './test-helpers';
 import type { FlowValue } from './values';
 
 const registry = registryWith();
@@ -754,6 +756,130 @@ describe('writes', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(pending).toHaveLength(2);
   });
+
+  describe('a replaced deployment\'s write landing late (issue #76)', () => {
+    /** Writes stall until the test answers them; `apply` puts the value on the remote. */
+    function remoteBridge() {
+      const remote = { value: null as FlowValue };
+      const pending: Array<{ value: FlowValue; resolve: () => void; reject: (e: unknown) => void; apply: () => void }> = [];
+      const bridge = createMemorySignalBridge({
+        write: (_c, _s, value) =>
+          new Promise<void>((resolve, reject) =>
+            pending.push({
+              value,
+              resolve,
+              reject,
+              apply: () => {
+                remote.value = value;
+              },
+            }),
+          ),
+      });
+      return { bridge, pending, remote };
+    }
+    const constOut = (value: FlowValue, target = 'b') =>
+      flowDoc(graph([node('k', 'flow.const', { value }), node('o', 'signal.out', { connection: 'plc', source: target })], [wire('w', 'k.value', 'o.value')]), [plc]);
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    for (const answer of ['resolve', 'reject'] as const) {
+      it(`old 1 in flight, new deployment acks 2, then old 1 lands and ${answer}s → 2 is re-asserted, no fault`, async () => {
+        const { bridge, pending, remote } = remoteBridge();
+        const { session, manual } = await connect({ signals: bridge, writeRetryMs: 0 });
+        expect((await session.deploy!(constOut(1))).ok).toBe(true);
+        expect(pending.map((p) => p.value)).toEqual([1]); // A's write stalls
+        expect((await session.deploy!(constOut(2))).ok).toBe(true);
+        expect(pending.map((p) => p.value)).toEqual([1, 2]);
+        pending[1]!.apply();
+        pending[1]!.resolve(); // B's 2 acknowledged
+        await settle();
+        manual.tick();
+        expect(remote.value).toBe(2);
+        expect(pending).toHaveLength(2); // B trusts its ack
+        pending[0]!.apply(); // A's delayed 1 lands on top of 2
+        if (answer === 'resolve') pending[0]!.resolve();
+        else pending[0]!.reject(new Error('applied, but the ack was lost'));
+        await settle();
+        expect(remote.value).toBe(1);
+        manual.tick();
+        expect(pending.map((p) => p.value)).toEqual([1, 2, 2]); // B forgets its ack and re-asserts 2
+        pending[2]!.apply();
+        pending[2]!.resolve();
+        await settle();
+        for (let i = 0; i < 5; i++) manual.tick();
+        await settle();
+        expect(remote.value).toBe(2);
+        expect(pending).toHaveLength(3); // and then stops
+        expect((await session.read!(['flow:o.$fault']))[0]?.value).toBeNull(); // the old failure faults nothing
+      });
+    }
+
+    it('old write landing while the new deployment\'s write is in flight makes that write untrusted', async () => {
+      // Remote order: B's 2 applied, A's 1 applied, A answers, B answers.
+      const { bridge, pending, remote } = remoteBridge();
+      const { session, manual } = await connect({ signals: bridge, writeRetryMs: 0 });
+      await session.deploy!(constOut(1));
+      await session.deploy!(constOut(2));
+      pending[1]!.apply();
+      pending[0]!.apply();
+      pending[0]!.resolve();
+      await settle();
+      pending[1]!.resolve();
+      await settle();
+      manual.tick();
+      expect(pending.map((p) => p.value)).toEqual([1, 2, 2]);
+      pending[2]!.apply();
+      pending[2]!.resolve();
+      await settle();
+      for (let i = 0; i < 3; i++) manual.tick();
+      expect(remote.value).toBe(2);
+      expect(pending).toHaveLength(3);
+    });
+
+    it('an old write to a different target does not disturb the new deployment', async () => {
+      const { bridge, pending } = remoteBridge();
+      const { session, manual } = await connect({ signals: bridge });
+      await session.deploy!(constOut(1, 'other'));
+      await session.deploy!(constOut(2));
+      pending[1]!.resolve();
+      await settle();
+      pending[0]!.resolve();
+      await settle();
+      for (let i = 0; i < 3; i++) manual.tick();
+      expect(pending.map((p) => p.value)).toEqual([1, 2]);
+    });
+
+    it('two writers of one target in the same deployment do not invalidate each other (no ping-pong)', async () => {
+      const { bridge, pending } = remoteBridge();
+      const { session, manual } = await connect({ signals: bridge });
+      const body = graph(
+        [node('k', 'flow.const', { value: 3 }), node('o1', 'signal.out', { connection: 'plc', source: 'b' }), node('o2', 'signal.out', { connection: 'plc', source: 'b' })],
+        [wire('w1', 'k.value', 'o1.value'), wire('w2', 'k.value', 'o2.value')],
+      );
+      await session.deploy!(flowDoc(body, [plc]));
+      expect(pending).toHaveLength(2);
+      for (const p of pending) p.resolve();
+      await settle();
+      for (let i = 0; i < 5; i++) manual.tick();
+      await settle();
+      expect(pending).toHaveLength(2);
+    });
+
+    it('a write landing after close does not touch another session on the same bridge', async () => {
+      const { bridge, pending } = remoteBridge();
+      const a = await connect({ signals: bridge });
+      const b = await connect({ signals: bridge });
+      await a.session.deploy!(constOut(1));
+      await b.session.deploy!(constOut(2));
+      pending[1]!.resolve();
+      await settle();
+      await a.session.close();
+      pending[0]!.resolve(); // session A's write lands on the target B owns
+      await settle();
+      b.manual.tick();
+      // The two sessions share one bridge, so B re-asserts 2.
+      expect(pending.map((p) => p.value)).toEqual([1, 2, 2]);
+    });
+  });
 });
 
 describe('close', () => {
@@ -925,6 +1051,97 @@ describe('hazards', () => {
       expect(session.status().message).toBe('running "second"');
       expect(manual.active).toBe(1);
       expect((await session.read!(['flow:k.value']))[0]?.value).toBe(9);
+    });
+
+    describe('a block initialState re-entering the session (issue #77)', () => {
+      /** `test.hook`: its initialState calls `onInit` (once per deploy that builds it). */
+      let onInit: () => void = () => {};
+      const hookBlock: FlowBlockDefinition<{ n: number }> = {
+        id: 'test.hook',
+        label: 'Hook',
+        category: 'Test',
+        inputs: [],
+        outputs: [{ name: 'out', type: 'number' }],
+        initialState: () => {
+          onInit();
+          return { n: 0 };
+        },
+        evaluate: ({ state }) => ({ outputs: { out: state.n + 1 }, state: { n: state.n + 1 } }),
+      };
+      const hookRegistry = registryWith([...TEST_BLOCKS, hookBlock as FlowBlockDefinition]);
+      afterEach(() => {
+        onInit = () => {};
+      });
+
+      it('a deploy during initialState → outer SUPERSEDED, the inner deployment keeps running', async () => {
+        const { session, manual } = await connect({}, {}, { registry: hookRegistry });
+        let inner: Promise<DeployResult> | undefined;
+        onInit = () => {
+          onInit = () => {};
+          inner = session.deploy!(flowDoc(graph([node('k', 'flow.const', { value: 9 })]), [], { name: 'inner' }));
+        };
+        const outer = await session.deploy!(flowDoc(graph([node('h', 'test.hook')]), [], { name: 'outer' }));
+        expect(outer.ok).toBe(false);
+        expect(outer.diagnostics.map((d) => d.code)).toEqual(['SUPERSEDED']);
+        expect(await inner).toMatchObject({ ok: true });
+        // What the results say is what runs: the inner flow, one schedule.
+        expect(session.status()).toMatchObject({ state: 'live', message: 'running "inner"' });
+        expect(manual.active).toBe(1);
+        expect((await session.read!(['flow:k.value']))[0]?.value).toBe(9);
+        expect((await session.read!(['flow:h.out']))[0]).toMatchObject({ value: null, quality: 'bad' });
+        manual.tick();
+        expect((await session.read!(['flow:k.value']))[0]).toMatchObject({ value: 9, quality: 'good' });
+      });
+
+      it('a deploy during initialState replacing a running flow → the inner one runs, the old one is stopped', async () => {
+        const bridge = createMemorySignalBridge();
+        const { session, manual } = await connect({ signals: bridge }, {}, { registry: hookRegistry });
+        expect((await session.deploy!(flowDoc(signalBody(), [plc], { name: 'old' }))).ok).toBe(true);
+        expect(bridge.subscriptions).toBe(1);
+        let inner: Promise<DeployResult> | undefined;
+        onInit = () => {
+          onInit = () => {};
+          inner = session.deploy!(flowDoc(counterBody(), [], { name: 'inner' }));
+        };
+        const outer = await session.deploy!(flowDoc(graph([node('h', 'test.hook')]), [], { name: 'outer' }));
+        expect(outer.diagnostics.map((d) => d.code)).toEqual(['SUPERSEDED']);
+        expect(await inner).toMatchObject({ ok: true });
+        expect(session.status().message).toBe('running "inner"');
+        expect(manual.active).toBe(1);
+        expect(bridge.subscriptions).toBe(0);
+        manual.tick();
+        expect((await session.read!(['flow:add.sum']))[0]?.value).toBe(2);
+      });
+
+      it('an invalid deploy during initialState does not supersede the outer deploy', async () => {
+        const { session, manual } = await connect({}, {}, { registry: hookRegistry });
+        let inner: Promise<DeployResult> | undefined;
+        onInit = () => {
+          onInit = () => {};
+          inner = session.deploy!(flowDoc({ nodes: 'x' }));
+        };
+        const outer = await session.deploy!(flowDoc(graph([node('h', 'test.hook')]), [], { name: 'outer' }));
+        expect(outer).toMatchObject({ ok: true, diagnostics: [] });
+        expect(await inner).toMatchObject({ ok: false });
+        expect(session.status().message).toBe('running "outer"');
+        expect(manual.active).toBe(1);
+        manual.tick();
+        expect((await session.read!(['flow:h.out']))[0]?.value).toBe(2);
+      });
+
+      it('a close during initialState → SUPERSEDED, nothing left running, status disconnected', async () => {
+        const { session, manual } = await connect({}, {}, { registry: hookRegistry });
+        await session.deploy!(flowDoc(counterBody(), [], { name: 'old' }));
+        onInit = () => {
+          onInit = () => {};
+          void session.close();
+        };
+        const outer = await session.deploy!(flowDoc(graph([node('h', 'test.hook')]), [], { name: 'outer' }));
+        expect(outer.diagnostics.map((d) => d.code)).toEqual(['SUPERSEDED']);
+        expect(manual.active).toBe(0);
+        expect(session.status().state).toBe('disconnected');
+        expect((await session.read!(['flow:add.sum']))[0]).toMatchObject({ value: null, quality: 'bad' });
+      });
     });
 
     it('a status listener whose re-entrant deploy fails does not supersede the outer deploy', async () => {
