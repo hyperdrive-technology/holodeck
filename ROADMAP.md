@@ -10,9 +10,13 @@ Holodeck's immediate work is to fix built-package imports and ship usable GLB as
 
 The 2.5D process editor already has equipment models, routing, animation, and editing. The 2D editor and 3D viewer have implementations and tests; they are no longer empty rendering placeholders. Package build success does not yet prove host import and asset delivery work.
 
-## M2 — Holodeck standalone scene builder
+## M2 — Holodeck Studio: Arcentry parity on AWS
 
-[M2](https://github.com/hyperdrive-technology/holodeck/milestone/2) develops Holodeck as a standalone browser scene builder after M1. Work includes a 2D editor host round trip, 3D viewer registry integration, and mapping the isometric scene format to the SDK's `SceneFile` contract.
+[M2](https://github.com/hyperdrive-technology/holodeck/milestone/2) makes Holodeck a standalone web builder that mirrors most of Arcentry. The base product is the `holodeck.iso` engine (React Three Fiber 2.5D) with an Arcentry-style theme, cloud archetype models carrying AWS icons, and live data from the `aws.cloudwatch` provider. Other clouds follow as more asset packs. Every piece ships as a package under the [SDK packaging contract](https://github.com/hyperdrive-technology/holodeck-sdk/blob/main/docs/PACKAGING.md). The feature-by-feature parity matrix and acceptance criteria are in [docs/ARCENTRY_PARITY.md](docs/ARCENTRY_PARITY.md).
+
+## M3 — Flow engine: Node-RED-style logic
+
+[M3](https://github.com/hyperdrive-technology/holodeck/milestone/3) adds the second engine, `holodeck.flow`: an xyflow editor with generic function blocks (AND, OR, NOT, XOR, compare, timers, latches). A flow is deployed to and run by a provider, either the in-browser `holodeck.flow.local` or a host product's runtime. Iso documents can bind to flow outputs like any other signal.
 
 ## Later tooling and extensions
 
