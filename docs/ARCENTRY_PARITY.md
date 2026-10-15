@@ -28,8 +28,8 @@ cache, queue and load balancer), each with brand logos and colours.
 
 ## Parity matrix
 
-Status: ✓ done · ◐ partial · ✗ missing · — out of scope (SaaS account features). Lanes refer to
-`~/dev/hyperdrive/.agents/plans/holodeck-arcentry-parity.md`.
+Status: ✓ done · ◐ partial · ✗ missing · — out of scope (SaaS account features). Lane codes match the issues in the
+[M2](https://github.com/hyperdrive-technology/holodeck/milestone/2) and [M3](https://github.com/hyperdrive-technology/holodeck/milestones) milestones.
 
 ### Canvas and camera
 
