@@ -19,7 +19,27 @@ import {
   type EditorHostMode,
   type EditorMode,
 } from './editor-state';
-import { ACCENT, BAR, FONT, MUTED, PANEL, RAIL, SIDEBAR, SIDEBAR_TEXT } from './editor-styles';
+import {
+  ACCENT,
+  BAR,
+  BAR_BG,
+  BAR_BORDER,
+  BAR_BTN_BG,
+  BAR_BTN_BORDER,
+  BAR_BTN_DISABLED_BG,
+  BAR_BTN_DISABLED_TEXT,
+  BAR_BTN_TEXT,
+  BAR_MUTED,
+  CANVAS_BG,
+  CANVAS_TEXT,
+  FONT,
+  MUTED,
+  PANEL,
+  RAIL,
+  RAIL_BG,
+  SIDEBAR,
+  SIDEBAR_TEXT,
+} from './editor-styles';
 import { InspectorPanel } from './InspectorPanel';
 import { Palette } from './Palette';
 import { ProcessSceneView, sceneTarget } from './ProcessSceneView';
@@ -321,9 +341,9 @@ export function ProcessEditor({
           overflow: 'hidden',
           position: 'relative',
           boxSizing: 'border-box',
-          background: '#fff',
+          background: CANVAS_BG,
           font: FONT,
-          color: '#222',
+          color: CANVAS_TEXT,
         }}
         onContextMenu={(event) => event.preventDefault()}
       >
@@ -499,7 +519,7 @@ function Rail({
       style={{
         width: RAIL,
         flex: 'none',
-        background: '#1b2028',
+        background: RAIL_BG,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'stretch',
@@ -593,8 +613,8 @@ function BottomBar({
         alignItems: 'center',
         gap: 4,
         padding: '0 10px',
-        borderTop: '1px solid #e6e6e6',
-        background: '#fafafa',
+        borderTop: `1px solid ${BAR_BORDER}`,
+        background: BAR_BG,
         font: FONT,
       }}
     >
@@ -614,12 +634,14 @@ function BottomBar({
       )}
       <BarBtn onClick={onFit}>fit</BarBtn>
       <BarBtn onClick={onZoomOut}>−</BarBtn>
-      <span style={{ width: 48, textAlign: 'center', color: '#666' }}>{Math.round(zoom)}</span>
+      <span style={{ width: 48, textAlign: 'center', color: BAR_MUTED }}>{Math.round(zoom)}</span>
       <BarBtn onClick={onZoomIn}>+</BarBtn>
       <BarBtn onClick={() => onRotate(1)}>rotate L</BarBtn>
       <BarBtn onClick={() => onRotate(-1)}>rotate R</BarBtn>
       <BarBtn onClick={onToggle2d}>{topDown ? '2.5D' : '2D'}</BarBtn>
-      <span style={{ marginLeft: 'auto', color: '#888' }}>{count} items</span>
+      <span data-testid="item-count" style={{ marginLeft: 'auto', color: BAR_MUTED }}>
+        {count} items
+      </span>
     </div>
   );
 }
@@ -642,9 +664,9 @@ function BarBtn({
       onClick={onClick}
       disabled={disabled}
       style={{
-        border: '1px solid #ddd',
-        background: disabled ? '#f3f3f3' : '#fff',
-        color: disabled ? '#bbb' : '#333',
+        border: `1px solid ${BAR_BTN_BORDER}`,
+        background: disabled ? BAR_BTN_DISABLED_BG : BAR_BTN_BG,
+        color: disabled ? BAR_BTN_DISABLED_TEXT : BAR_BTN_TEXT,
         padding: '6px 10px',
         borderRadius: 4,
         cursor: disabled ? 'default' : 'pointer',

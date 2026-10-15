@@ -8,6 +8,7 @@ import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
 import { PROCESS_SCENE } from '../iso/load-process-scene';
+import { WCAG_AA_NORMAL, contrastRatioL, luminanceRgb } from './contrast';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
 const snapDir = path.join(pkgRoot, 'tests/snapshots');
@@ -59,6 +60,19 @@ describe.skipIf(!CHROMIUM)('process editor', () => {
 
       expect(await root.getAttribute('data-mode')).toBe('select');
       expect(await root.getAttribute('data-object-count')).toBe(String(PROCESS_SCENE.objects.length));
+
+      // holodeck#72: the toolbar "N items" label must meet WCAG AA against the bar it sits on.
+      const count = page.getByTestId('item-count');
+      await expect(count.textContent()).resolves.toMatch(/^\d+ items$/);
+      const [fg, bg] = await count.evaluate((el) => {
+        const rgb = (c: string) => (c.match(/\d+/g) ?? []).slice(0, 3).map(Number);
+        return [rgb(getComputedStyle(el).color), rgb(getComputedStyle(el.parentElement as Element).backgroundColor)];
+      });
+      const ratio = contrastRatioL(
+        luminanceRgb(fg as [number, number, number]),
+        luminanceRgb(bg as [number, number, number]),
+      );
+      expect(ratio).toBeGreaterThanOrEqual(WCAG_AA_NORMAL);
 
       await page.getByRole('button', { name: /2×2 vessel/ }).click();
       expect(await root.getAttribute('data-mode')).toBe('place');
