@@ -23,9 +23,10 @@
  *
  * Everything in a deploy happens synchronously inside the call: two deploys,
  * or a deploy and a close, can never interleave. Callbacks made during a
- * deploy (status listeners, subscribers, the bridge) may deploy again or
- * close the session; a generation check after each of them makes the outer
- * deploy stop and report `SUPERSEDED`.
+ * deploy (block `initialState`, status listeners, subscribers, the bridge)
+ * may deploy again or close the session; a generation check after each of
+ * them makes the outer deploy stop and report `SUPERSEDED`, leaving whatever
+ * the inner call installed (or nothing, after a close) running.
  */
 
 import {
@@ -195,6 +196,28 @@ interface Deployment {
 }
 
 /**
+ * The live `signal.out` writers of every target (connection + source) per
+ * bridge, across deployments and sessions (issue #76). A retired writer (its
+ * deployment was replaced, or its session closed) can still have writes in
+ * flight; when one of them answers, it may just have landed on top of what a
+ * live writer of the same target has since acknowledged, so those writers are
+ * told to forget it and re-assert their current value.
+ *
+ * Keyed by the bridge object, because `(connection, source)` only names a
+ * target within one bridge. A `WeakMap` lets a bridge nobody uses any more be
+ * garbage-collected along with its entry.
+ */
+const liveWriters = new WeakMap<SignalBridge, Map<string, Set<SignalWriter>>>();
+
+function writersOf(bridge: SignalBridge, key: string): Set<SignalWriter> {
+  let targets = liveWriters.get(bridge);
+  if (!targets) liveWriters.set(bridge, (targets = new Map()));
+  let writers = targets.get(key);
+  if (!writers) targets.set(key, (writers = new Set()));
+  return writers;
+}
+
+/**
  * Forwards one `signal.out` node's value to the bridge:
  * - at most one write in flight; the newest value wins (intermediate values are skipped);
  * - a value equal to the last *acknowledged* write is not sent again;
@@ -217,7 +240,13 @@ interface Deployment {
  *   value, so nothing computed from data that is now in doubt is retried, and
  *   forgets the last acknowledged write, so the value is sent again once the
  *   reading is good. A write already in flight cannot be recalled; if it
- *   succeeds after the hold it is not remembered as written.
+ *   succeeds after the hold it is not remembered as written;
+ * - a write of a *retired* writer (its deployment was replaced or closed)
+ *   that answers late changes nothing of its own, but tells the live writers
+ *   of the same target to forget their acknowledged value and re-assert it
+ *   (`invalidate()`, issue #76). Only retired writers do this: two live
+ *   `signal.out` nodes of one target (DUPLICATE_SIGNAL_TARGET) would
+ *   otherwise invalidate each other forever.
  * Time is the provider's clock and every check runs on a request or a scan.
  */
 class SignalWriter {
@@ -235,6 +264,8 @@ class SignalWriter {
   private epoch = 0;
   private failedAt: number | undefined;
   private retired = false;
+  /** The live writers of this writer's target (shared with every deployment using `bridge`). */
+  private readonly peers: Set<SignalWriter>;
 
   constructor(
     private readonly ref: FlowSignalRef,
@@ -244,7 +275,10 @@ class SignalWriter {
     private readonly retryMs: number,
     private readonly timeoutMs: number,
     private readonly log: ProviderContext['log'],
-  ) {}
+  ) {
+    this.peers = writersOf(bridge, pairKey(ref.connection, ref.source));
+    this.peers.add(this);
+  }
 
   request(value: FlowValue): void {
     this.desired = value;
@@ -290,10 +324,24 @@ class SignalWriter {
 
   retire(): void {
     this.retired = true;
+    this.peers.delete(this);
+  }
+
+  /** Another (retired) writer's write to our target just answered: what the target holds is unknown again. */
+  invalidate(): void {
+    if (this.retired) return;
+    this.forget();
+    this.pump();
   }
 
   private settle(token: number, value: FlowValue, error: unknown): void {
-    if (this.retired) return;
+    if (this.retired) {
+      // Our deployment is gone, so our own state no longer matters — but this
+      // write may have landed after a live writer's acknowledged one (either
+      // answer is ambiguous). Copy the set: invalidate() may write synchronously.
+      for (const peer of [...this.peers]) peer.invalidate();
+      return;
+    }
     if (this.attempt?.token !== token) {
       // An orphan: this write timed out earlier, and a newer one may have been
       // acknowledged since. Whatever the answer, it may just have landed on
@@ -491,6 +539,15 @@ class LocalFlowSession implements ProviderSession {
       schedule: this.schedule,
       onError: (error) => this.log('warn', 'holodeck.flow.local: scan error', error),
     });
+    // createFlowRun() calls block `initialState` callbacks, which may deploy
+    // again or close the session. Such a deploy has already committed (and
+    // reported ok) by now, so this one must not install itself over it: drop
+    // our run, which nothing else has seen yet, and report SUPERSEDED, so the
+    // results match what actually runs (issue #77).
+    if (this.closed || this.generation !== generation) {
+      run.dispose();
+      return superseded();
+    }
     const name = record?.name;
     const deployment: Deployment = {
       plan,

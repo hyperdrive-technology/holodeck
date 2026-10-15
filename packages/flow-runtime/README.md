@@ -273,7 +273,8 @@ Diagnostics use the SDK's `Diagnostic` with these codes, and `objectId` is the n
 nothing: the previous flow keeps running. Warnings (`NO_SIGNAL_BRIDGE`, `SIGNAL_SUBSCRIBE_FAILED`,
 `DUPLICATE_SIGNAL_TARGET`) do not stop a deploy. A deploy runs synchronously inside the call. Two deploys, or a
 deploy and a `close()`, therefore never interleave. If a callback made during the deploy (a status listener,
-subscriber or bridge) deploys again or closes the session, the outer deploy stops and returns `SUPERSEDED`.
+subscriber, bridge, or a block's `initialState`) deploys again or closes the session, the outer deploy stops and
+returns `SUPERSEDED`; the inner deploy's result stands, so the results always match what runs.
 
 - **Sources** are `flow:<nodeId>.<port>` for every output, and `flow:<nodeId>.$fault` for every node. Port names
   never contain a dot, so splitting at the last dot recovers the node id.
@@ -322,7 +323,9 @@ write is not sent again. Anything that makes the target's value unknown resets t
 again: a hold (and a write still in flight during the hold does not count as the target's value); a failed or
 timed-out write, because the bridge gives no rollback guarantee and the value may have landed anyway; and the late
 answer of a timed-out write, because timing out does not cancel it and it may have landed on top of a newer value
-(a write in flight when that answer arrives is not trusted either). The fault clears only on an acknowledged write.
+(a write in flight when that answer arrives is not trusted either). The same goes for a write of a replaced (or
+closed) deployment that answers after a new deployment's `signal.out` to the same target, on the same bridge, has
+acknowledged its value: the new one re-asserts its value. The fault clears only on an acknowledged write.
 A timed-out write that never answers cannot be reconciled: that would need remote sequencing. One bridge subscription serves every `signal.in` that reads the same signal. Without a
 bridge, `signal.in` reads `null`/`bad`, `signal.out` is faulted, and deploy warns `NO_SIGNAL_BRIDGE`.
 
