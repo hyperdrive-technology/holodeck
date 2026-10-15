@@ -1,0 +1,1460 @@
+import { createManualSchedule } from '@holodeck/sdk';
+import { describe, expect, it, vi } from 'vitest';
+import type { FlowBlockDefinition, FlowState } from './block';
+import { compileFlow } from './compile';
+import { createFlowRun, FlowRunError, snapshotState, type FlowRun, type FlowScan } from './run';
+import { clock, graph, node, registryWith, TEST_BLOCKS, wire } from './test-helpers';
+import { FLOW_LIMITS, type FlowValue } from './values';
+
+const registry = registryWith();
+
+function runOf(body: unknown, extraBlocks: FlowBlockDefinition[] = [], options: Parameters<typeof createFlowRun>[1] = {}): FlowRun {
+  const r = extraBlocks.length ? registryWith([...TEST_BLOCKS, ...extraBlocks]) : registry;
+  return createFlowRun(compileFlow(body, r), { now: clock().now, ...options });
+}
+
+const value = (run: FlowRun, source: string) => run.read(source)?.value;
+
+describe('scans', () => {
+  it('evaluates every node in order and publishes outputs', () => {
+    const run = runOf(
+      graph(
+        [node('a', 'flow.const', { type: 'bool', value: true }), node('b', 'flow.const', { type: 'bool', value: true }), node('and', 'test.and'), node('not', 'test.not')],
+        [wire('w1', 'a.value', 'and.in1'), wire('w2', 'b.value', 'and.in2'), wire('w3', 'and.out', 'not.in')],
+      ),
+    );
+    expect(run.read('flow:and.out')).toEqual({ value: false, quality: 'uncertain' }); // before the first scan
+    const scan = run.step();
+    expect(scan.scan).toBe(1);
+    expect(value(run, 'flow:and.out')).toBe(true);
+    expect(value(run, 'flow:not.out')).toBe(false);
+    expect(run.read('flow:not.out')?.quality).toBe('good');
+    expect(run.scans).toBe(1);
+  });
+
+  it('gives unconnected inputs their defaults (type default, or the port default)', () => {
+    const run = runOf(graph([node('p', 'test.probe'), node('and', 'test.and')]));
+    run.step();
+    expect([value(run, 'flow:p.b'), value(run, 'flow:p.n'), value(run, 'flow:p.s'), value(run, 'flow:p.x')]).toEqual([false, 0, '', null]);
+    expect(value(run, 'flow:and.out')).toBe(true); // both instances read default true
+  });
+
+  it('passes variadic inputs as a frozen array, sized max(min, highest wired)', () => {
+    const seen: unknown[] = [];
+    const spy: FlowBlockDefinition = {
+      id: 'test.spy',
+      label: 'Spy',
+      category: 'Test',
+      inputs: [{ name: 'in', type: 'number', variadic: true, min: 2, max: 6 }],
+      outputs: [],
+      evaluate: ({ inputs }) => {
+        seen.push(inputs.in);
+        return { outputs: {} };
+      },
+    };
+    const run = runOf(graph([node('k', 'flow.const', { value: 7 }), node('s', 'test.spy')], [wire('w', 'k.value', 's.in4')]), [spy]);
+    run.step();
+    expect(seen[0]).toEqual([0, 0, 0, 7]);
+    expect(Object.isFrozen(seen[0])).toBe(true);
+  });
+
+  it('converts values from `any` outputs into typed inputs', () => {
+    const cases: Array<[FlowValue, [boolean, number, string]]> = [
+      [true, [true, 1, 'true']],
+      [false, [false, 0, 'false']],
+      [0, [false, 0, '0']],
+      [2.5, [true, 2.5, '2.5']],
+      ['true', [true, 0, 'true']],
+      [' FALSE ', [false, 0, ' FALSE ']],
+      ['42', [true, 42, '42']],
+      ['0', [false, 0, '0']],
+      ['', [false, 0, '']],
+      ['abc', [false, 0, 'abc']],
+      [null, [false, 0, '']],
+    ];
+    for (const [input, [b, n, s]] of cases) {
+      const run = runOf(
+        graph(
+          [node('k', 'flow.const', { type: typeof input === 'boolean' ? 'bool' : typeof input === 'number' ? 'number' : 'string', value: input }), node('p', 'test.probe')],
+          [wire('w1', 'k.value', 'p.b'), wire('w2', 'k.value', 'p.n'), wire('w3', 'k.value', 'p.s'), wire('w4', 'k.value', 'p.x')],
+        ),
+      );
+      run.step();
+      const constValue = value(run, 'flow:k.value');
+      expect([value(run, 'flow:p.b'), value(run, 'flow:p.n'), value(run, 'flow:p.s')], JSON.stringify(input)).toEqual(
+        input === null ? [false, 0, ''] : [b, n, s],
+      );
+      expect(value(run, 'flow:p.x')).toBe(constValue);
+    }
+  });
+
+  it('holds an output the block leaves out (or sets to undefined)', () => {
+    let emit: Record<string, FlowValue | undefined> = { a: 1, b: 2 };
+    const block: FlowBlockDefinition = {
+      id: 'test.partial',
+      label: 'P',
+      category: 'T',
+      inputs: [],
+      outputs: [
+        { name: 'a', type: 'number' },
+        { name: 'b', type: 'number' },
+      ],
+      evaluate: () => ({ outputs: emit as Record<string, FlowValue> }),
+    };
+    const run = runOf(graph([node('p', 'test.partial')]), [block]);
+    run.step();
+    emit = { b: 3, a: undefined };
+    const scan = run.step();
+    expect([value(run, 'flow:p.a'), value(run, 'flow:p.b')]).toEqual([1, 3]);
+    expect(scan.changes.map((c) => c.port)).toEqual(['b']);
+  });
+
+  it('lists only changed outputs after the first scan', () => {
+    const run = runOf(graph([node('c', 'test.counter'), node('k', 'flow.const', { value: 1 })]));
+    const first = run.step();
+    expect(first.changes.map((c) => c.source)).toEqual(['flow:c.count', 'flow:k.value']);
+    const second = run.step();
+    expect(second.changes).toEqual([{ node: 'c', port: 'count', source: 'flow:c.count', value: 2, quality: 'good' }]);
+  });
+
+  it('passes dtMs and nowMs from the clock (0 on the first scan, never negative)', () => {
+    const c = clock(5000);
+    const seen: Array<[number, number]> = [];
+    const block: FlowBlockDefinition = {
+      id: 'test.time',
+      label: 'T',
+      category: 'T',
+      inputs: [],
+      outputs: [],
+      evaluate: ({ dtMs, nowMs }) => {
+        seen.push([dtMs, nowMs]);
+        return { outputs: {} };
+      },
+    };
+    const run = runOf(graph([node('t', 'test.time')]), [block], { now: c.now });
+    run.step();
+    c.advance(100);
+    run.step();
+    c.set(4000); // clock went backwards
+    run.step();
+    c.set(Number.NaN); // broken clock: previous reading repeats
+    run.step();
+    expect(seen).toEqual([
+      [0, 5000],
+      [100, 5100],
+      [0, 4000],
+      [0, 4000],
+    ]);
+    expect(run.nowMs).toBe(4000);
+  });
+
+  it('reports a throwing clock through onError and keeps scanning', () => {
+    const onError = vi.fn();
+    const run = runOf(graph([node('c', 'test.counter')]), [], {
+      now: () => {
+        throw new Error('clock');
+      },
+      onError,
+    });
+    expect(run.step().nowMs).toBe(0);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'clock' }));
+  });
+});
+
+describe('state', () => {
+  it('starts from initialState(params) and persists what evaluate returns', () => {
+    const run = runOf(graph([node('c', 'test.counter', { start: 10 })]));
+    run.step();
+    run.step();
+    expect(value(run, 'flow:c.count')).toBe(12);
+  });
+
+  it('freezes state handed to evaluate: in-place mutation faults the node instead of leaking', () => {
+    const block: FlowBlockDefinition<{ n: number }> = {
+      id: 'test.mutate',
+      label: 'M',
+      category: 'T',
+      inputs: [],
+      outputs: [{ name: 'n', type: 'number' }],
+      initialState: () => ({ n: 0 }),
+      evaluate: ({ state }) => {
+        (state as { n: number }).n++;
+        return { outputs: { n: state.n } };
+      },
+    };
+    const run = runOf(graph([node('m', 'test.mutate')]), [block as FlowBlockDefinition]);
+    const scan = run.step();
+    expect(scan.faults).toEqual([{ node: 'm', message: expect.stringMatching(/read.only|Cannot assign/) }]);
+  });
+
+  it('copies returned state: the block keeping and mutating its object later changes nothing', () => {
+    const kept: Array<{ list: number[] }> = [];
+    const seen: unknown[] = [];
+    const block: FlowBlockDefinition = {
+      id: 'test.keep',
+      label: 'K',
+      category: 'T',
+      inputs: [],
+      outputs: [],
+      evaluate: ({ state }) => {
+        seen.push(state);
+        const next = { list: [1, 2] };
+        kept.push(next);
+        return { outputs: {}, state: next };
+      },
+    };
+    const run = runOf(graph([node('k', 'test.keep')]), [block]);
+    run.step();
+    kept[0]!.list.push(99);
+    run.step();
+    expect(seen[1]).toEqual({ list: [1, 2] });
+    expect(Object.isFrozen(seen[1])).toBe(true);
+    expect(Object.isFrozen((seen[1] as { list: number[] }).list)).toBe(true);
+  });
+
+  it('keeps state when evaluate returns none, clears it with null', () => {
+    let mode: 'keep' | 'clear' = 'keep';
+    const seen: unknown[] = [];
+    const block: FlowBlockDefinition = {
+      id: 'test.st',
+      label: 'S',
+      category: 'T',
+      inputs: [],
+      outputs: [],
+      initialState: () => 5,
+      evaluate: ({ state }) => {
+        seen.push(state);
+        return mode === 'keep' ? { outputs: {} } : { outputs: {}, state: null };
+      },
+    };
+    const run = runOf(graph([node('s', 'test.st')]), [block]);
+    run.step();
+    mode = 'clear';
+    run.step();
+    run.step();
+    expect(seen).toEqual([5, 5, null]);
+  });
+
+  it('faults a node whose state is not JSON-like data', () => {
+    for (const bad of [() => 1, new Date(), new Map(), Number.POSITIVE_INFINITY, [undefined], 10n]) {
+      const block: FlowBlockDefinition = { id: 'test.badstate', label: 'B', category: 'T', inputs: [], outputs: [], evaluate: () => ({ outputs: {}, state: bad as unknown as FlowState }) };
+      const run = runOf(graph([node('b', 'test.badstate')]), [block]);
+      expect(run.step().faults, String(bad)).toHaveLength(1);
+    }
+  });
+
+  it('a node whose initialState throws is faulted from the first scan and never evaluated (review P2)', () => {
+    const evaluate = vi.fn(({ state }: { state: unknown }) => ({ outputs: { out: state === null ? -1 : 1 } }));
+    const block: FlowBlockDefinition = {
+      id: 'test.init',
+      label: 'I',
+      category: 'T',
+      inputs: [],
+      outputs: [{ name: 'out', type: 'number' }],
+      initialState: () => {
+        throw new Error('init boom');
+      },
+      evaluate,
+    };
+    const run = runOf(graph([node('i', 'test.init'), node('c', 'test.counter')]), [block]);
+    for (let i = 0; i < 3; i++) {
+      const scan = run.step();
+      expect(scan.faults).toEqual([{ node: 'i', message: 'initialState failed: init boom' }]);
+    }
+    expect(evaluate).not.toHaveBeenCalled();
+    expect(run.read('flow:i.out')).toEqual({ value: 0, quality: 'bad' }); // never -1: no run with a null state
+    expect(run.read('flow:i.$fault')?.value).toBe('initialState failed: init boom');
+    expect(value(run, 'flow:c.count')).toBe(3); // the rest kept running
+  });
+
+  it('snapshotState copies __proto__ keys as data and bounds size and depth', () => {
+    const state = snapshotState(JSON.parse('{"__proto__": {"polluted": true}, "a": [1, {"b": null}]}')) as Record<string, unknown>;
+    expect(Object.keys(state)).toEqual(['__proto__', 'a']);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.getPrototypeOf(state)).toBe(Object.prototype);
+    let deep: unknown = 1;
+    for (let i = 0; i < FLOW_LIMITS.maxStateDepth + 1; i++) deep = [deep];
+    expect(() => snapshotState(deep)).toThrow(RangeError);
+    expect(() => snapshotState(new Array(FLOW_LIMITS.maxStateValues).fill(0))).toThrow(RangeError);
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    expect(() => snapshotState(cyclic)).toThrow();
+  });
+});
+
+describe('README example', () => {
+  /** The on-delay timer from README.md, verbatim. */
+  const ton: FlowBlockDefinition<{ elapsed: number }> = {
+    id: 'logic.ton',
+    label: 'TON',
+    category: 'Timers',
+    inputs: [{ name: 'in', type: 'bool' }],
+    outputs: [{ name: 'q', type: 'bool' }, { name: 'et', type: 'number' }],
+    params: { preset: { type: 'number', default: 1000, min: 0, unit: 'ms' } },
+    initialState: () => ({ elapsed: 0 }),
+    evaluate: ({ inputs, params, state, dtMs }) => {
+      const elapsed = inputs.in ? Math.min(state.elapsed + dtMs, params.preset as number) : 0;
+      return { outputs: { q: elapsed >= (params.preset as number) && inputs.in === true, et: elapsed }, state: { elapsed } };
+    },
+  };
+
+  it('a TON timer driven by dtMs turns on after its preset', () => {
+    const c = clock();
+    const run = runOf(
+      graph([node('in', 'signal.in', { connection: 'c', source: 's' }), node('t', 'logic.ton', { preset: 300 })], [wire('w', 'in.value', 't.in')]),
+      [ton as FlowBlockDefinition],
+      { now: c.now },
+    );
+    run.setSignal('in', true);
+    const q: unknown[] = [];
+    for (let i = 0; i < 5; i++) {
+      run.step();
+      q.push([value(run, 'flow:t.q'), value(run, 'flow:t.et')]);
+      c.advance(100);
+    }
+    expect(q).toEqual([
+      [false, 0],
+      [false, 100],
+      [false, 200],
+      [true, 300],
+      [true, 300],
+    ]);
+    run.setSignal('in', false);
+    run.step();
+    expect([value(run, 'flow:t.q'), value(run, 'flow:t.et')]).toEqual([false, 0]);
+  });
+});
+
+describe('faults', () => {
+  const faultGraph = (mode: string) =>
+    graph(
+      [node('t', 'flow.const', { type: 'bool', value: true }), node('m', 'test.misbehave', { mode }), node('c', 'test.counter')],
+      [wire('w', 't.value', 'm.trigger')],
+    );
+
+  it.each([
+    ['throw', /boom/],
+    ['nan', /output "out" must be number, got NaN/],
+    ['string', /output "out" must be number/],
+    ['unknown', /unknown output "other"/],
+    ['promise', /must be synchronous/],
+    ['none', /must return \{ outputs, state\? \}/],
+  ])('mode %s faults only that node', (mode, pattern) => {
+    const run = runOf(faultGraph(mode));
+    const scan = run.step();
+    expect(scan.faults).toEqual([{ node: 'm', message: expect.stringMatching(pattern) }]);
+    expect(run.read('flow:m.out')).toEqual({ value: 0, quality: 'bad' }); // held (initial) value, bad quality
+    expect(run.read('flow:m.$fault')).toEqual({ value: expect.stringMatching(pattern), quality: 'good' });
+    expect(value(run, 'flow:c.count')).toBe(1); // the rest kept running
+    expect(scan.changes).toContainEqual(expect.objectContaining({ source: 'flow:m.$fault', value: expect.stringMatching(pattern) }));
+  });
+
+  it('does not leave unhandled rejections from a block returning a rejected promise', async () => {
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      runOf(faultGraph('promise')).step();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+
+  it('faults a string output longer than maxValueLength', () => {
+    const block: FlowBlockDefinition = {
+      id: 'test.long',
+      label: 'L',
+      category: 'T',
+      inputs: [],
+      outputs: [{ name: 's', type: 'string' }],
+      evaluate: () => ({ outputs: { s: 'x'.repeat(FLOW_LIMITS.maxValueLength + 1) } }),
+    };
+    expect(runOf(graph([node('l', 'test.long')]), [block]).step().faults[0]?.message).toMatch(/longer than/);
+  });
+
+  it('keeps a faulted node atomic (no partial outputs) and recovers on the next good scan', () => {
+    let mode = 'bad';
+    const block: FlowBlockDefinition = {
+      id: 'test.atomic',
+      label: 'A',
+      category: 'T',
+      inputs: [],
+      outputs: [
+        { name: 'a', type: 'number' },
+        { name: 'b', type: 'number' },
+      ],
+      evaluate: () => (mode === 'bad' ? { outputs: { a: 5, b: Number.NaN } } : { outputs: { a: 6, b: 7 } }),
+    };
+    const run = runOf(graph([node('x', 'test.atomic')]), [block]);
+    run.step();
+    expect([value(run, 'flow:x.a'), value(run, 'flow:x.b')]).toEqual([0, 0]);
+    mode = 'good';
+    const scan = run.step();
+    expect([value(run, 'flow:x.a'), value(run, 'flow:x.b')]).toEqual([6, 7]);
+    expect(scan.faults).toEqual([]);
+    expect(run.read('flow:x.$fault')?.value).toBeNull();
+    expect(scan.changes).toContainEqual(expect.objectContaining({ source: 'flow:x.$fault', value: null }));
+    expect(run.read('flow:x.a')?.quality).toBe('good');
+  });
+
+  it('reportFault shows an external fault until cleared; evaluate faults win', () => {
+    const run = runOf(graph([node('c', 'test.counter')]));
+    run.reportFault('c', 'write failed');
+    expect(run.step().faults).toEqual([{ node: 'c', message: 'write failed' }]);
+    run.reportFault('c', null);
+    expect(run.step().faults).toEqual([]);
+    expect(() => run.reportFault('ghost', 'x')).toThrow(expect.objectContaining({ code: 'UNKNOWN_NODE' }));
+  });
+
+  it('snapshot lists faults and every source, frozen and cached per scan', () => {
+    const run = runOf(faultGraph('throw'));
+    run.step();
+    const snap = run.snapshot();
+    expect(snap.faults).toEqual({ m: 'boom' });
+    expect(Object.keys(snap.values)).toEqual(run.plan.sources);
+    expect(Object.isFrozen(snap) && Object.isFrozen(snap.values) && Object.isFrozen(snap.values['flow:m.out'])).toBe(true);
+    expect(run.snapshot()).toBe(snap);
+    run.step();
+    expect(run.snapshot()).not.toBe(snap);
+  });
+});
+
+describe('delays and feedback', () => {
+  it('a counter loop through a delay increments once per scan', () => {
+    const run = runOf(
+      graph(
+        [node('add', 'test.add'), node('one', 'flow.const', { value: 1 }), node('d', 'flow.delay', { initial: 0 })],
+        [wire('w1', 'one.value', 'add.a'), wire('w2', 'd.out', 'add.b'), wire('w3', 'add.sum', 'd.in')],
+      ),
+    );
+    const sums: unknown[] = [];
+    for (let i = 0; i < 4; i++) {
+      run.step();
+      sums.push(value(run, 'flow:add.sum'));
+    }
+    expect(sums).toEqual([1, 2, 3, 4]);
+    expect(value(run, 'flow:d.out')).toBe(4);
+  });
+
+  it('outputs the initial value before the first scan and null without one', () => {
+    const run = runOf(graph([node('d', 'flow.delay', { initial: 'start' }), node('e', 'flow.delay')]));
+    expect([value(run, 'flow:d.out'), value(run, 'flow:e.out')]).toEqual(['start', null]);
+  });
+
+  it('readers placed before or after the delay both see the previous scan', () => {
+    const run = runOf(
+      graph(
+        [node('before', 'test.probe'), node('c', 'test.counter'), node('d', 'flow.delay', { initial: -1 }), node('after', 'test.probe')],
+        [wire('w1', 'c.count', 'd.in'), wire('w2', 'd.out', 'before.x'), wire('w3', 'd.out', 'after.x')],
+      ),
+    );
+    run.step();
+    expect([value(run, 'flow:before.x'), value(run, 'flow:after.x')]).toEqual([-1, -1]);
+    run.step();
+    expect([value(run, 'flow:before.x'), value(run, 'flow:after.x')]).toEqual([1, 1]);
+  });
+
+  it('a chain of delays shifts by one scan per delay', () => {
+    const run = runOf(
+      graph(
+        [node('c', 'test.counter'), node('d1', 'flow.delay', { initial: 0 }), node('d2', 'flow.delay', { initial: 0 })],
+        [wire('w1', 'c.count', 'd1.in'), wire('w2', 'd1.out', 'd2.in')],
+      ),
+    );
+    const rows: unknown[] = [];
+    for (let i = 0; i < 3; i++) {
+      run.step();
+      rows.push([value(run, 'flow:c.count'), value(run, 'flow:d1.out'), value(run, 'flow:d2.out')]);
+    }
+    expect(rows).toEqual([
+      [1, 1, 0],
+      [2, 2, 1],
+      [3, 3, 2],
+    ]);
+  });
+
+  it('an SR-style latch built from logic and a delay holds its state', () => {
+    // q = (set OR q_prev) AND NOT reset, with OR built as NOT(AND(NOT a, NOT b)).
+    const bodies = graph(
+      [
+        node('set', 'signal.in', { connection: 'io', source: 'set' }),
+        node('reset', 'signal.in', { connection: 'io', source: 'reset' }),
+        node('nset', 'test.not'),
+        node('nprev', 'test.not'),
+        node('nor', 'test.and'),
+        node('or', 'test.not'),
+        node('nreset', 'test.not'),
+        node('q', 'test.and'),
+        node('prev', 'flow.delay', { initial: false }),
+      ],
+      [
+        wire('w1', 'set.value', 'nset.in'),
+        wire('w2', 'prev.out', 'nprev.in'),
+        wire('w3', 'nset.out', 'nor.in1'),
+        wire('w4', 'nprev.out', 'nor.in2'),
+        wire('w5', 'nor.out', 'or.in'),
+        wire('w6', 'reset.value', 'nreset.in'),
+        wire('w7', 'or.out', 'q.in1'),
+        wire('w8', 'nreset.out', 'q.in2'),
+        wire('w9', 'q.out', 'prev.in'),
+      ],
+    );
+    const run = runOf(bodies);
+    const q = () => value(run, 'flow:q.out');
+    run.setSignal('set', false);
+    run.setSignal('reset', false);
+    run.step();
+    expect(q()).toBe(false);
+    run.setSignal('set', true);
+    run.step();
+    expect(q()).toBe(true);
+    run.setSignal('set', false);
+    run.step();
+    run.step();
+    expect(q()).toBe(true); // latched
+    run.setSignal('reset', true);
+    run.step();
+    expect(q()).toBe(false);
+  });
+});
+
+describe('signals', () => {
+  const signalGraph = () =>
+    graph(
+      [node('in', 'signal.in', { connection: 'plc', source: 'a' }), node('n', 'test.not'), node('out', 'signal.out', { connection: 'plc', source: 'b' })],
+      [wire('w1', 'in.value', 'n.in'), wire('w2', 'n.out', 'out.value')],
+    );
+
+  it('signal.in publishes the latest external value and its quality, from the next scan', () => {
+    const run = runOf(signalGraph());
+    run.step();
+    expect(run.read('flow:in.value')).toEqual({ value: null, quality: 'uncertain' });
+    run.setSignal('in', true, 'good');
+    expect(value(run, 'flow:in.value')).toBeNull();
+    run.step();
+    expect(run.read('flow:in.value')).toEqual({ value: true, quality: 'good' });
+    expect(value(run, 'flow:n.out')).toBe(false);
+    run.setSignal('in', true, 'uncertain');
+    const scan = run.step();
+    expect(scan.changes).toEqual([
+      { node: 'in', port: 'value', source: 'flow:in.value', value: true, quality: 'uncertain' },
+      { node: 'n', port: 'out', source: 'flow:n.out', value: false, quality: 'uncertain' }, // quality propagates
+    ]);
+  });
+
+  it('signal.out reports writes when its input changes, never null, never when unwired', () => {
+    const run = runOf(
+      graph(
+        [
+          node('in', 'signal.in', { connection: 'plc', source: 'a' }),
+          node('fwd', 'signal.out', { connection: 'plc', source: 'copy' }),
+          node('idle', 'signal.out', { connection: 'plc', source: 'nothing' }),
+        ],
+        [wire('w', 'in.value', 'fwd.value')],
+      ),
+    );
+    expect(run.step().writes).toEqual([]); // null is not written
+    run.setSignal('in', 5);
+    expect(run.step().writes).toEqual([{ node: 'fwd', connection: 'plc', source: 'copy', value: 5 }]);
+    expect(run.step().writes).toEqual([]); // unchanged
+    run.setSignal('in', null);
+    expect(run.step().writes).toEqual([]);
+    run.setSignal('in', 5);
+    expect(run.step().writes).toEqual([{ node: 'fwd', connection: 'plc', source: 'copy', value: 5 }]);
+  });
+
+  it('writes a computed value on the first scan when a good sample is already there', () => {
+    const run = runOf(signalGraph());
+    run.setSignal('in', false);
+    expect(run.step().writes).toEqual([{ node: 'out', connection: 'plc', source: 'b', value: true }]);
+  });
+
+  it('rejects setSignal on other nodes and invalid values', () => {
+    const run = runOf(signalGraph());
+    expect(() => run.setSignal('n', true)).toThrow(expect.objectContaining({ code: 'NOT_A_SIGNAL' }));
+    expect(() => run.setSignal('ghost', true)).toThrow(FlowRunError);
+    expect(() => run.setSignal('in', { a: 1 } as never)).toThrow(TypeError);
+    expect(() => run.setSignal('in', Number.NaN)).toThrow(TypeError);
+    expect(() => run.setSignal('in', 'x'.repeat(FLOW_LIMITS.maxValueLength + 1))).toThrow(TypeError);
+    expect(() => run.setSignal('in', 1, 'great' as never)).toThrow(TypeError);
+  });
+});
+
+describe('quality and the write gate (review P1)', () => {
+  const W = (value: FlowValue, source = 'b') => ({ node: 'out', connection: 'plc', source, value });
+  const signalNot = () =>
+    graph(
+      [node('in', 'signal.in', { connection: 'plc', source: 'a' }), node('n', 'test.not'), node('out', 'signal.out', { connection: 'plc', source: 'b' })],
+      [wire('w1', 'in.value', 'n.in'), wire('w2', 'n.out', 'out.value')],
+    );
+  const quality = (run: FlowRun, source: string) => run.read(source)?.quality;
+
+  it('first scan before any sample: nothing is written and the derived output is not good', () => {
+    const run = runOf(signalNot());
+    const scan = run.step();
+    expect(scan.writes).toEqual([]);
+    expect(scan.holds).toEqual([]); // nothing was ever written, so there is nothing to hold
+    // NOT sees a substitute `false` for the missing value: its output exists but is bad.
+    expect(run.read('flow:in.value')).toEqual({ value: null, quality: 'uncertain' });
+    expect(run.read('flow:n.out')).toEqual({ value: true, quality: 'bad' });
+    expect(run.step().writes).toEqual([]); // and keeps holding
+  });
+
+  it('signal.in → NOT → signal.out writes nothing until a good sample, then the correct value', () => {
+    const run = runOf(signalNot());
+    run.step();
+    run.setSignal('in', true, 'uncertain');
+    expect(run.step().writes).toEqual([]);
+    run.setSignal('in', true, 'bad');
+    expect(run.step().writes).toEqual([]);
+    run.setSignal('in', true, 'good');
+    expect(run.step().writes).toEqual([W(false)]);
+    expect(run.read('flow:n.out')).toEqual({ value: false, quality: 'good' });
+    expect(run.step().writes).toEqual([]); // unchanged
+    run.setSignal('in', false);
+    expect(run.step().writes).toEqual([W(true)]);
+  });
+
+  it('a null sample is never good, even if the provider calls it good', () => {
+    const run = runOf(signalNot());
+    run.setSignal('in', null, 'good'); // e.g. the sim delivers an unset memory signal as null/good
+    expect(run.step().writes).toEqual([]);
+    expect(quality(run, 'flow:in.value')).toBe('uncertain');
+    expect(quality(run, 'flow:n.out')).toBe('bad');
+  });
+
+  it('connection down (uncertain) stops writing and holds; recovery writes the current value again', () => {
+    const run = runOf(signalNot());
+    run.setSignal('in', true);
+    expect(run.step().writes).toEqual([W(false)]);
+    // The bridge holds the last value as uncertain while the connection is down.
+    run.setSignal('in', true, 'uncertain');
+    const down = run.step();
+    expect(down.writes).toEqual([]);
+    expect(down.holds).toEqual([{ node: 'out', connection: 'plc', source: 'b', quality: 'uncertain' }]);
+    expect(run.read('flow:n.out')).toEqual({ value: false, quality: 'uncertain' });
+    // A stale value that changes while uncertain is still not written, and the hold is not repeated.
+    run.setSignal('in', false, 'uncertain');
+    expect(run.step()).toMatchObject({ writes: [], holds: [] });
+    // Recovery with the same value as the last write: written again (the target may have changed meanwhile).
+    run.setSignal('in', true, 'good');
+    expect(run.step()).toMatchObject({ writes: [W(false)], holds: [] });
+    // Recovery with a different value: the new value.
+    run.setSignal('in', true, 'uncertain');
+    run.step();
+    run.setSignal('in', false, 'good');
+    expect(run.step().writes).toEqual([W(true)]);
+  });
+
+  it('a value turning null while good holds instead of writing', () => {
+    const run = runOf(
+      graph([node('in', 'signal.in', { connection: 'plc', source: 'a' }), node('out', 'signal.out', { connection: 'plc', source: 'b' })], [wire('w', 'in.value', 'out.value')]),
+    );
+    run.setSignal('in', 3);
+    expect(run.step().writes).toEqual([W(3)]);
+    run.setSignal('in', null);
+    expect(run.step()).toMatchObject({ writes: [], holds: [{ node: 'out', quality: 'uncertain' }] });
+    run.setSignal('in', 3);
+    expect(run.step().writes).toEqual([W(3)]);
+  });
+
+  it('an upstream block fault propagates bad downstream and stops the write; clearing it writes again', () => {
+    const run = runOf(
+      graph(
+        [
+          node('trig', 'signal.in', { connection: 'plc', source: 't' }),
+          node('m', 'test.misbehave', { mode: 'throw' }),
+          node('add', 'test.add'),
+          node('out', 'signal.out', { connection: 'plc', source: 'b' }),
+        ],
+        [wire('w1', 'trig.value', 'm.trigger'), wire('w2', 'm.out', 'add.a'), wire('w3', 'add.sum', 'out.value')],
+      ),
+    );
+    run.setSignal('trig', false);
+    expect(run.step().writes).toEqual([W(1)]); // m.out = 1, add.b unconnected (good default 0)
+    run.setSignal('trig', true); // m throws
+    const faulted = run.step();
+    expect(faulted.faults).toEqual([{ node: 'm', message: 'boom' }]);
+    expect(run.read('flow:m.out')).toEqual({ value: 1, quality: 'bad' });
+    expect(run.read('flow:add.sum')).toEqual({ value: 1, quality: 'bad' }); // held value, bad quality
+    expect(faulted.writes).toEqual([]);
+    expect(faulted.holds).toEqual([{ node: 'out', connection: 'plc', source: 'b', quality: 'bad' }]);
+    run.setSignal('trig', false);
+    expect(run.step().writes).toEqual([W(1)]);
+    expect(quality(run, 'flow:add.sum')).toBe('good');
+  });
+
+  it('a node that failed initialState publishes bad outputs', () => {
+    const broken: FlowBlockDefinition = {
+      id: 'test.broken',
+      label: 'Broken',
+      category: 'Test',
+      inputs: [],
+      outputs: [{ name: 'out', type: 'bool' }],
+      initialState: () => {
+        throw new Error('nope');
+      },
+      evaluate: () => ({ outputs: { out: true } }),
+    };
+    const run = runOf(graph([node('b', 'test.broken'), node('n', 'test.not')], [wire('w', 'b.out', 'n.in')]), [broken]);
+    run.step();
+    expect(quality(run, 'flow:b.out')).toBe('bad');
+    expect(quality(run, 'flow:n.out')).toBe('bad');
+  });
+
+  it('a fault reported from outside (reportFault) makes the node outputs bad until cleared', () => {
+    const run = runOf(signalNot());
+    run.setSignal('in', true);
+    run.step();
+    run.reportFault('n', 'external');
+    run.step();
+    expect(quality(run, 'flow:n.out')).toBe('bad');
+    run.reportFault('n', null);
+    run.step();
+    expect(quality(run, 'flow:n.out')).toBe('good');
+  });
+
+  it('multi-input blocks take the worst quality of their connected inputs; unconnected inputs stay good', () => {
+    const run = runOf(
+      graph(
+        [
+          node('a', 'signal.in', { connection: 'plc', source: 'a' }),
+          node('b', 'signal.in', { connection: 'plc', source: 'b' }),
+          node('and2', 'test.and'),
+          node('and1', 'test.and'), // in1 wired, in2 unconnected (default true)
+        ],
+        [wire('w1', 'a.value', 'and2.in1'), wire('w2', 'b.value', 'and2.in2'), wire('w3', 'a.value', 'and1.in1')],
+      ),
+    );
+    const q = () => [quality(run, 'flow:and2.out'), quality(run, 'flow:and1.out')];
+    run.setSignal('a', true);
+    run.setSignal('b', true);
+    run.step();
+    expect(q()).toEqual(['good', 'good']);
+    run.setSignal('b', true, 'uncertain');
+    run.step();
+    expect(q()).toEqual(['uncertain', 'good']);
+    run.setSignal('a', true, 'bad');
+    run.step();
+    expect(q()).toEqual(['bad', 'bad']); // bad beats uncertain
+    run.setSignal('a', true, 'uncertain');
+    run.setSignal('b', true, 'good');
+    run.step();
+    expect(q()).toEqual(['uncertain', 'uncertain']);
+  });
+
+  it('variadic instances count too: one bad instance makes the output bad', () => {
+    const run = runOf(
+      graph(
+        [node('k', 'flow.const', { type: 'bool', value: true }), node('s', 'signal.in', { connection: 'plc', source: 's' }), node('and', 'test.and')],
+        [wire('w1', 'k.value', 'and.in1'), wire('w2', 's.value', 'and.in3')], // in2 unwired (good default)
+      ),
+    );
+    run.setSignal('s', true);
+    run.step();
+    expect(quality(run, 'flow:and.out')).toBe('good');
+    run.setSignal('s', true, 'bad');
+    run.step();
+    expect(quality(run, 'flow:and.out')).toBe('bad');
+  });
+
+  it('constants and blocks without inputs are good', () => {
+    const run = runOf(graph([node('k', 'flow.const', { type: 'number' }), node('c', 'test.counter')]));
+    run.step();
+    expect(run.read('flow:k.value')).toEqual({ value: 0, quality: 'good' });
+    expect(quality(run, 'flow:c.count')).toBe('good');
+  });
+
+  it('a substituted conversion is bad; an exact one keeps the source quality', () => {
+    const run = runOf(
+      graph([node('s', 'signal.in', { connection: 'plc', source: 's' }), node('p', 'test.probe')], [wire('w1', 's.value', 'p.n')]),
+    );
+    run.setSignal('s', '42');
+    run.step();
+    expect(run.read('flow:p.n')).toEqual({ value: 42, quality: 'good' });
+    run.setSignal('s', 'not a number');
+    run.step();
+    expect(run.read('flow:p.n')).toEqual({ value: 0, quality: 'bad' });
+    run.setSignal('s', '');
+    run.step();
+    expect(quality(run, 'flow:p.n')).toBe('bad');
+  });
+
+  it('flow.delay carries its input quality through the delay, one scan later per delay', () => {
+    const run = runOf(
+      graph(
+        [node('in', 'signal.in', { connection: 'plc', source: 'a' }), node('d1', 'flow.delay', { initial: 0 }), node('d2', 'flow.delay', { initial: 0 })],
+        [wire('w1', 'in.value', 'd1.in'), wire('w2', 'd1.out', 'd2.in')],
+      ),
+    );
+    const read = () => [run.read('flow:d1.out'), run.read('flow:d2.out')];
+    // A configured, non-null `initial` is trusted like a constant.
+    expect(read()).toEqual([
+      { value: 0, quality: 'good' },
+      { value: 0, quality: 'good' },
+    ]);
+    run.setSignal('in', 5, 'uncertain');
+    run.step();
+    expect(read()).toEqual([
+      { value: 5, quality: 'uncertain' },
+      { value: 0, quality: 'good' }, // d2 still shows d1's previous value and quality
+    ]);
+    run.setSignal('in', 6, 'good');
+    run.step();
+    expect(read()).toEqual([
+      { value: 6, quality: 'good' },
+      { value: 5, quality: 'uncertain' },
+    ]);
+    run.step();
+    expect(read()).toEqual([
+      { value: 6, quality: 'good' },
+      { value: 6, quality: 'good' },
+    ]);
+  });
+
+  it('a delayed bad value is not written downstream', () => {
+    const run = runOf(
+      graph(
+        [node('in', 'signal.in', { connection: 'plc', source: 'a' }), node('d', 'flow.delay', { initial: 0 }), node('out', 'signal.out', { connection: 'plc', source: 'b' })],
+        [wire('w1', 'in.value', 'd.in'), wire('w2', 'd.out', 'out.value')],
+      ),
+    );
+    run.setSignal('in', 7, 'bad');
+    expect(run.step().writes).toEqual([]);
+    run.setSignal('in', 7, 'good');
+    expect(run.step().writes).toEqual([W(7)]);
+  });
+
+  it('a feedback loop through a delay is good once the delay holds a value; a null initial costs one bad scan inside the loop, two outside', () => {
+    const loop = (initial: FlowValue) =>
+      runOf(
+        graph(
+          [node('d', 'flow.delay', initial === null ? {} : { initial }), node('n', 'test.not')],
+          [wire('w1', 'd.out', 'n.in'), wire('w2', 'n.out', 'd.in')],
+        ),
+      );
+    const good = loop(false);
+    good.step();
+    expect([quality(good, 'flow:n.out'), quality(good, 'flow:d.out')]).toEqual(['good', 'good']);
+    const unknown = loop(null);
+    expect(unknown.read('flow:d.out')).toEqual({ value: null, quality: 'uncertain' });
+    unknown.step();
+    // Scan 1: NOT reads a substitute for null (bad), so the loop's health is bad, and the delay stores
+    // `true` with the health of the scan that produced it: still bad for anyone reading d.out.
+    expect(unknown.read('flow:n.out')).toEqual({ value: true, quality: 'bad' });
+    expect(unknown.read('flow:d.out')).toEqual({ value: true, quality: 'bad' });
+    unknown.step();
+    // Scan 2: every reading on the loop is real, so the loop is healthy and what it stores is good.
+    expect([quality(unknown, 'flow:n.out'), quality(unknown, 'flow:d.out')]).toEqual(['good', 'good']);
+  });
+});
+
+describe('feedback loops recover: state carries value, not quality (re-review P1)', () => {
+  const M = (value: FlowValue) => ({ node: 'motor', connection: 'io', source: 'Motor', value });
+  const quality = (run: FlowRun, source: string) => run.read(source)?.quality;
+  /** q = (set OR q_prev) AND NOT reset, with OR built as NOT(AND(NOT a, NOT b)); q drives signal.out(Motor). */
+  const latch = () =>
+    runOf(
+      graph(
+        [
+          node('set', 'signal.in', { connection: 'io', source: 'set' }),
+          node('reset', 'signal.in', { connection: 'io', source: 'reset' }),
+          node('nset', 'test.not'),
+          node('nprev', 'test.not'),
+          node('nor', 'test.and'),
+          node('or', 'test.not'),
+          node('nreset', 'test.not'),
+          node('q', 'test.and'),
+          node('prev', 'flow.delay', { initial: false }),
+          node('motor', 'signal.out', { connection: 'io', source: 'Motor' }),
+        ],
+        [
+          wire('w1', 'set.value', 'nset.in'),
+          wire('w2', 'prev.out', 'nprev.in'),
+          wire('w3', 'nset.out', 'nor.in1'),
+          wire('w4', 'nprev.out', 'nor.in2'),
+          wire('w5', 'nor.out', 'or.in'),
+          wire('w6', 'reset.value', 'nreset.in'),
+          wire('w7', 'or.out', 'q.in1'),
+          wire('w8', 'nreset.out', 'q.in2'),
+          wire('w9', 'q.out', 'prev.in'),
+          wire('w10', 'q.out', 'motor.value'),
+        ],
+      ),
+    );
+
+  it('SR latch: a startup scan before any sample writes nothing, then the latch writes once samples are good', () => {
+    const run = latch();
+    // deploy() runs the first scan right away, usually before the hub has a sample.
+    const first = run.step();
+    expect(first.writes).toEqual([]);
+    expect(quality(run, 'flow:q.out')).not.toBe('good');
+    run.setSignal('set', false);
+    run.setSignal('reset', false);
+    expect(run.step().writes).toEqual([M(false)]);
+    expect(run.read('flow:q.out')).toEqual({ value: false, quality: 'good' });
+    run.setSignal('set', true);
+    expect(run.step().writes).toEqual([M(true)]);
+    run.setSignal('set', false);
+    expect(run.step().writes).toEqual([]); // latched: no change, nothing to write
+    expect(run.read('flow:q.out')).toEqual({ value: true, quality: 'good' });
+    run.setSignal('reset', true);
+    expect(run.step().writes).toEqual([M(false)]);
+  });
+
+  for (const blip of ['uncertain', 'bad'] as const) {
+    it(`SR latch / seal-in: a one-scan ${blip} sample inside the loop holds, keeps the latched state, then recovers and re-sends`, () => {
+      const run = latch();
+      run.setSignal('set', true);
+      run.setSignal('reset', false);
+      expect(run.step().writes).toEqual([M(true)]);
+      run.setSignal('set', false);
+      run.step(); // sealed in
+      // One scan of a connection blip: the hub holds the last value with a non-good quality.
+      run.setSignal('reset', false, blip);
+      const held = run.step();
+      expect(held.writes).toEqual([]);
+      expect(held.holds).toEqual([{ node: 'motor', connection: 'io', source: 'Motor', quality: blip }]);
+      expect(run.read('flow:q.out')).toEqual({ value: true, quality: blip });
+      // The connection is back: the loop is good again and the current value is re-sent.
+      run.setSignal('reset', false, 'good');
+      expect(run.step().writes).toEqual([M(true)]);
+      expect(run.read('flow:q.out')).toEqual({ value: true, quality: 'good' });
+      expect(quality(run, 'flow:prev.out')).toBe('good');
+      run.setSignal('reset', true);
+      expect(run.step().writes).toEqual([M(false)]);
+    });
+  }
+
+  it('a transient block fault inside a loop (integrator) holds the write, then recovers', () => {
+    // sum = m.out + prev; prev = delay(sum); m throws while `trig` is true.
+    const run = runOf(
+      graph(
+        [
+          node('trig', 'signal.in', { connection: 'io', source: 't' }),
+          node('m', 'test.misbehave', { mode: 'throw' }),
+          node('add', 'test.add'),
+          node('prev', 'flow.delay', { initial: 0 }),
+          node('motor', 'signal.out', { connection: 'io', source: 'Motor' }),
+        ],
+        [wire('w1', 'trig.value', 'm.trigger'), wire('w2', 'm.out', 'add.a'), wire('w3', 'prev.out', 'add.b'), wire('w4', 'add.sum', 'prev.in'), wire('w5', 'add.sum', 'motor.value')],
+      ),
+    );
+    run.setSignal('trig', false);
+    expect(run.step().writes).toEqual([M(1)]);
+    expect(run.step().writes).toEqual([M(2)]);
+    run.setSignal('trig', true);
+    const faulted = run.step();
+    expect(faulted.faults).toEqual([{ node: 'm', message: 'boom' }]);
+    expect(faulted.writes).toEqual([]);
+    expect(run.read('flow:add.sum')).toEqual({ value: 3, quality: 'bad' }); // integrates the held value, but bad
+    run.setSignal('trig', false);
+    expect(run.step().writes).toEqual([M(4)]);
+    expect(run.read('flow:add.sum')).toEqual({ value: 4, quality: 'good' });
+    expect(run.step().writes).toEqual([M(5)]);
+  });
+
+  it('a fault reported from outside on a node inside a loop holds for that scan only', () => {
+    const run = latch();
+    run.setSignal('set', true);
+    run.setSignal('reset', false);
+    run.step();
+    run.setSignal('set', false);
+    run.reportFault('nor', 'driver lost');
+    expect(run.step()).toMatchObject({ writes: [], holds: [{ node: 'motor', quality: 'bad' }] });
+    run.reportFault('nor', null);
+    expect(run.step().writes).toEqual([M(true)]);
+  });
+
+  it('a loop through a chain of two delays recovers; a delay downstream of the loop still carries quality one scan', () => {
+    // Toggle: n = NOT(d2); d1 = delay(n); d2 = delay(d1). g = n AND en; f = delay(g) (outside any loop); p = NOT(f).
+    const run = runOf(
+      graph(
+        [
+          node('en', 'signal.in', { connection: 'io', source: 'en' }),
+          node('n', 'test.not'),
+          node('d1', 'flow.delay', { initial: false }),
+          node('d2', 'flow.delay', { initial: false }),
+          node('g', 'test.and'),
+          node('f', 'flow.delay', { initial: false }),
+          node('p', 'test.not'),
+        ],
+        [
+          wire('w1', 'd2.out', 'n.in'),
+          wire('w2', 'n.out', 'd1.in'),
+          wire('w3', 'd1.out', 'd2.in'),
+          wire('w4', 'n.out', 'g.in1'),
+          wire('w5', 'en.value', 'g.in2'),
+          wire('w6', 'g.out', 'f.in'),
+          wire('w7', 'f.out', 'p.in'),
+        ],
+      ),
+    );
+    const q = (...ids: string[]) => ids.map((id) => quality(run, `flow:${id}`));
+    run.setSignal('en', true);
+    run.step();
+    run.setSignal('en', true, 'bad');
+    run.step();
+    expect(q('n.out', 'g.out', 'f.out', 'p.out')).toEqual(['good', 'bad', 'bad', 'good']); // p read f before f took the bad reading
+    run.setSignal('en', true, 'good');
+    run.step();
+    // g is good again at once; p reads f, which still holds last scan's bad reading (a plain time shift).
+    expect(q('d1.out', 'd2.out', 'g.out', 'p.out')).toEqual(['good', 'good', 'good', 'bad']);
+    run.step();
+    expect(q('f.out', 'p.out')).toEqual(['good', 'good']);
+  });
+
+  it('a bad sample that circulates through two loop delays leaves the loop as soon as the input is good again', () => {
+    // acc = in + d2; d1 = delay(acc); d2 = delay(d1).
+    const run = runOf(
+      graph(
+        [
+          node('in', 'signal.in', { connection: 'io', source: 'in' }),
+          node('acc', 'test.add'),
+          node('d1', 'flow.delay', { initial: 0 }),
+          node('d2', 'flow.delay', { initial: 0 }),
+          node('motor', 'signal.out', { connection: 'io', source: 'Motor' }),
+        ],
+        [wire('w1', 'in.value', 'acc.a'), wire('w2', 'd2.out', 'acc.b'), wire('w3', 'acc.sum', 'd1.in'), wire('w4', 'd1.out', 'd2.in'), wire('w5', 'acc.sum', 'motor.value')],
+      ),
+    );
+    run.setSignal('in', 1, 'bad');
+    expect(run.step().writes).toEqual([]);
+    run.setSignal('in', 1, 'good');
+    const sums: unknown[] = [];
+    for (let i = 0; i < 4; i++) {
+      sums.push(run.step().writes.map((w) => w.value));
+      expect(quality(run, 'flow:acc.sum')).toBe('good');
+    }
+    expect(sums).toEqual([[1], [2], [], [3]]); // 1+0 (re-sent on recovery), 1+1, 1+1 (unchanged: no write), 1+2
+  });
+
+  it('block state follows the same rule: a counter recovers as soon as its input is good again', () => {
+    const run = runOf(
+      graph(
+        [node('en', 'signal.in', { connection: 'io', source: 'en' }), node('c', 'test.counter'), node('motor', 'signal.out', { connection: 'io', source: 'Motor' })],
+        [wire('w1', 'en.value', 'c.enable'), wire('w2', 'c.count', 'motor.value')],
+      ),
+    );
+    run.setSignal('en', true);
+    expect(run.step().writes).toEqual([M(1)]);
+    run.setSignal('en', true, 'uncertain');
+    expect(run.step().writes).toEqual([]);
+    expect(run.read('flow:c.count')).toEqual({ value: 2, quality: 'uncertain' });
+    run.setSignal('en', true, 'good');
+    expect(run.step().writes).toEqual([M(3)]);
+  });
+});
+
+describe('loop health: nothing read from a loop is good until its outside inputs are (third review P1)', () => {
+  const T = (value: FlowValue) => ({ node: 'total', connection: 'io', source: 'Total', value });
+  const quality = (run: FlowRun, source: string) => run.read(source)?.quality;
+  /**
+   * Integrator / totalizer: sum = rate + prev; prev = delay(sum). `total` (signal.out) taps `tap`:
+   * `prev.out` (the loop delay's output) or `later.out`, a delay outside the loop fed by `prev.out`.
+   */
+  const integrator = (initial: FlowValue, tap: 'prev.out' | 'later.out' | 'add.sum' = 'prev.out') =>
+    runOf(
+      graph(
+        [
+          node('rate', 'signal.in', { connection: 'io', source: 'rate' }),
+          node('add', 'test.add'),
+          node('prev', 'flow.delay', initial === null ? {} : { initial }),
+          node('later', 'flow.delay', { initial: 0 }),
+          node('total', 'signal.out', { connection: 'io', source: 'Total' }),
+        ],
+        [
+          wire('w1', 'rate.value', 'add.a'),
+          wire('w2', 'prev.out', 'add.b'),
+          wire('w3', 'add.sum', 'prev.in'),
+          wire('w4', 'prev.out', 'later.in'),
+          wire('w5', tap, 'total.value'),
+        ],
+      ),
+    );
+
+  it('startup with initial: null and no sample writes nothing, however long the sample takes', () => {
+    const run = integrator(null);
+    for (let i = 0; i < 4; i++) {
+      expect(run.step().writes).toEqual([]);
+      expect(quality(run, 'flow:prev.out')).not.toBe('good');
+    }
+    run.setSignal('rate', 5);
+    // signal.out reads after the delays commit: prev.out then holds the sum stored by this scan, whose
+    // readings were all real. (Its state, 0, came from substitutes: the loop exception.)
+    expect(run.step().writes).toEqual([T(5)]);
+    expect(run.read('flow:prev.out')).toEqual({ value: 5, quality: 'good' });
+    expect(run.step().writes).toEqual([T(10)]);
+  });
+
+  it('a non-null initial is configuration: good until the delay stores, then the stored scan\'s health', () => {
+    const run = integrator(0);
+    expect(run.read('flow:prev.out')).toEqual({ value: 0, quality: 'good' });
+    const first = run.step(); // no sample yet
+    expect(first.writes).toEqual([]);
+    expect(run.read('flow:prev.out')).toEqual({ value: 0, quality: 'bad' }); // 0 = substitute + initial
+    // `later` read prev.out before it committed: the configured initial, trusted like a constant.
+    expect(run.read('flow:later.out')).toEqual({ value: 0, quality: 'good' });
+    run.step();
+    expect(run.read('flow:later.out')).toEqual({ value: 0, quality: 'bad' });
+  });
+
+  for (const blip of ['uncertain', 'bad'] as const) {
+    it(`an input that stays ${blip} writes nothing while it is ${blip}, from the loop delay or from inside the loop`, () => {
+      for (const tap of ['prev.out', 'add.sum'] as const) {
+        const run = integrator(0, tap);
+        run.setSignal('rate', 1);
+        run.step();
+        run.step();
+        run.setSignal('rate', 1000, blip);
+        for (let i = 0; i < 5; i++) {
+          expect(run.step().writes).toEqual([]);
+          expect(quality(run, `flow:${tap}`)).not.toBe('good');
+          if (i > 0) expect(quality(run, 'flow:prev.out')).toBe(blip === 'bad' ? 'bad' : 'uncertain');
+        }
+        // The loop's state kept integrating (PLC latch behaviour) …
+        expect(run.read('flow:add.sum')?.value).toBe(5002);
+        // … and is published again once the input has been good for a scan.
+        run.setSignal('rate', 1);
+        expect(run.step().writes).toEqual([T(5003)]);
+      }
+    });
+  }
+
+  it('loop delay → delay outside the loop → signal.out does not leak a bad sample', () => {
+    const run = integrator(0, 'later.out');
+    run.setSignal('rate', 1);
+    run.step();
+    run.step();
+    run.step();
+    expect(run.read('flow:later.out')).toEqual({ value: 2, quality: 'good' });
+    run.setSignal('rate', 1000, 'bad');
+    const scans = [run.step(), run.step(), run.step(), run.step()];
+    // later.out shows prev.out one scan late: the sum stored before the bad scan is still good for one scan.
+    expect(scans.map((s) => s.writes.map((w) => w.value))).toEqual([[3], [], [], []]);
+    expect(run.read('flow:later.out')?.quality).toBe('bad');
+    run.setSignal('rate', 1);
+    // Loop healthy again; later.out took prev.out before it committed, i.e. the bad scan's sum.
+    expect(run.step().writes).toEqual([]);
+    expect(run.read('flow:later.out')?.quality).toBe('bad');
+    expect(run.step().writes).toEqual([T(4004)]); // 3 + 1000 × 4 bad scans + 1 good: the kept state
+    expect(run.read('flow:later.out')?.quality).toBe('good');
+  });
+
+  it('recovery: in the first scan whose outside inputs are good, the loop writes again (from a loop node or a loop delay)', () => {
+    const inside = integrator(0, 'add.sum');
+    const delay = integrator(0, 'prev.out');
+    for (const run of [inside, delay]) {
+      run.setSignal('rate', 1, 'uncertain');
+      run.step();
+      run.step();
+      run.setSignal('rate', 1);
+    }
+    expect(inside.step().writes).toEqual([T(3)]);
+    expect(delay.step().writes).toEqual([T(3)]);
+  });
+
+  it('a bad reading entering a loop elsewhere is not laundered by the loop delays (two-delay ring)', () => {
+    // A = X + d2; d1 = delay(A); B = Y + d1; d2 = delay(B). B only sees X through d1, one scan late.
+    const run = runOf(
+      graph(
+        [
+          node('x', 'signal.in', { connection: 'io', source: 'x' }),
+          node('y', 'signal.in', { connection: 'io', source: 'y' }),
+          node('a', 'test.add'),
+          node('b', 'test.add'),
+          node('d1', 'flow.delay', { initial: 0 }),
+          node('d2', 'flow.delay', { initial: 0 }),
+          node('total', 'signal.out', { connection: 'io', source: 'Total' }),
+        ],
+        [
+          wire('w1', 'x.value', 'a.a'),
+          wire('w2', 'd2.out', 'a.b'),
+          wire('w3', 'a.sum', 'd1.in'),
+          wire('w4', 'y.value', 'b.a'),
+          wire('w5', 'd1.out', 'b.b'),
+          wire('w6', 'b.sum', 'd2.in'),
+          wire('w7', 'b.sum', 'total.value'),
+        ],
+      ),
+    );
+    run.setSignal('x', 1);
+    run.setSignal('y', 1);
+    expect(run.step().writes).toHaveLength(1);
+    run.setSignal('x', 100, 'bad');
+    for (let i = 0; i < 6; i++) {
+      expect(run.step().writes).toEqual([]);
+      expect(['b.sum', 'd1.out', 'd2.out'].map((s) => quality(run, `flow:${s}`))).not.toContain('good');
+    }
+    run.setSignal('x', 1);
+    expect(run.step().writes).toHaveLength(1);
+  });
+
+  it('a fault reported on a loop delay makes the whole loop bad until cleared', () => {
+    const run = integrator(0, 'add.sum');
+    run.setSignal('rate', 1);
+    run.step();
+    run.reportFault('prev', 'memory lost');
+    expect(run.step().writes).toEqual([]);
+    expect(quality(run, 'flow:add.sum')).toBe('bad');
+    expect(quality(run, 'flow:prev.out')).toBe('bad');
+    run.reportFault('prev', null);
+    expect(run.step().writes).toHaveLength(1);
+  });
+
+  it('a loop downstream of another loop is only as good as the upstream loop', () => {
+    // Loop 1: s1 = in + p1, p1 = delay(s1). Loop 2: s2 = p1 + p2, p2 = delay(s2). Total = s2.
+    const run = runOf(
+      graph(
+        [
+          node('total', 'signal.out', { connection: 'io', source: 'Total' }),
+          node('s2', 'test.add'),
+          node('p2', 'flow.delay', { initial: 0 }),
+          node('in', 'signal.in', { connection: 'io', source: 'in' }),
+          node('s1', 'test.add'),
+          node('p1', 'flow.delay', { initial: 0 }),
+        ],
+        [
+          wire('w1', 'in.value', 's1.a'),
+          wire('w2', 'p1.out', 's1.b'),
+          wire('w3', 's1.sum', 'p1.in'),
+          wire('w4', 'p1.out', 's2.a'),
+          wire('w5', 'p2.out', 's2.b'),
+          wire('w6', 's2.sum', 'p2.in'),
+          wire('w7', 's2.sum', 'total.value'),
+        ],
+      ),
+    );
+    run.setSignal('in', 1);
+    run.step();
+    run.step();
+    run.setSignal('in', 1, 'bad');
+    run.step(); // loop 1 bad; p1.out still holds the good scan's value
+    expect(quality(run, 'flow:s2.sum')).toBe('good');
+    expect(run.step().writes).toEqual([]); // p1.out now carries the bad scan's health into loop 2
+    expect(quality(run, 'flow:s2.sum')).toBe('bad');
+    run.setSignal('in', 1);
+    expect(run.step().writes).toEqual([]); // loop 1 healthy, p1.out still from the bad scan
+    expect(run.step().writes).toHaveLength(1);
+  });
+});
+
+describe('scheduling', () => {
+  it('start() scans every tick; stop() pauses; start() resumes', () => {
+    const manual = createManualSchedule();
+    const run = runOf(graph([node('c', 'test.counter')]), [], { schedule: manual.schedule, scanMs: 50 });
+    expect(run.state).toBe('idle');
+    run.start();
+    run.start(); // idempotent
+    expect(manual.active).toBe(1);
+    expect(run.state).toBe('running');
+    manual.tick();
+    manual.tick();
+    expect(run.scans).toBe(2);
+    run.stop();
+    expect(manual.active).toBe(0);
+    manual.tick();
+    expect(run.scans).toBe(2);
+    run.start();
+    manual.tick();
+    expect(run.scans).toBe(3);
+  });
+
+  it('passes scanMs to the schedule and validates it', () => {
+    const schedule = vi.fn(() => () => {});
+    runOf(graph([]), [], { schedule, scanMs: 250 }).start();
+    expect(schedule).toHaveBeenCalledWith(expect.any(Function), 250);
+    for (const scanMs of [0, 9, 1.5, Number.NaN, 3_600_001, '100']) {
+      expect(() => runOf(graph([]), [], { scanMs: scanMs as number })).toThrow(RangeError);
+    }
+  });
+
+  it('ignores ticks from a cancelled schedule (a timer that fires late)', () => {
+    let tick: () => void = () => {};
+    const run = runOf(graph([node('c', 'test.counter')]), [], {
+      schedule: (t) => {
+        tick = t;
+        return () => {}; // cancel that does not actually stop the timer
+      },
+    });
+    run.start();
+    const stale = tick;
+    run.stop();
+    stale();
+    expect(run.scans).toBe(0);
+    run.start();
+    stale();
+    expect(run.scans).toBe(0);
+    tick();
+    expect(run.scans).toBe(1);
+  });
+
+  it('rolls back start() when the schedule throws or returns no cancel function', () => {
+    const throwing = runOf(graph([]), [], {
+      schedule: () => {
+        throw new Error('no timers');
+      },
+    });
+    expect(() => throwing.start()).toThrow('no timers');
+    expect(throwing.state).toBe('idle');
+    const bad = runOf(graph([]), [], { schedule: () => undefined as never });
+    expect(() => bad.start()).toThrow(/cancel function/);
+    expect(bad.state).toBe('idle');
+  });
+
+  it('a tick registered by a schedule that then throws or returns no cancel function stays inert (review P3)', () => {
+    for (const ending of ['throw', 'no-cancel'] as const) {
+      let tick: () => void = () => {};
+      const run = runOf(graph([node('c', 'test.counter')]), [], {
+        schedule: (t) => {
+          tick = t;
+          if (ending === 'throw') throw new Error('half-registered');
+          return 42 as never;
+        },
+      });
+      expect(() => run.start()).toThrow();
+      tick();
+      tick();
+      expect(run.scans, ending).toBe(0);
+      expect(run.state).toBe('idle');
+    }
+  });
+
+  it('runs scans with the real setInterval by default', async () => {
+    const run = createFlowRun(compileFlow(graph([node('c', 'test.counter')]), registry), { scanMs: 10 });
+    run.start();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    run.dispose();
+    expect(run.scans).toBeGreaterThanOrEqual(2);
+  });
+
+  it('reports errors from scheduled scans instead of throwing into the timer', () => {
+    const manual = createManualSchedule();
+    const onError = vi.fn();
+    const run = runOf(graph([node('c', 'test.counter')]), [], { schedule: manual.schedule, onError });
+    run.subscribe(() => {
+      throw new Error('listener');
+    });
+    run.start();
+    expect(() => manual.tick()).not.toThrow();
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'listener' }));
+  });
+});
+
+describe('listeners and re-entrancy', () => {
+  it('delivers each scan to every listener; a throwing listener does not stop the others', () => {
+    const onError = vi.fn();
+    const run = runOf(graph([node('c', 'test.counter')]), [], { onError });
+    const seen: number[] = [];
+    run.subscribe(() => {
+      throw new Error('first');
+    });
+    run.subscribe((scan) => seen.push(scan.scan));
+    run.step();
+    expect(seen).toEqual([1]);
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a nested step() from a listener (BUSY) so scans are never delivered out of order', () => {
+    const run = runOf(graph([node('c', 'test.counter')]));
+    const errors: unknown[] = [];
+    const order: number[] = [];
+    run.subscribe((scan) => {
+      order.push(scan.scan);
+      try {
+        run.step();
+      } catch (error) {
+        errors.push(error);
+      }
+    });
+    run.subscribe((scan) => order.push(scan.scan));
+    run.step();
+    expect(order).toEqual([1, 1]);
+    expect(errors).toEqual([expect.objectContaining({ code: 'BUSY' })]);
+    expect(run.scans).toBe(1);
+  });
+
+  it('a listener disposing the run stops delivery to the rest', () => {
+    const manual = createManualSchedule();
+    const run = runOf(graph([node('c', 'test.counter')]), [], { schedule: manual.schedule });
+    const later = vi.fn();
+    run.subscribe(() => run.dispose());
+    run.subscribe(later);
+    run.start();
+    manual.tick();
+    expect(later).not.toHaveBeenCalled();
+    expect(run.state).toBe('disposed');
+    expect(manual.active).toBe(0);
+    expect(() => run.step()).toThrow(expect.objectContaining({ code: 'DISPOSED' }));
+    expect(() => run.start()).toThrow(expect.objectContaining({ code: 'DISPOSED' }));
+  });
+
+  it('a listener unsubscribing another one mid-scan skips it', () => {
+    const run = runOf(graph([node('c', 'test.counter')]));
+    const second = vi.fn();
+    let off: () => void = () => {};
+    run.subscribe(() => off());
+    off = run.subscribe(second);
+    run.step();
+    expect(second).not.toHaveBeenCalled();
+  });
+
+  it('a stop() from inside the schedule call is honoured', () => {
+    let run!: FlowRun;
+    const cancel = vi.fn();
+    run = runOf(graph([]), [], {
+      schedule: () => {
+        run.stop();
+        return cancel;
+      },
+    });
+    run.start();
+    expect(run.state).toBe('idle');
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it('after dispose, setSignal / reportFault are ignored and subscribe is inert', () => {
+    const run = runOf(graph([node('in', 'signal.in', { connection: 'c', source: 's' })]));
+    run.dispose();
+    run.dispose();
+    expect(() => run.setSignal('in', 1)).not.toThrow();
+    expect(() => run.reportFault('in', 'x')).not.toThrow();
+    const off = run.subscribe(() => {});
+    expect(off).toBeTypeOf('function');
+  });
+
+  it('scans are frozen and hold copies', () => {
+    const run = runOf(graph([node('c', 'test.counter')]));
+    const scan: FlowScan = run.step();
+    expect(Object.isFrozen(scan) && Object.isFrozen(scan.changes) && Object.isFrozen(scan.changes[0])).toBe(true);
+    expect(Object.isFrozen(run.read('flow:c.count'))).toBe(true);
+    expect(run.read('flow:nope.x')).toBeUndefined();
+  });
+
+  it('reads options once: editing the options object later changes nothing', () => {
+    const manual = createManualSchedule();
+    const options = { scanMs: 100, schedule: manual.schedule, now: clock().now };
+    const run = createFlowRun(compileFlow(graph([]), registry), options);
+    options.scanMs = 5;
+    options.schedule = () => {
+      throw new Error('swapped');
+    };
+    expect(run.scanMs).toBe(100);
+    expect(() => run.start()).not.toThrow();
+  });
+});
+
+describe('performance bounds', () => {
+  it('scans a 10 000-node graph', () => {
+    const n = FLOW_LIMITS.maxNodes;
+    const nodes = Array.from({ length: n }, (_, i) => node(`n${i}`, 'test.not'));
+    const wires = Array.from({ length: n - 1 }, (_, i) => wire(`w${i}`, `n${i}.out`, `n${i + 1}.in`));
+    const run = runOf(graph(nodes, wires));
+    const started = performance.now();
+    run.step();
+    run.step();
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(value(run, `flow:n${n - 1}.out`)).toBe(false); // 10 000 NOTs of false
+  });
+});
