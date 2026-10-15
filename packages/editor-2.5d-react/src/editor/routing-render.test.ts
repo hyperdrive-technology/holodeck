@@ -6,10 +6,10 @@
 import { statSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
-import { chromium, type Page } from 'playwright';
+import type { Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
-import { waitForRendered } from '../test-support/render-harness';
+import { animationFrames, launchRenderBrowser, settle, waitForRendered } from '../test-support/render-harness';
 import { artifactsDir } from '../visual/io';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { footprintCells } from '../routing/occupancy';
@@ -18,7 +18,6 @@ import { runCells } from '../routing/occupancy';
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
 // Review screenshot only (nothing compares it): gitignored artifacts, not the tracked tree.
 const shotPath = path.join(artifactsDir('render'), 'auto-route.png');
-
 
 let server: ViteDevServer;
 
@@ -44,8 +43,8 @@ async function calibrate(page: Page) {
   const probe = async (px: number, py: number) => {
     await page.mouse.move(px, py);
     await page.waitForFunction(() => document.querySelector('[data-testid="process-editor"]')?.getAttribute('data-cursor'));
-    // Let the reducer settle on this pointer position.
-    await page.waitForTimeout(50);
+    // Let the reducer commit this pointer position.
+    await animationFrames(page, 2);
     const [gx, gy] = (await root.getAttribute('data-cursor'))!.split(',').map(Number);
     return { px, py, gx: gx!, gy: gy! };
   };
@@ -79,18 +78,18 @@ describe.skipIf(!CHROMIUM)('auto pipe routing in the editor', () => {
     if (!address || typeof address === 'string') {
       throw new Error('vite did not bind a port');
     }
-    const browser = await chromium.launch({ executablePath: CHROMIUM, headless: true });
+    const browser = await launchRenderBrowser();
     try {
       const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
       await page.goto(`http://127.0.0.1:${address.port}/editor.html?scene=routing`);
       const root = page.getByTestId('process-editor');
       await root.waitFor();
       await page.waitForSelector('canvas');
-      await page.waitForTimeout(1500);
+      await waitForRendered(page);
 
       // Top-down (X) so no tank hides a floor cell from the pointer.
       await page.keyboard.press('x');
-      await page.waitForTimeout(1500);
+      await settle(page);
       const toScreen = await calibrate(page);
 
       await page.keyboard.press('p');
@@ -100,7 +99,7 @@ describe.skipIf(!CHROMIUM)('auto pipe routing in the editor', () => {
         for (let i = 0; i < 6; i += 1) {
           const { x, y } = toScreen(target.gx, target.gy);
           await page.mouse.move(x, y);
-          await page.waitForTimeout(60);
+          await animationFrames(page, 2);
           const [cx, cy] = (await root.getAttribute('data-cursor'))!.split(',').map(Number);
           if (cx === gx && cy === gy) break;
           target = { gx: target.gx + (gx - cx!) * 0.5, gy: target.gy + (gy - cy!) * 0.5 };
@@ -115,7 +114,7 @@ describe.skipIf(!CHROMIUM)('auto pipe routing in the editor', () => {
       await click(0, 0);
       expect(await root.getAttribute('data-pipe-start')).toBe('1,0');
       await click(10, 0);
-      await page.waitForTimeout(200);
+      await settle(page);
 
       const scene = (await page.evaluate(() => (window as unknown as { __scene: IsoSceneFile }).__scene));
       const pipes = scene.objects.filter((o: IsoPlacement) => o.object === 'pipe');
@@ -131,7 +130,7 @@ describe.skipIf(!CHROMIUM)('auto pipe routing in the editor', () => {
       await page.keyboard.press('Escape');
       await page.keyboard.press('x');
       // The 2D -> 2.5D pose animation holds the rendered signal until it lands.
-      await waitForRendered(root);
+      await settle(page);
       await page.screenshot({ path: shotPath, type: 'png' });
     } finally {
       await browser.close();

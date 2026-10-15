@@ -6,6 +6,13 @@
       "epsilon": 0.0005,
       "rmse": 25.34,
       "recordedAt": "2026-10-14T05:00:43.737Z"
+    },
+    "linux": {
+      "fidelity": 0.28371,
+      "epsilon": 0.0005,
+      "rmse": 24.867,
+      "recordedAt": "2026-10-15T08:08:16Z",
+      "source": "CI run 38702345405 (PR #52 head 8507838), job editor-2.5d-react, attempts 1 and 2: GitHub ubuntu runner, preinstalled Google Chrome 154.0.8037.97 and 155.0.8059.39, SwiftShader; both renders byte-identical"
     }
   }
 }

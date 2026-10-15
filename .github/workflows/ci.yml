@@ -20,11 +20,7 @@ jobs:
         # src/index.ts (its build entry), and depends on @holodeck/sdk from the npm
         # registry, which is not published. Add it once it is revived.
         package: [editor-2.5d-react, editor-2d-react, viewer-3d-react, flow-runtime]
-    env:
-      # Render (*-render) tests need a GPU + WebGPU Chromium; hosted runners have
-      # neither. src/test-support/chromium.ts skips them when CI is set and
-      # HOLODECK_CHROMIUM is not. Set explicitly so the intent is visible here.
-      HOLODECK_SKIP_RENDER_TESTS: '1'
+    timeout-minutes: 30
     steps:
       # The packages depend on the SDK via `file:../../../holodeck-sdk/ts`, so the
       # SDK must be checked out as a sibling of this repo. Actions can only check
@@ -95,9 +91,36 @@ jobs:
         working-directory: holodeck/packages/${{ matrix.package }}
         run: pnpm type-check
 
+      # Render (*-render) tests drive a real WebGPU canvas in headless Chrome.
+      # editor-2.5d-react runs them on the runner's PREINSTALLED Google Chrome
+      # (HOLODECK_CHROMIUM) with the SwiftShader software-Vulkan flags in
+      # src/test-support/chromium.ts. Do NOT `playwright install` here: it hangs
+      # while unpacking its browser archive on GitHub-hosted runners (holodeck#29).
+      # Other packages have no render tests; they skip explicitly.
+      - name: Select browser for render tests
+        run: |
+          if [ "${{ matrix.package }}" = "editor-2.5d-react" ]; then
+            chrome=$(command -v google-chrome || command -v google-chrome-stable)
+            "$chrome" --version
+            echo "HOLODECK_CHROMIUM=$chrome" >> "$GITHUB_ENV"
+          else
+            echo "HOLODECK_SKIP_RENDER_TESTS=1" >> "$GITHUB_ENV"
+          fi
+
       - name: Test
+        timeout-minutes: 15
         working-directory: holodeck/packages/${{ matrix.package }}
         run: pnpm exec vitest run
+
+      # Render output (Arcentry fidelity metrics/diff/heatmap, review shots) for
+      # inspecting a CI run: artifacts/visual + artifacts/render (gitignored).
+      - name: Upload render artifacts
+        if: always() && matrix.package == 'editor-2.5d-react'
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-artifacts
+          path: holodeck/packages/editor-2.5d-react/artifacts/
+          if-no-files-found: ignore
 
       - name: Build
         working-directory: holodeck/packages/${{ matrix.package }}

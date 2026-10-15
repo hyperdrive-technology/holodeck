@@ -15,12 +15,13 @@
  * the GLB pumps are dropped. Skipped when the core checkout is not there.
  * Needs local Chromium + WebGPU like the other *-render tests.
  */
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
-import { chromium, type Page } from 'playwright';
+import type { Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
+import { launchRenderBrowser, waitForRendered } from '../test-support/render-harness';
 import { pipeWorldY } from '../../assets/process/pipe-math';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { resolvePipeRuns } from '../iso/pipe-runs';
@@ -30,9 +31,10 @@ import { CUTAWAY_VESSEL_IDS, createCutawayRegistry } from './pipe-cutaway-parts'
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
 const snapDir = path.join(pkgRoot, 'tests/snapshots');
-const hmiDir = path.resolve(pkgRoot, '../../../core/src/typescript/packages/hyperdrive-ui/examples/brewery/hmi');
+// Vendored copies of core's brewery HMI scenes (tests/fixtures/brewery); brewery-fixtures.test.ts
+// keeps them in sync with core when the sibling checkout exists.
+const hmiDir = path.join(pkgRoot, 'tests/fixtures/brewery');
 const SCENES = ['brewhouse', 'cellar'] as const;
-const HAVE_SCENES = SCENES.every((s) => existsSync(path.join(hmiDir, `${s}.iso.json`)));
 const VIEW = { width: 1600, height: 900 };
 const CROP = { width: 420, height: 300 };
 
@@ -71,7 +73,7 @@ function vesselEnds(scene: IsoSceneFile) {
 let server: ViteDevServer;
 
 beforeAll(async () => {
-  if (!HAVE_SCENES || !CHROMIUM) return;
+  if (!CHROMIUM) return;
   server = await createServer({
     root: path.join(pkgRoot, 'src/editor'),
     server: { host: '127.0.0.1', port: 0, strictPort: false },
@@ -92,11 +94,11 @@ async function show(page: Page, base: string, scene: IsoSceneFile, query: string
   await page.goto(`${base}/pipe-cutaway.html?${query}`);
   await page.getByTestId('cutaway-root').waitFor();
   await page.waitForSelector('canvas');
-  await page.waitForTimeout(2500);
+  await waitForRendered(page);
   expect(errors).toEqual([]);
 }
 
-describe.skipIf(!HAVE_SCENES || !CHROMIUM)('pipe cut-away render', () => {
+describe.skipIf(!CHROMIUM)('pipe cut-away render', () => {
   it('both scenes have window entries to look at', () => {
     for (const name of SCENES) {
       const objects = resolveAutoElbows(loadScene(name).objects);
@@ -108,11 +110,7 @@ describe.skipIf(!HAVE_SCENES || !CHROMIUM)('pipe cut-away render', () => {
     const address = server.httpServer?.address();
     if (!address || typeof address === 'string') throw new Error('vite did not bind a port');
     const base = `http://127.0.0.1:${address.port}`;
-    const browser = await chromium.launch({
-      executablePath: CHROMIUM,
-      headless: true,
-      args: ['--enable-unsafe-webgpu', '--enable-features=WebGPU', '--ignore-gpu-blocklist'],
-    });
+    const browser = await launchRenderBrowser();
     mkdirSync(snapDir, { recursive: true });
     try {
       for (const name of SCENES) {

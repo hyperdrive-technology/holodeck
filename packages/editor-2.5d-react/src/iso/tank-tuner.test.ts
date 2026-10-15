@@ -1,8 +1,8 @@
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
-import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
+import { launchRenderBrowser } from '../test-support/render-harness';
 import { DEFAULT_TANK_PARAMS, LIQUID_THETA_LENGTH, TANK_INNER_RATIO, TANK_BOWL_Y_OFFSET, MIXER_INNER_RATIO, MIXER_WINDOW_DEG, MIXER_SHOULDER_RATIO, MIXER_SHOULDER_TOP, MIXER_OUTER_BOWL, MIXER_HEEL_OVERLAP, MIXER_SHOULDER_OVERLAP, MIXER_DOME_OVERLAP, angleOnArc, bodyShoulder, bodyOuterBowl, flaskBowl, heelOverlap, shoulderOverlap, bowlThetaForLiquid, cylinderThetasEven, cylinderThetasKept, innerCageSpan, liquidCylinderHeight, liquidSurfaceRadius, mergeTankParams, mixerHatLayout, mixerShaftLayout, spherePhiFromCylinderTheta, tankWindow, tunedVesselHeight, windowFillSegments } from '../../assets/process/tank-params';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
@@ -178,7 +178,7 @@ describe('tank tuner', () => {
     if (!address || typeof address === 'string') {
       throw new Error('vite did not bind a port');
     }
-    const browser = await chromium.launch({ executablePath: CHROMIUM, headless: true });
+    const browser = await launchRenderBrowser();
     try {
       const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
       await page.goto(`http://127.0.0.1:${address.port}/tank-tuner.html`);

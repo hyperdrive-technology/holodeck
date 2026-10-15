@@ -4,9 +4,9 @@
 import { mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
-import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
+import { launchRenderBrowser, waitForRendered } from '../test-support/render-harness';
 import { PROCESS_SCENE } from '../iso/load-process-scene';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
@@ -42,10 +42,7 @@ describe.skipIf(!CHROMIUM)('process editor', () => {
       throw new Error('vite did not bind a port');
     }
 
-    const browser = await chromium.launch({
-      executablePath: CHROMIUM,
-      headless: true,
-    });
+    const browser = await launchRenderBrowser();
     try {
       const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
       await page.goto(`http://127.0.0.1:${address.port}/editor.html`);
@@ -55,7 +52,7 @@ describe.skipIf(!CHROMIUM)('process editor', () => {
       const box = await page.locator('canvas').boundingBox();
       expect(box?.width).toBeGreaterThan(100);
       expect(box?.height).toBeGreaterThan(100);
-      await page.waitForTimeout(1500);
+      await waitForRendered(page);
 
       expect(await root.getAttribute('data-mode')).toBe('select');
       expect(await root.getAttribute('data-object-count')).toBe(String(PROCESS_SCENE.objects.length));

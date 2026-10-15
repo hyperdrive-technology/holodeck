@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`@holodeck/editor-2.5d-react`**: `ProcessEditor` no longer grows past the box its host gives it (palette / inspector / canvas content no longer sets its intrinsic height), so the scene is fitted to the visible pane in any embedding (core#69). Palette section headings are 12 px.
 - **`@holodeck/editor-2.5d-react`**: render tests no longer rewrite tracked files: `reference-canvas.png` is generated once by a script (no ImageMagick), `auto-route.png` is untracked and written to `artifacts/render/`, label boxes go to `artifacts/visual/` instead of `/tmp`.
+- **`@holodeck/editor-2.5d-react`**: render (`*-render`) tests run in CI on the runner's preinstalled Google Chrome with SwiftShader WebGPU (`HOLODECK_CHROMIUM`, one launch path `launchRenderBrowser()`), wait on the rendered signal instead of fixed sleeps (`waitForRendered(page | locator)`, `settle`), need no ImageMagick, and upload `artifacts/` from CI.
 
 ## [0.1.0] - 2026-09-22
 

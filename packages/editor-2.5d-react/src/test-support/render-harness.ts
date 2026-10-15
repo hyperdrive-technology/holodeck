@@ -9,12 +9,9 @@
 import path from 'node:path';
 import { chromium, type Browser, type Locator, type Page } from 'playwright';
 import { createServer, type ViteDevServer } from 'vite';
-import { CHROMIUM } from './chromium';
+import { CHROMIUM, RENDER_ARGS } from './chromium';
 
 export const PKG_ROOT = path.resolve(import.meta.dirname, '../..');
-
-/** Flags that expose WebGPU in headless Chromium (same as the existing render tests). */
-export const WEBGPU_ARGS = ['--enable-unsafe-webgpu', '--enable-features=WebGPU', '--ignore-gpu-blocklist'];
 
 export interface Harness {
   server: ViteDevServer;
@@ -38,9 +35,13 @@ export async function startHarness(dir: string): Promise<Harness> {
   return { server, origin: `http://127.0.0.1:${address.port}`, close: () => server.close() };
 }
 
+/**
+ * The one way render tests launch Chromium: the resolved binary (chromium.ts)
+ * with RENDER_ARGS (WebGPU; SwiftShader software Vulkan on GPU-less Linux CI).
+ */
 export function launchRenderBrowser(): Promise<Browser> {
   if (!CHROMIUM) throw new Error('no Chromium for render tests (see test-support/chromium.ts)');
-  return chromium.launch({ executablePath: CHROMIUM, headless: true, args: WEBGPU_ARGS });
+  return chromium.launch({ executablePath: CHROMIUM, headless: true, args: RENDER_ARGS });
 }
 
 /** Collects console errors, page errors and failed requests for failure messages. */
@@ -55,24 +56,37 @@ export function collectPageLog(page: Page): string[] {
 }
 
 /**
- * Resolves once `root` reports `data-render-state="ready"` for its current
- * revision; returns that revision. Throws on `unsupported` (no WebGPU) rather
- * than timing out.
+ * Resolves once every `[data-render-state]` element in `scope` reports
+ * `ready` for its current revision, and at least one exists. `scope` is a
+ * locator (the element itself and/or its descendants carry the attribute) or
+ * a whole page (several IsoCanvases, or editor + inner canvas). Elements are
+ * re-queried on every poll, so canvases that mount late are waited for too.
+ * Throws on `unsupported` (no WebGPU) rather than timing out.
+ *
+ * Returns the `data-holodeck-rendered` revision of the first signalling
+ * element (the scope element itself when it carries the attribute).
  */
-export async function waitForRendered(root: Locator, timeout = 60_000): Promise<number> {
-  const handle = await root.elementHandle({ timeout });
-  if (!handle) throw new Error('render root not found');
-  await root.page().waitForFunction(
+export async function waitForRendered(scope: Locator | Page, timeout = 60_000): Promise<number> {
+  const isLocator = typeof (scope as Locator).elementHandle === 'function';
+  const page = isLocator ? (scope as Locator).page() : (scope as Page);
+  const handle = isLocator ? await (scope as Locator).elementHandle({ timeout }) : null;
+  if (isLocator && !handle) throw new Error('render root not found');
+  const result = await page.waitForFunction(
     (el) => {
-      const state = el.getAttribute('data-render-state');
-      return state === 'ready' || state === 'unsupported';
+      const els = [...(el ?? document).querySelectorAll('[data-render-state]')];
+      if (el?.hasAttribute('data-render-state')) els.unshift(el);
+      if (els.length === 0) return false;
+      const states = els.map((e) => e.getAttribute('data-render-state'));
+      if (!states.every((s) => s === 'ready') && !states.includes('unsupported')) return false;
+      return { states, revision: els[0]!.getAttribute('data-holodeck-rendered') };
     },
     handle,
     { timeout },
   );
-  const state = await root.getAttribute('data-render-state');
-  if (state !== 'ready') throw new Error(`render state is ${state} (WebGPU unavailable?)`);
-  return Number(await root.getAttribute('data-holodeck-rendered'));
+  const { states, revision } = (await result.jsonValue()) as { states: string[]; revision: string | null };
+  await result.dispose();
+  if (states.some((s) => s !== 'ready')) throw new Error(`render state is ${states.join(',')} (WebGPU unavailable?)`);
+  return Number(revision);
 }
 
 /** Resolves after `n` animation frames in the page (frame-counted, not timed). */
@@ -86,4 +100,15 @@ export function animationFrames(page: Page, n: number): Promise<void> {
       }),
     n,
   );
+}
+
+/**
+ * After a pointer / keyboard / viewport interaction: lets the page commit the
+ * resulting state (two animation frames: input handlers and rAF-batched
+ * updates run, React commits) and then waits for the new picture to be
+ * presented. Replaces `waitForTimeout(<guess>)` after an input.
+ */
+export async function settle(page: Page, timeout = 60_000): Promise<void> {
+  await animationFrames(page, 2);
+  await waitForRendered(page, timeout);
 }

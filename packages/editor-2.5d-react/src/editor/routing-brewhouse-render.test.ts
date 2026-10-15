@@ -11,23 +11,20 @@
  *
  * Needs local Chromium + WebGPU like the other *-render tests.
  */
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
-import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
+import { launchRenderBrowser, waitForRendered } from '../test-support/render-harness';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { checkElbows, isAutoElbow, resolveAutoElbows } from '../routing/elbows';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
 const snapDir = path.join(pkgRoot, 'tests/snapshots');
 const shotPath = path.join(snapDir, 'brewhouse-routing.png');
-const brewhousePath = path.resolve(
-  pkgRoot,
-  '../../../core/src/typescript/packages/hyperdrive-ui/examples/brewery/hmi/brewhouse.iso.json',
-);
-const HAVE_SCENE = existsSync(brewhousePath);
+// Vendored copy of core's brewhouse HMI scene; brewery-fixtures.test.ts keeps it in sync.
+const brewhousePath = path.join(pkgRoot, 'tests/fixtures/brewery/brewhouse.iso.json');
 
 
 /** Brewery parts that are vessels (drawn as a built-in tank); other `brewery:*` parts are dropped. */
@@ -53,7 +50,7 @@ function builtinBrewhouse(): IsoSceneFile {
 let server: ViteDevServer;
 
 beforeAll(async () => {
-  if (!HAVE_SCENE || !CHROMIUM) return;
+  if (!CHROMIUM) return;
   server = await createServer({
     root: path.join(pkgRoot, 'src/editor'),
     server: { host: '127.0.0.1', port: 0, strictPort: false },
@@ -67,7 +64,7 @@ afterAll(async () => {
   await server?.close();
 });
 
-describe.skipIf(!HAVE_SCENE || !CHROMIUM)('brewhouse piping render', () => {
+describe.skipIf(!CHROMIUM)('brewhouse piping render', () => {
   it('draws the brewhouse with every bend joining its pipes', async () => {
     const scene = builtinBrewhouse();
     // The bends this snapshot is about resolve from their pipes (params.bend = "auto").
@@ -86,11 +83,7 @@ describe.skipIf(!HAVE_SCENE || !CHROMIUM)('brewhouse piping render', () => {
     if (!address || typeof address === 'string') {
       throw new Error('vite did not bind a port');
     }
-    const browser = await chromium.launch({
-      executablePath: CHROMIUM,
-      headless: true,
-      args: ['--enable-unsafe-webgpu', '--enable-features=WebGPU', '--ignore-gpu-blocklist'],
-    });
+    const browser = await launchRenderBrowser();
     try {
       const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 2 });
       const errors: string[] = [];
@@ -101,7 +94,7 @@ describe.skipIf(!HAVE_SCENE || !CHROMIUM)('brewhouse piping render', () => {
       await page.goto(`http://127.0.0.1:${address.port}/routing-brewhouse.html`);
       await page.getByTestId('process-editor').waitFor();
       await page.waitForSelector('canvas');
-      await page.waitForTimeout(3000);
+      await waitForRendered(page);
       expect(errors).toEqual([]);
       mkdirSync(snapDir, { recursive: true });
       await page.screenshot({ path: shotPath, type: 'png' });
