@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   compareToReference,
   DEFAULT_EPSILON,
+  isCi,
   judge,
   tighten,
   worstCells,
@@ -164,8 +165,35 @@ describe('compareToReference', () => {
 describe('judge', () => {
   const record = { fidelity: 0.8, epsilon: 0.002, rmse: 30, recordedAt: '2026-10-14' };
 
-  it('is unrecorded without a record', () => {
-    expect(judge(undefined, { fidelity: 0.5 }).status).toBe('unrecorded');
+  it('is unrecorded (and passes) without a record locally', () => {
+    const r = judge(undefined, { fidelity: 0.5 });
+    expect(r.status).toBe('unrecorded');
+    expect(r.ok).toBe(true);
+    expect(judge(undefined, { fidelity: 0.5 }, { requireRecord: false }).ok).toBe(true);
+  });
+
+  it('fails as missing without a record when one is required (CI)', () => {
+    const r = judge(undefined, { fidelity: 0.5 }, { requireRecord: true, platform: 'linux' });
+    expect(r.status).toBe('missing');
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain('linux');
+    expect(r.message).toContain('0.5');
+    expect(r.message).toContain('reference-fidelity.json');
+    expect(r.message).toContain('pnpm visual:record');
+  });
+
+  it('judges against an existing record the same way whether or not one is required', () => {
+    for (const requireRecord of [false, true]) {
+      expect(judge(record, { fidelity: 0.8 }, { requireRecord }).status).toBe('held');
+      expect(judge(record, { fidelity: 0.7 }, { requireRecord }).status).toBe('regressed');
+      expect(judge(record, { fidelity: 0.81 }, { requireRecord }).status).toBe('improved');
+    }
+  });
+
+  it('only regressed and missing fail', () => {
+    expect(judge(record, { fidelity: 0.8 }).ok).toBe(true);
+    expect(judge(record, { fidelity: 0.81 }).ok).toBe(true);
+    expect(judge(record, { fidelity: 0.7979 }).ok).toBe(false);
   });
 
   it('holds within epsilon on either side', () => {
@@ -184,6 +212,23 @@ describe('judge', () => {
     const r = judge(record, { fidelity: 0.81 });
     expect(r.status).toBe('improved');
     expect(r.message).toContain('visual:record');
+  });
+});
+
+describe('isCi', () => {
+  it('is true for the values CI systems set', () => {
+    expect(isCi({ CI: 'true' })).toBe(true);
+    expect(isCi({ CI: '1' })).toBe(true);
+    expect(isCi({ CI: 'TRUE' })).toBe(true);
+  });
+
+  it('is false when unset, empty, 0 or false', () => {
+    expect(isCi({})).toBe(false);
+    expect(isCi({ CI: '' })).toBe(false);
+    expect(isCi({ CI: ' ' })).toBe(false);
+    expect(isCi({ CI: '0' })).toBe(false);
+    expect(isCi({ CI: 'false' })).toBe(false);
+    expect(isCi({ CI: 'False' })).toBe(false);
   });
 });
 
@@ -208,6 +253,24 @@ describe('tighten', () => {
     const start = tighten(empty, 'darwin', { fidelity: 0.7, rmse: 40 }, 't0').file;
     expect(tighten(start, 'darwin', { fidelity: 0.7, rmse: 10 }, 't1')).toEqual({ file: start, changed: false });
     expect(tighten(start, 'darwin', { fidelity: 0.6, rmse: 10 }, 't1')).toEqual({ file: start, changed: false });
+  });
+
+  it('drops a hand-set source when it raises the score', () => {
+    const start: FidelityRecordFile = {
+      description: 'x',
+      platforms: { linux: { fidelity: 0.5, epsilon: 0.001, rmse: 30, recordedAt: 't0', source: 'CI run 1' } },
+    };
+    const { file } = tighten(start, 'linux', { fidelity: 0.6, rmse: 20 }, 't1');
+    expect(file.platforms.linux).toEqual({ fidelity: 0.6, epsilon: 0.001, rmse: 20, recordedAt: 't1' });
+  });
+
+  it('ignores a gain within epsilon, so the record cannot creep up on noise', () => {
+    const start = tighten(empty, 'linux', { fidelity: 0.7, rmse: 40 }, 't0', 0.001).file;
+    expect(tighten(start, 'linux', { fidelity: 0.7005, rmse: 39 }, 't1')).toEqual({ file: start, changed: false });
+    expect(tighten(start, 'linux', { fidelity: 0.701, rmse: 39 }, 't1')).toEqual({ file: start, changed: false });
+    const raised = tighten(start, 'linux', { fidelity: 0.7011, rmse: 39 }, 't1');
+    expect(raised.changed).toBe(true);
+    expect(raised.file.platforms.linux.fidelity).toBe(0.7011);
   });
 
   it('keeps platforms independent', () => {

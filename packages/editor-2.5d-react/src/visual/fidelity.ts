@@ -303,6 +303,12 @@ export interface FidelityRecord {
   /** RMSE at the time of the record (information only). */
   rmse: number;
   recordedAt: string;
+  /**
+   * Where the number came from, when not a local `pnpm visual:record` (e.g. the CI
+   * run whose artifact it was copied from). `tighten` drops it: a raised record
+   * comes from the run that raised it.
+   */
+  source?: string;
 }
 
 export interface FidelityRecordFile {
@@ -319,37 +325,82 @@ export interface FidelityRecordFile {
  */
 export const DEFAULT_EPSILON = 0.0005;
 
-export type FidelityStatus = 'unrecorded' | 'regressed' | 'held' | 'improved';
+/**
+ * - `unrecorded`: no record for this platform, local run: passes (nothing to compare against yet).
+ * - `missing`:    no record for this platform and a record is required (CI): fails, because
+ *                 otherwise the gate silently passes on every platform nobody recorded.
+ * - `regressed`:  below `fidelity - epsilon`: fails.
+ * - `held` / `improved`: pass.
+ */
+export type FidelityStatus = 'unrecorded' | 'missing' | 'regressed' | 'held' | 'improved';
 
-export function judge(record: FidelityRecord | undefined, metrics: Pick<FidelityMetrics, 'fidelity'>): {
+export interface JudgeOptions {
+  /** Fail (`missing`) instead of passing (`unrecorded`) when the platform has no record. Set in CI. */
+  requireRecord?: boolean;
+  /** Platform name for the messages (e.g. `process.platform`). */
+  platform?: string;
+}
+
+export interface Verdict {
   status: FidelityStatus;
+  /** False for `regressed` and `missing`: the run fails. */
+  ok: boolean;
   message: string;
-} {
+}
+
+/**
+ * True when running under CI. GitHub Actions (and most CI systems) set CI=true;
+ * an empty value, "0" or "false" counts as not CI so a stray export can be undone.
+ */
+export function isCi(env: Readonly<Record<string, string | undefined>> = process.env): boolean {
+  const v = env.CI?.trim().toLowerCase();
+  return !!v && v !== '0' && v !== 'false';
+}
+
+export function judge(
+  record: FidelityRecord | undefined,
+  metrics: Pick<FidelityMetrics, 'fidelity'>,
+  { requireRecord = false, platform = 'this platform' }: JudgeOptions = {},
+): Verdict {
   if (!record) {
+    if (requireRecord) {
+      return {
+        status: 'missing',
+        ok: false,
+        message:
+          `no recorded fidelity for ${platform} (fidelity this run: ${metrics.fidelity}), and CI requires one: ` +
+          `without it the ratchet cannot fail. Add a "${platform}" entry to tests/visual/reference-fidelity.json ` +
+          `(run pnpm visual:record on ${platform}, or copy fidelity/rmse from this job's reference-metrics.json ` +
+          `artifact; see the package README, "Arcentry fidelity loop").`,
+      };
+    }
     return {
       status: 'unrecorded',
-      message: `no recorded fidelity for this platform; fidelity ${metrics.fidelity}. Record it with pnpm visual:record.`,
+      ok: true,
+      message: `no recorded fidelity for ${platform}; fidelity ${metrics.fidelity}. Record it with pnpm visual:record (CI fails without a record).`,
     };
   }
   const floor = round(record.fidelity - record.epsilon);
   if (metrics.fidelity < floor) {
     return {
       status: 'regressed',
+      ok: false,
       message: `fidelity ${metrics.fidelity} < recorded ${record.fidelity} - epsilon ${record.epsilon} (= ${floor}): the render moved away from the Arcentry reference.`,
     };
   }
   if (metrics.fidelity > record.fidelity + record.epsilon) {
     return {
       status: 'improved',
+      ok: true,
       message: `fidelity ${metrics.fidelity} beats recorded ${record.fidelity} by more than epsilon: run pnpm visual:record to tighten the gate.`,
     };
   }
-  return { status: 'held', message: `fidelity ${metrics.fidelity} within epsilon of recorded ${record.fidelity}.` };
+  return { status: 'held', ok: true, message: `fidelity ${metrics.fidelity} within epsilon of recorded ${record.fidelity}.` };
 }
 
 /**
  * Returns the record file with this platform's score raised to `metrics`
- * when that is better (or set, when missing). Never lowers a score or widens
+ * when that beats it by more than its epsilon (or set, when missing). Never lowers a score or widens
  * epsilon: loosening the gate is a deliberate hand edit of the JSON.
  */
 export function tighten(
@@ -360,7 +411,10 @@ export function tighten(
   epsilon = DEFAULT_EPSILON,
 ): { file: FidelityRecordFile; changed: boolean } {
   const current = file.platforms[platform];
-  if (current && metrics.fidelity <= current.fidelity) return { file, changed: false };
+  // Raise only on a gain beyond epsilon (what `judge` calls `improved`): a gain
+  // inside the noise band would let the record creep up on jitter until honest
+  // runs fail (holodeck#68, item 3).
+  if (current && metrics.fidelity <= current.fidelity + current.epsilon) return { file, changed: false };
   const next: FidelityRecord = {
     fidelity: metrics.fidelity,
     epsilon: current?.epsilon ?? epsilon,

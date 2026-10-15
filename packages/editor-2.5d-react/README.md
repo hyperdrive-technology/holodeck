@@ -54,11 +54,12 @@ on macOS produced byte-identical renders, so every score change is a real change
 anti-aliasing ignored) calls equal, where relevant = drawn in either image (darker than the
 floor grid's `#EEE`) or different. Arcentry's toolbar, baked into the reference, is
 ignored. `rmse` (0..255) is reported too: it moves on shading changes too small to cross
-the pixelmatch threshold. Current record (darwin): **fidelity 0.283, rmse 25.34**.
+the pixelmatch threshold. Current records: darwin **fidelity 0.283, rmse 25.34**; linux (CI,
+SwiftShader) **fidelity 0.28371, rmse 24.867**.
 
 **Gate.** `tests/visual/reference-fidelity.json` holds the best score per platform. A run
 fails when fidelity drops more than `epsilon` (0.0005) below it. The record only goes up:
-`pnpm visual:record` raises it when a run beats it and never lowers it. Lowering it (a
+`pnpm visual:record` raises it when a run beats it by more than `epsilon` and never lowers it. Lowering it (a
 deliberate trade-off) is a hand edit of the JSON with the reason in the PR.
 
 **Loop.**
@@ -82,8 +83,20 @@ deliberate trade-off) is a hand edit of the JSON with the reason in the PR.
    change. The PR states the before/after score and attaches the heatmap.
 
 Set `HOLODECK_ARTIFACTS_DIR` to keep runs apart (e.g. one directory per iteration).
-Scores are per platform because GPU paths and font rasterisation differ; a platform with
-no record reports `unrecorded` and passes until someone records it.
+Scores are per platform because GPU paths and font rasterisation differ. Locally, a
+platform with no record reports `unrecorded` and passes. **In CI (`CI` set) a missing
+record fails** (`missing`): otherwise the ratchet could never fail there.
+
+**The linux record comes from CI.** CI renders on the runner's preinstalled Google Chrome
+with SwiftShader (software Vulkan). To set or raise it: download the `render-artifacts`
+artifact of the `editor-2.5d-react` job (`gh run download <run> -n render-artifacts`),
+copy `metrics.fidelity` and `metrics.rmse` from `visual/reference-metrics.json` into the
+`linux` entry, and say which run it came from in `source`. (Running `pnpm visual:record`
+on a Linux box with SwiftShader works too.) Epsilon is the default 0.0005: two attempts
+of CI run 38702345405, on Chrome 154 and 155, gave byte-identical renders, so SwiftShader
+showed no run-to-run jitter. If a runner Chrome update moves the score, the job fails as
+`regressed` or reports `improved`: check the heatmap, then re-record by hand with the
+reason in the PR.
 
 ## Using the built package in a Vite app
 

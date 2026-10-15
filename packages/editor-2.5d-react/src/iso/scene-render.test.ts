@@ -17,7 +17,8 @@
  *   label-boxes.json        DOM label centres (SnapshotLabelLock check)
  *
  * Gate: tests/visual/reference-fidelity.json (per platform). A run fails when
- * fidelity drops more than epsilon below the record; `pnpm visual:record`
+ * fidelity drops more than epsilon below the record, or (CI only) when the
+ * platform has no record; `pnpm visual:record`
  * (HOLODECK_VISUAL_RECORD=1) raises the record when a run beats it. Nothing
  * under tests/snapshots/ is written any more.
  */
@@ -34,7 +35,7 @@ import {
   waitForRendered,
   type Harness,
 } from '../test-support/render-harness';
-import { compareToReference, judge, tighten, worstCells } from '../visual/fidelity';
+import { compareToReference, isCi, judge, tighten, worstCells } from '../visual/fidelity';
 import {
   artifactsDir,
   decodePng,
@@ -146,7 +147,9 @@ describe.skipIf(!CHROMIUM)('renders scene.json', () => {
 
     let record = readRecord();
     const before = record.platforms[process.platform];
-    const verdict = judge(before, metrics);
+    // In CI a platform without a record fails (`missing`): otherwise the ratchet
+    // passes `unrecorded` forever on a platform nobody recorded (holodeck PR #52).
+    const verdict = judge(before, metrics, { requireRecord: isCi(), platform: process.platform });
     let recorded = false;
     if (RECORD && verdict.status !== 'regressed') {
       const next = tighten(record, process.platform, metrics, new Date().toISOString());
@@ -172,7 +175,7 @@ describe.skipIf(!CHROMIUM)('renders scene.json', () => {
       `[arcentry fidelity] ${metrics.fidelity} (rmse ${metrics.rmse}) ${verdict.status}${recorded ? ', recorded' : ''}: ${path.join(out, 'reference-metrics.json')}`,
     );
 
-    expect(verdict.status, `${verdict.message}\nheatmap: ${files.heatmap}`).not.toBe('regressed');
+    expect(verdict.ok, `${verdict.status}: ${verdict.message}\nheatmap: ${files.heatmap}`).toBe(true);
     // 60s is enough for one Chromium; a second concurrent vitest races the
     // port/GPU and this it() hangs past the timeout (21min observed).
   }, 60_000);
