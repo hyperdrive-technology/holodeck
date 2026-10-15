@@ -19,6 +19,7 @@ From the Holodeck repository root, choose one of these package directories:
 | 2.5D editor, routing, animation, models | `packages/editor-2.5d-react` | Colocated `*.test.ts` / `*.test.tsx` under `src/` and `assets/`; browser fixtures and screenshots under `tests/` |
 | 2D editor and extension registry | `packages/editor-2d-react` | Colocated `src/**/*.test.ts` / `*.test.tsx`; jsdom setup in `vitest.setup.ts` |
 | 3D viewer | `packages/viewer-3d-react` | Colocated tests under `src/`, including `HolodeckViewer3D.test.tsx` |
+| Flow blocks, runtime, `holodeck.flow.local` | `packages/flow-runtime` | Colocated `src/**/*.test.ts` (Node, no browser); `pnpm smoke` after `pnpm build` |
 | Blender parts | `blender/parts` and 2.5D assets | GLB contract tests under `packages/editor-2.5d-react/src/models/` |
 
 For each affected React package, run this sequence from its directory:
@@ -30,7 +31,7 @@ HOLODECK_SKIP_RENDER_TESTS=1 pnpm exec vitest run
 pnpm build
 ```
 
-The [CI workflow](.github/workflows/ci.yml) runs these checks separately for all three React packages on pull requests and pushes to `main`, after installing and building the SDK. It sets `HOLODECK_SKIP_RENDER_TESTS=1` because hosted runners lack the GPU/WebGPU environment required by the render tests. CI does not run package lint scripts, Storybook, or a built-package import smoke test; built-package import and asset coverage is tracked in [#7](https://github.com/hyperdrive-technology/holodeck/issues/7).
+The [CI workflow](.github/workflows/ci.yml) runs these checks separately for the three React packages and `flow-runtime` on pull requests and pushes to `main`, after installing and building the SDK. It sets `HOLODECK_SKIP_RENDER_TESTS=1` because hosted runners lack the GPU/WebGPU environment required by the render tests. CI does not run package lint scripts, Storybook, or a built-package import smoke test; built-package import and asset coverage is tracked in [#7](https://github.com/hyperdrive-technology/holodeck/issues/7).
 
 The root manifest is a legacy CLI scaffold, not an aggregate runner. `packages/cli` is also excluded from CI: its `src/index.ts` build entry is absent, its `package-lock.json` contains no resolved dependencies, and its SDK dependency targets the registry. Restoring the CLI requires its own setup and verification; its advertised commands are not the supported onboarding path.
 

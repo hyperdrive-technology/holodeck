@@ -19,7 +19,7 @@ jobs:
         # packages/cli is not built here: it has an empty package-lock.json, no
         # src/index.ts (its build entry), and depends on @holodeck/sdk from the npm
         # registry, which is not published. Add it once it is revived.
-        package: [editor-2.5d-react, editor-2d-react, viewer-3d-react]
+        package: [editor-2.5d-react, editor-2d-react, viewer-3d-react, flow-runtime]
     timeout-minutes: 30
     steps:
       # The packages depend on the SDK via `file:../../../holodeck-sdk/ts`, so the
@@ -126,17 +126,19 @@ jobs:
         working-directory: holodeck/packages/${{ matrix.package }}
         run: pnpm build
 
-      # Load the built dist/ by package name in plain Node, as both ESM and CJS,
+      # Load the built dist/ by package name in plain Node, as both ESM and CJS
+      # (ESM-only packages such as flow-runtime: require(esm) of the import target),
       # and (editor-2.5d-react) check every bundled GLB URL points at a real,
       # published file. Catches holodeck#7-style "builds fine, crashes on import".
       - name: Smoke-test built package
         working-directory: holodeck/packages/${{ matrix.package }}
         run: node ../../scripts/smoke-dist.mjs .
 
-      # editor-2.5d-react only: install the built holodeck.package.json entry into a
+      # Packages that ship a holodeck.package.json: install the built entry into a
       # HolodeckHost through the manifest path (SDK packaging contract, holodeck#15).
+      # flow-runtime's script also deploys a small flow through holodeck.flow.local.
       - name: Smoke-test the Holodeck package entry
-        if: matrix.package == 'editor-2.5d-react'
+        if: matrix.package == 'editor-2.5d-react' || matrix.package == 'flow-runtime'
         working-directory: holodeck/packages/${{ matrix.package }}
         run: node --no-deprecation scripts/smoke-holodeck-package.mjs
 

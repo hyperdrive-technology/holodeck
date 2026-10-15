@@ -9,6 +9,9 @@
  *    whose cwd is the package (Node self-references a package by name from
  *    inside it, so a wrong condition order or path fails here, not in a
  *    consumer). The holodeck#7 crash happened at exactly this point.
+ *    ESM-only packages (root export without a `require` condition) cannot be
+ *    required by name; for them the CJS leg is Node's `require(esm)` of the
+ *    `import` target by path, which proves the build has no top-level await.
  * 2. Both formats must expose the same, non-empty set of exports.
  * 3. If the package exports `BUILTIN_MODEL_URLS` (editor-2.5d-react), every
  *    entry must be a `file:` URL to an existing GLB under dist/ that is
@@ -39,13 +42,19 @@ const failures = [];
 const fail = (msg) => failures.push(msg);
 const MARK = '__SMOKE__';
 
+const rootExport = pkg.exports?.['.'] ?? {};
+/** No `require` condition: the package ships ESM only (holodeck#60). */
+const ESM_ONLY = typeof rootExport === 'object' && rootExport.require === undefined && typeof rootExport.import === 'string';
+
 /** Loads the package in a child Node and returns {keys, models}. */
 function load(format) {
   const report = `console.log(${JSON.stringify(MARK)} + JSON.stringify({ keys: Object.keys(m).sort(), models: m.BUILTIN_MODEL_URLS ?? null }))`;
+  // require(esm) by path: an import-only exports map refuses require by name.
+  const requireTarget = ESM_ONLY ? join(PKG_DIR, rootExport.import) : pkg.name;
   const code =
     format === 'esm'
       ? `const m = await import(${JSON.stringify(pkg.name)}); ${report}`
-      : `const m = require(${JSON.stringify(pkg.name)}); ${report}`;
+      : `const m = require(${JSON.stringify(requireTarget)}); ${report}`;
   const out = execFileSync(
     process.execPath,
     ['--no-deprecation', '--import', HOOKS, `--input-type=${format === 'esm' ? 'module' : 'commonjs'}`, '-e', code],
@@ -90,7 +99,8 @@ const loaded = {};
 for (const format of ['esm', 'cjs']) {
   try {
     loaded[format] = load(format);
-    console.log(`${format}: ${pkg.name} loaded, ${loaded[format].keys.length} exports`);
+    const how = format === 'cjs' && ESM_ONLY ? ' (require(esm) of the import target)' : '';
+    console.log(`${format}: ${pkg.name} loaded${how}, ${loaded[format].keys.length} exports`);
     if (loaded[format].keys.length === 0) fail(`${format}: no exports`);
   } catch (err) {
     fail(`${format}: loading ${pkg.name} threw:\n${err.stderr || err.message}`);
@@ -107,8 +117,7 @@ for (const format of ['esm', 'cjs']) {
     for (const file of checkModels(format, loaded[format].models)) mustPublish.add(file.slice(PKG_DIR.length + 1));
   }
 }
-const root = pkg.exports?.['.'] ?? {};
-for (const p of [pkg.main, pkg.module, pkg.types, root.types, root.import, root.require]) {
+for (const p of [pkg.main, pkg.module, pkg.types, rootExport.types, rootExport.import, rootExport.require]) {
   if (typeof p === 'string') mustPublish.add(p.replace(/^\.\//, ''));
 }
 const pack = JSON.parse(
