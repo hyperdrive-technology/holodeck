@@ -6,10 +6,10 @@
  */
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
-import { chromium, type Browser, type Page } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CHROMIUM, RENDER_ARGS } from '../test-support/chromium';
-import { animationFrames, settle, waitForPageRendered } from '../test-support/render-harness';
+import { CHROMIUM } from '../test-support/chromium';
+import { animationFrames, launchRenderBrowser, settle, waitForRendered } from '../test-support/render-harness';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
 
@@ -30,7 +30,7 @@ beforeAll(async () => {
   const address = server.httpServer?.address();
   if (!address || typeof address === 'string') throw new Error('vite did not bind a port');
   base = `http://127.0.0.1:${address.port}/registry-harness.html`;
-  browser = await chromium.launch({ executablePath: CHROMIUM, headless: true, args: RENDER_ARGS });
+  browser = await launchRenderBrowser();
 }, 60_000);
 
 afterAll(async () => {
@@ -45,7 +45,7 @@ async function open(query = ''): Promise<Page> {
   });
   await page.goto(`${base}${query}`);
   await page.getByTestId('process-editor').waitFor();
-  await waitForPageRendered(page);
+  await waitForRendered(page);
   // The probe part hands over the R3F scene; the GLB loads asynchronously after that.
   await page.waitForFunction(
     () => {

@@ -103,10 +103,6 @@ jobs:
             chrome=$(command -v google-chrome || command -v google-chrome-stable)
             "$chrome" --version
             echo "HOLODECK_CHROMIUM=$chrome" >> "$GITHUB_ENV"
-            # The scene/vessel render tests crop their screenshots with ImageMagick
-            # (not preinstalled on the runner image; apt gives v6's `convert`).
-            command -v magick >/dev/null || command -v convert >/dev/null \
-              || { sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick; }
           else
             echo "HOLODECK_SKIP_RENDER_TESTS=1" >> "$GITHUB_ENV"
           fi
@@ -115,6 +111,16 @@ jobs:
         timeout-minutes: 15
         working-directory: holodeck/packages/${{ matrix.package }}
         run: pnpm exec vitest run
+
+      # Render output (Arcentry fidelity metrics/diff/heatmap, review shots) for
+      # inspecting a CI run: artifacts/visual + artifacts/render (gitignored).
+      - name: Upload render artifacts
+        if: always() && matrix.package == 'editor-2.5d-react'
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-artifacts
+          path: holodeck/packages/editor-2.5d-react/artifacts/
+          if-no-files-found: ignore
 
       - name: Build
         working-directory: holodeck/packages/${{ matrix.package }}

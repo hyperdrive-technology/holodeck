@@ -8,10 +8,10 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
-import { chromium, type Browser, type Page } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CHROMIUM, RENDER_ARGS } from '../test-support/chromium';
-import { settle, waitForPageRendered } from '../test-support/render-harness';
+import { CHROMIUM } from '../test-support/chromium';
+import { launchRenderBrowser, settle, waitForRendered } from '../test-support/render-harness';
 import type { Vector3Tuple } from 'three';
 import type { IsoSceneFile } from '../iso/scene';
 import { panTarget } from '../iso/pan';
@@ -37,11 +37,7 @@ beforeAll(async () => {
   const address = server.httpServer?.address();
   if (!address || typeof address === 'string') throw new Error('vite did not bind a port');
   base = `http://127.0.0.1:${address.port}`;
-  browser = await chromium.launch({
-    executablePath: CHROMIUM,
-    headless: true,
-    args: RENDER_ARGS,
-  });
+  browser = await launchRenderBrowser();
 }, 30_000);
 
 afterAll(async () => {
@@ -54,7 +50,7 @@ async function open(query: string): Promise<Page> {
   await page.goto(`${base}/editor.html?${query}`);
   await page.getByTestId('process-editor').waitFor();
   await page.waitForSelector('canvas');
-  await waitForPageRendered(page); // first fit + WebGPU init
+  await waitForRendered(page); // first fit + WebGPU init
   return page;
 }
 

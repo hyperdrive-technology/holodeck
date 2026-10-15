@@ -5,10 +5,9 @@
 import { mkdirSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
-import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CHROMIUM, RENDER_ARGS } from '../test-support/chromium';
-import { waitForPageRendered } from '../test-support/render-harness';
+import { CHROMIUM } from '../test-support/chromium';
+import { launchRenderBrowser, waitForRendered } from '../test-support/render-harness';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
 const snapDir = path.join(pkgRoot, 'tests/snapshots');
@@ -43,11 +42,7 @@ describe.skipIf(!CHROMIUM)('parts workbench', () => {
     if (!address || typeof address === 'string') {
       throw new Error('vite did not bind a port');
     }
-    const browser = await chromium.launch({
-      executablePath: CHROMIUM,
-      headless: true,
-      args: RENDER_ARGS,
-    });
+    const browser = await launchRenderBrowser();
     const logs: string[] = [];
     try {
       const page = await browser.newPage({ viewport: { width: 800, height: 380 * modelNames.length } });
@@ -68,7 +63,7 @@ describe.skipIf(!CHROMIUM)('parts workbench', () => {
         modelNames.join(','),
         { timeout: 20_000 },
       );
-      await waitForPageRendered(page);
+      await waitForRendered(page);
 
       // Every unknown-material / style warning from applyHolodeckStyle is a contract break.
       expect(logs.filter((l) => l.includes('applyHolodeckStyle')), logs.join('\n')).toEqual([]);

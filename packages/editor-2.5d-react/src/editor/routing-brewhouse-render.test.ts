@@ -14,10 +14,9 @@
 import { mkdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
-import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CHROMIUM, RENDER_ARGS } from '../test-support/chromium';
-import { waitForPageRendered } from '../test-support/render-harness';
+import { CHROMIUM } from '../test-support/chromium';
+import { launchRenderBrowser, waitForRendered } from '../test-support/render-harness';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { checkElbows, isAutoElbow, resolveAutoElbows } from '../routing/elbows';
 
@@ -84,11 +83,7 @@ describe.skipIf(!CHROMIUM)('brewhouse piping render', () => {
     if (!address || typeof address === 'string') {
       throw new Error('vite did not bind a port');
     }
-    const browser = await chromium.launch({
-      executablePath: CHROMIUM,
-      headless: true,
-      args: RENDER_ARGS,
-    });
+    const browser = await launchRenderBrowser();
     try {
       const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 2 });
       const errors: string[] = [];
@@ -99,7 +94,7 @@ describe.skipIf(!CHROMIUM)('brewhouse piping render', () => {
       await page.goto(`http://127.0.0.1:${address.port}/routing-brewhouse.html`);
       await page.getByTestId('process-editor').waitFor();
       await page.waitForSelector('canvas');
-      await waitForPageRendered(page);
+      await waitForRendered(page);
       expect(errors).toEqual([]);
       mkdirSync(snapDir, { recursive: true });
       await page.screenshot({ path: shotPath, type: 'png' });

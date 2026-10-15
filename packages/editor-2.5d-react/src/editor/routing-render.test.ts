@@ -3,21 +3,21 @@
  * first tank's (solid-wall) port to a cell beside the last with the real
  * pointer, and assert it goes around the middle tank. Needs local Chromium + WebGPU like the other *-render tests.
  */
-import { mkdirSync, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
-import { chromium, type Page } from 'playwright';
+import type { Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CHROMIUM, RENDER_ARGS } from '../test-support/chromium';
-import { animationFrames, settle, waitForPageRendered } from '../test-support/render-harness';
+import { CHROMIUM } from '../test-support/chromium';
+import { animationFrames, launchRenderBrowser, settle, waitForRendered } from '../test-support/render-harness';
+import { artifactsDir } from '../visual/io';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { footprintCells } from '../routing/occupancy';
 import { runCells } from '../routing/occupancy';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
-const snapDir = path.join(pkgRoot, 'tests/snapshots');
-const shotPath = path.join(snapDir, 'auto-route.png');
-
+// Review screenshot only (nothing compares it): gitignored artifacts, not the tracked tree.
+const shotPath = path.join(artifactsDir('render'), 'auto-route.png');
 
 let server: ViteDevServer;
 
@@ -78,14 +78,14 @@ describe.skipIf(!CHROMIUM)('auto pipe routing in the editor', () => {
     if (!address || typeof address === 'string') {
       throw new Error('vite did not bind a port');
     }
-    const browser = await chromium.launch({ executablePath: CHROMIUM, headless: true, args: RENDER_ARGS });
+    const browser = await launchRenderBrowser();
     try {
       const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
       await page.goto(`http://127.0.0.1:${address.port}/editor.html?scene=routing`);
       const root = page.getByTestId('process-editor');
       await root.waitFor();
       await page.waitForSelector('canvas');
-      await waitForPageRendered(page);
+      await waitForRendered(page);
 
       // Top-down (X) so no tank hides a floor cell from the pointer.
       await page.keyboard.press('x');
@@ -129,8 +129,8 @@ describe.skipIf(!CHROMIUM)('auto pipe routing in the editor', () => {
       // Back to the iso view for a reviewable screenshot.
       await page.keyboard.press('Escape');
       await page.keyboard.press('x');
+      // The 2D -> 2.5D pose animation holds the rendered signal until it lands.
       await settle(page);
-      mkdirSync(snapDir, { recursive: true });
       await page.screenshot({ path: shotPath, type: 'png' });
     } finally {
       await browser.close();

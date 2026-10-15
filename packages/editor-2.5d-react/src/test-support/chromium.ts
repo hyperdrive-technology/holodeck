@@ -13,8 +13,9 @@
  *
  * Flags: `RENDER_ARGS` below. They are the same set core's e2e uses to run the
  * WebGPU editor headless on GPU-less Linux (SwiftShader software Vulkan), and
- * are harmless on a Mac with a real GPU. See .github/workflows/ci.yml (`render`
- * job) for the CI wiring.
+ * are harmless on a Mac with a real GPU. Launch only through
+ * `launchRenderBrowser()` (render-harness.ts) so every test gets the same
+ * flags. CI wiring: .github/workflows/ci.yml, "Select browser for render tests".
  */
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';

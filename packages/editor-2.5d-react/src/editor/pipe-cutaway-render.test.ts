@@ -18,10 +18,10 @@
 import { mkdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
-import { chromium, type Page } from 'playwright';
+import type { Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CHROMIUM, RENDER_ARGS } from '../test-support/chromium';
-import { waitForPageRendered } from '../test-support/render-harness';
+import { CHROMIUM } from '../test-support/chromium';
+import { launchRenderBrowser, waitForRendered } from '../test-support/render-harness';
 import { pipeWorldY } from '../../assets/process/pipe-math';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { resolvePipeRuns } from '../iso/pipe-runs';
@@ -94,7 +94,7 @@ async function show(page: Page, base: string, scene: IsoSceneFile, query: string
   await page.goto(`${base}/pipe-cutaway.html?${query}`);
   await page.getByTestId('cutaway-root').waitFor();
   await page.waitForSelector('canvas');
-  await waitForPageRendered(page);
+  await waitForRendered(page);
   expect(errors).toEqual([]);
 }
 
@@ -110,11 +110,7 @@ describe.skipIf(!CHROMIUM)('pipe cut-away render', () => {
     const address = server.httpServer?.address();
     if (!address || typeof address === 'string') throw new Error('vite did not bind a port');
     const base = `http://127.0.0.1:${address.port}`;
-    const browser = await chromium.launch({
-      executablePath: CHROMIUM,
-      headless: true,
-      args: RENDER_ARGS,
-    });
+    const browser = await launchRenderBrowser();
     mkdirSync(snapDir, { recursive: true });
     try {
       for (const name of SCENES) {

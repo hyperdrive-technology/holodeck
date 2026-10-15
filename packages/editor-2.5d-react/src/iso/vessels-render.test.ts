@@ -5,14 +5,12 @@
  * the same object (cutaway, solid liquid, no lines inside the window) with
  * different radius / height / closures.
  */
-import { execSync } from 'node:child_process';
 import { mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
-import { chromium } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CHROMIUM, RENDER_ARGS } from '../test-support/chromium';
-import { IMAGEMAGICK, waitForPageRendered } from '../test-support/render-harness';
+import { CHROMIUM } from '../test-support/chromium';
+import { launchRenderBrowser, waitForRendered } from '../test-support/render-harness';
 import { TANK_PRESETS } from '../../assets/process/tank-presets';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
@@ -43,11 +41,7 @@ describe.skipIf(!CHROMIUM)('vessel family workbench', () => {
   it('renders every Tank preset and snapshots them', async () => {
     const address = server.httpServer?.address();
     if (!address || typeof address === 'string') throw new Error('vite did not bind a port');
-    const browser = await chromium.launch({
-      executablePath: CHROMIUM,
-      headless: true,
-      args: RENDER_ARGS,
-    });
+    const browser = await launchRenderBrowser();
     const logs: string[] = [];
     try {
       const page = await browser.newPage({ viewport: VIEW, deviceScaleFactor: 2 });
@@ -57,7 +51,7 @@ describe.skipIf(!CHROMIUM)('vessel family workbench', () => {
       const root = page.getByTestId('vessels-root');
       await root.waitFor();
       await page.waitForSelector('canvas');
-      await waitForPageRendered(page);
+      await waitForRendered(page);
       expect(await root.getAttribute('data-vessels')).toBe(Object.keys(TANK_PRESETS).join(','));
       expect(logs.filter((l) => l.startsWith('pageerror'))).toEqual([]);
       mkdirSync(snapDir, { recursive: true });
@@ -66,14 +60,15 @@ describe.skipIf(!CHROMIUM)('vessel family workbench', () => {
         throw new Error(`blank snapshot (${statSync(snapPath).size} bytes)\n${logs.join('\n')}`);
       }
       // Close-up crops (2x device pixels): one per vessel, left to right.
+      // Playwright clips in CSS pixels, so no image tool (ImageMagick) is needed.
       const names = Object.keys(TANK_PRESETS);
-      const stride = (VIEW.width * 2) / names.length;
+      const stride = VIEW.width / names.length;
       for (const [i, name] of names.entries()) {
-        const out = path.join(snapDir, `brewhouse-vessel-${name}.png`);
-        execSync(
-          `${IMAGEMAGICK} ${JSON.stringify(snapPath)} -crop ${Math.round(stride)}x${VIEW.height * 2}+${Math.round(i * stride)}+0 +repage ${JSON.stringify(out)}`,
-          { stdio: 'pipe' },
-        );
+        await page.screenshot({
+          path: path.join(snapDir, `brewhouse-vessel-${name}.png`),
+          type: 'png',
+          clip: { x: Math.round(i * stride), y: 0, width: Math.round(stride), height: VIEW.height },
+        });
       }
     } finally {
       await browser.close();
