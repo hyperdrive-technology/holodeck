@@ -1,17 +1,19 @@
 /**
  * Renders the process editor chrome + scene in a real WebGL canvas.
  */
-import { mkdirSync, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
 import { launchRenderBrowser, waitForRendered } from '../test-support/render-harness';
+import { artifactsDir } from '../visual/io';
 import { PROCESS_SCENE } from '../iso/load-process-scene';
 import { WCAG_AA_NORMAL, contrastRatioL, luminanceRgb } from './contrast';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
-const snapDir = path.join(pkgRoot, 'tests/snapshots');
+/** Review shots: gitignored, uploaded by CI's render-artifacts step (holodeck#73). */
+const snapDir = artifactsDir('render');
 const oursPath = path.join(snapDir, 'editor.png');
 
 
@@ -74,7 +76,6 @@ describe.skipIf(!CHROMIUM)('process editor', () => {
       await page.getByRole('button', { name: /2×2 vessel/ }).click();
       expect(await root.getAttribute('data-mode')).toBe('place');
 
-      mkdirSync(snapDir, { recursive: true });
       await page.screenshot({ path: oursPath, type: 'png' });
     } finally {
       await browser.close();

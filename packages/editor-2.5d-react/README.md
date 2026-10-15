@@ -35,11 +35,24 @@ at the same moment.
 
 ```bash
 pnpm type-check
-pnpm exec vitest run      # unit + *-render browser tests (render tests need a local WebGPU Chromium; CI skips them)
+pnpm exec vitest run      # unit + *-render browser tests (WebGPU Chromium; CI runs them too)
 pnpm build && pnpm smoke
 ```
 
-Browser tests write review output to `artifacts/` (gitignored), not to the tracked tree.
+Browser tests write review output to `artifacts/` (gitignored): review shots to
+`artifacts/render/`, the fidelity run to `artifacts/visual/`. CI uploads that folder as the
+`render-artifacts` artifact. `tests/snapshots/` holds committed comparison inputs only
+(`src/visual/artifacts-layout.test.ts` enforces it).
+
+**Browser.** `src/test-support/chromium.ts` picks it (the render tests and
+`pnpm visual:reference` share it): `HOLODECK_CHROMIUM`, else Playwright's pinned build for
+the `playwright` devDependency, else system Google Chrome. Install the pinned build with
+`pnpm exec playwright install chromium`. If that hangs while unpacking (seen with Node 26 on
+CI and on macOS), download the zip it prints and unpack it into
+`~/Library/Caches/ms-playwright/chromium-<revision>/` yourself, then create an empty
+`INSTALLATION_COMPLETE` file there. In CI (`CI` set and not `0`/`false`) render tests never
+skip quietly. A missing or wrong `HOLODECK_CHROMIUM` fails the guard test in
+`render-harness.test.ts`. Opt out only with `HOLODECK_SKIP_RENDER_TESTS=1`.
 
 ## Arcentry fidelity loop (agents)
 
@@ -48,14 +61,23 @@ viewport, DPR 1, `REFERENCE_ZOOM` and the frozen look-at, frozen metrics), waits
 rendered signal, and measures the render against the Arcentry target
 `tests/snapshots/reference-canvas.png` (the process pane of `reference.jpg`; regenerate
 it with `pnpm visual:reference` only if `reference.jpg` changes). Five consecutive runs
-on macOS produced byte-identical renders, so every score change is a real change.
+on macOS produced byte-identical renders, so every score change is a real change. The gate
+only judges on a pinned browser (`HOLODECK_CHROMIUM` or Playwright's build, see **Browser**
+above). On an auto-updating system Chrome it writes the images and then fails, asking for
+the pinned build. The darwin record is from Playwright 1.59.1's chromium-1217 (Chrome for
+Testing 147).
 
-**Score.** `fidelity` = share of the relevant pixels that pixelmatch (threshold 0.1,
-anti-aliasing ignored) calls equal, where relevant = drawn in either image (darker than the
-floor grid's `#EEE`) or different. Arcentry's toolbar, baked into the reference, is
-ignored. `rmse` (0..255) is reported too: it moves on shading changes too small to cross
-the pixelmatch threshold. Current records: darwin **fidelity 0.283, rmse 25.34**; linux (CI,
-SwiftShader) **fidelity 0.28371, rmse 24.867**.
+**Score.** `fidelity` = share of the relevant pixels that match. A pixel is relevant when
+it is drawn in either image or different. Drawn means darker than the floor grid's `#EEE`
+and away from that image's own background colour. A pixel matches when pixelmatch
+(threshold 0.1, anti-aliasing ignored) calls it equal and it is not *uncovered*. Uncovered
+means drawn in one image while the other shows its background there. Background-aware
+scoring (holodeck#70) means a blank or uniformly tinted render scores 0. Before, `#e5e5e5`
+scored 0.305, because pixelmatch calls it equal to both white floor and Arcentry's pale
+shading. Arcentry's toolbar, baked into the reference, is ignored. `rmse` (0..255) is
+reported too: it moves on shading changes too small to cross the pixelmatch threshold.
+Current records: darwin **fidelity 0.16487, rmse 25.34**; linux (CI, SwiftShader)
+**fidelity 0.1654, rmse 24.867**. Under the pre-#70 metric these were 0.283 / 0.28371.
 
 **Gate.** `tests/visual/reference-fidelity.json` holds the best score per platform. A run
 fails when fidelity drops more than `epsilon` (0.0005) below it. The record only goes up:

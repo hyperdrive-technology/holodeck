@@ -2,9 +2,9 @@
  * Headless render of pipes running into vessel cut-away windows in the
  * Hyperdrive brewery scenes (brewhouse + cellar), for review:
  *
- *   tests/snapshots/brewhouse-pipe-cutaway.png   whole brewhouse, fitted zoom
- *   tests/snapshots/cellar-pipe-cutaway.png      whole cellar, fitted zoom
- *   tests/snapshots/pipe-cutaway-<scene>-<pipe>-<end>-<1x|2x>.png
+ *   artifacts/render/brewhouse-pipe-cutaway.png   whole brewhouse, fitted zoom
+ *   artifacts/render/cellar-pipe-cutaway.png      whole cellar, fitted zoom
+ *   artifacts/render/pipe-cutaway-<scene>-<pipe>-<end>-<1x|2x>.png
  *       close-up of each pipe end that meets a vessel: every window entry
  *       (clipped at the wall, cut-section end) plus the under / outlet ends
  *       (fermenter cone branches and glycol stubs, mash tun and kettle on legs),
@@ -15,13 +15,14 @@
  * the GLB pumps are dropped. Skipped when the core checkout is not there.
  * Needs local Chromium + WebGPU like the other *-render tests.
  */
-import { mkdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import type { Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
 import { launchRenderBrowser, waitForRendered } from '../test-support/render-harness';
+import { artifactsDir } from '../visual/io';
 import { pipeWorldY } from '../../assets/process/pipe-math';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { resolvePipeRuns } from '../iso/pipe-runs';
@@ -30,7 +31,8 @@ import { findWindowConnections, resolvePipeClips } from '../routing/vessel-ports
 import { CUTAWAY_VESSEL_IDS, createCutawayRegistry } from './pipe-cutaway-parts';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
-const snapDir = path.join(pkgRoot, 'tests/snapshots');
+/** Review shots: gitignored, uploaded by CI's render-artifacts step (holodeck#73). */
+const snapDir = artifactsDir('render');
 // Vendored copies of core's brewery HMI scenes (tests/fixtures/brewery); brewery-fixtures.test.ts
 // keeps them in sync with core when the sibling checkout exists.
 const hmiDir = path.join(pkgRoot, 'tests/fixtures/brewery');
@@ -111,7 +113,6 @@ describe.skipIf(!CHROMIUM)('pipe cut-away render', () => {
     if (!address || typeof address === 'string') throw new Error('vite did not bind a port');
     const base = `http://127.0.0.1:${address.port}`;
     const browser = await launchRenderBrowser();
-    mkdirSync(snapDir, { recursive: true });
     try {
       for (const name of SCENES) {
         const scene = loadScene(name);

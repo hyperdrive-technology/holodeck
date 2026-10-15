@@ -5,16 +5,25 @@
  * (tests/snapshots/reference-canvas.png, the process pane cropped out of
  * reference.jpg) and produces:
  *
- *   - `fidelity` = share of the *relevant* pixels that pixelmatch calls equal
- *     (OKLab HyAB distance <= `threshold`, anti-aliased pixels ignored), where
- *     relevant = drawn (darker than the #EEE floor-grid lines) in either image,
- *     or different. This is the one gated score: higher is closer to Arcentry.
+ *   - `fidelity` = share of the *relevant* pixels that match, where
+ *       relevant = drawn in either image, or different;
+ *       drawn    = darker than the #EEE floor-grid lines AND away from that
+ *                  image's own background (its most common luminance);
+ *       match    = pixelmatch calls the pixel equal (OKLab HyAB distance <=
+ *                  `threshold`, anti-aliased pixels ignored) AND it is not
+ *                  "uncovered": drawn in one image while the other shows its
+ *                  background there.
+ *     The background terms are holodeck#70: pixelmatch calls #e5e5e5 equal to
+ *     both white floor and Arcentry's pale shading, so a blank tinted render
+ *     used to count every pixel as relevant, most of them equal, and passed
+ *     the ratchet. This is the one gated score: higher is closer to Arcentry.
  *     Normalising by the drawn area matters: ~78 % of the canvas is white floor
  *     in both images, and a whole-canvas ratio hid a 1.5 % zoom change inside
  *     the noise allowance (0.00045 vs 0.0005), while this score moves ~10x more.
  *   - `pixelFidelity` = 1 - diff ratio over the whole canvas (reported only).
  *   - `rmse` (0..255, RGB): continuous, moves on shading changes too small to
  *     cross the pixelmatch threshold. Reported, not gated.
+ *   - `inkRatio`: share of our pixels away from our background (blank-render guard).
  *   - per-cell diff ratios on a grid, worst first, so an agent knows where to look.
  *   - images: a pixelmatch diff (red = ours lighter than Arcentry / missing ink,
  *     blue = ours darker / extra ink, over a faded copy of ours), a continuous
@@ -61,24 +70,32 @@ export interface FidelityMetrics {
   width: number;
   height: number;
   threshold: number;
-  /** 1 - diffPixels / relevantPixels. The gated score. */
+  /** 1 - (diffPixels + uncoveredPixels) / relevantPixels. The gated score. */
   fidelity: number;
   /** 1 - diffRatio (whole canvas). */
   pixelFidelity: number;
   /** diffPixels / all pixels. */
   diffRatio: number;
-  /** Pixels drawn in either image (luminance < INK_LUMINANCE) or different. */
+  /** Pixels drawn in either image (luminance < INK_LUMINANCE and away from that image's background) or different. */
   relevantPixels: number;
   /** Pixels excluded by `ignore`. */
   ignoredPixels: number;
   diffPixels: number;
+  /**
+   * Relevant pixels pixelmatch calls equal but where one image is drawn and the
+   * other shows its background (pale ink vs floor or tint). Misses, like diffPixels.
+   */
+  uncoveredPixels: number;
   /** Pixels darker in ours than in the reference (extra ink: thicker lines, darker shading). */
   darkerPixels: number;
   /** Pixels lighter in ours (missing ink: thin or absent outlines, washed-out shading). */
   lighterPixels: number;
   /** RGB root-mean-square error, 0..255. */
   rmse: number;
-  /** Share of our pixels that are not near-white (blank-render guard). */
+  /**
+   * Share of our pixels more than BACKGROUND_DELTA away from our background
+   * luminance (blank-render guard). A uniform image of any shade has 0.
+   */
   inkRatio: number;
   /** Grid cells in row-major order. */
   cells: FidelityCell[];
@@ -93,12 +110,53 @@ export interface FidelityImages {
 /** Darker than this is "drawn": below the floor grid's #EEE cell lines (238), above its #CCC section lines (204). */
 export const INK_LUMINANCE = 230;
 
+/**
+ * A pixel within this luminance distance of its image's background (the most
+ * common luminance) is background, whatever its shade. 10 keeps the old guard
+ * (ink = luminance < 245) on a white floor.
+ */
+export const BACKGROUND_DELTA = 10;
+
 const DIFF_LIGHTER: [number, number, number] = [230, 30, 30];
 const DIFF_DARKER: [number, number, number] = [20, 90, 230];
 const AA_COLOR: [number, number, number] = [255, 210, 0];
 
 function luminance(d: RgbaImage['data'], i: number): number {
   return 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+}
+
+/**
+ * The most common rounded luminance among the counted pixels: the floor colour
+ * of a render or reference (white, or a tint).
+ */
+function backgroundLuminance(img: Uint8ClampedArray, ignored: Uint8Array): number {
+  const hist = new Uint32Array(256);
+  for (let p = 0; p < ignored.length; p++) {
+    if (!ignored[p]) hist[Math.round(luminance(img, p * 4))]++;
+  }
+  let best = 255;
+  for (let l = 0; l < 256; l++) if (hist[l] > hist[best]) best = l;
+  return best;
+}
+
+/**
+ * Cell index of every coordinate along one axis, from the same rounded
+ * boundaries the reported cell rectangles use (holodeck#71: assigning with
+ * floor(x / cellW) while reporting rounded bounds put pixels in a cell whose
+ * rectangle excluded them).
+ */
+function cellEdges(size: number, cells: number): number[] {
+  return Array.from({ length: cells + 1 }, (_, k) => Math.round((k * size) / cells));
+}
+
+function cellIndex(size: number, edges: readonly number[]): Uint32Array {
+  const out = new Uint32Array(size);
+  let k = 0;
+  for (let v = 0; v < size; v++) {
+    while (v >= edges[k + 1]) k++;
+    out[v] = k;
+  }
+  return out;
 }
 
 /** Composites RGBA over white (screenshots and decoded JPEG crops are opaque; this keeps odd inputs honest). */
@@ -152,8 +210,12 @@ export function compareToReference(
   });
 
   const total = width * height;
-  const cellW = width / grid.cols;
-  const cellH = height / grid.rows;
+  const xEdges = cellEdges(width, grid.cols);
+  const yEdges = cellEdges(height, grid.rows);
+  const colOf = cellIndex(width, xEdges);
+  const rowOf = cellIndex(height, yEdges);
+  const refBg = backgroundLuminance(ref, ignored);
+  const ourBg = backgroundLuminance(ours, ignored);
   const cellDiff = new Array<number>(grid.cols * grid.rows).fill(0);
   const cellTotal = new Array<number>(grid.cols * grid.rows).fill(0);
 
@@ -163,6 +225,7 @@ export function compareToReference(
   let sq = 0;
   let ink = 0;
   let relevant = 0;
+  let uncovered = 0;
   let ignoredCount = 0;
   let darker = 0;
   let lighter = 0;
@@ -185,15 +248,20 @@ export function compareToReference(
     const db = ours[i + 2] - ref[i + 2];
     sq += dr * dr + dg * dg + db * db;
     const lum = luminance(ours, i);
-    if (lum < 245) ink++;
+    const oursForeground = Math.abs(lum - ourBg) > BACKGROUND_DELTA;
+    if (oursForeground) ink++;
     const refLum = luminance(ref, i);
+    const refForeground = Math.abs(refLum - refBg) > BACKGROUND_DELTA;
+    const refDrawn = refLum < INK_LUMINANCE && refForeground;
+    const oursDrawn = lum < INK_LUMINANCE && oursForeground;
 
     const isLighter = mask[i] === DIFF_LIGHTER[0] && mask[i + 1] === DIFF_LIGHTER[1] && mask[i + 2] === DIFF_LIGHTER[2] && mask[i + 3] > 0;
     const isDarker = mask[i] === DIFF_DARKER[0] && mask[i + 1] === DIFF_DARKER[1] && mask[i + 2] === DIFF_DARKER[2] && mask[i + 3] > 0;
     if (isLighter) lighter++;
     if (isDarker) darker++;
-    if (isLighter || isDarker || lum < INK_LUMINANCE || refLum < INK_LUMINANCE) relevant++;
-    const cell = Math.min(grid.rows - 1, Math.floor(y / cellH)) * grid.cols + Math.min(grid.cols - 1, Math.floor(x / cellW));
+    if (isLighter || isDarker || oursDrawn || refDrawn) relevant++;
+    if (!isLighter && !isDarker && ((refDrawn && !oursForeground) || (oursDrawn && !refForeground))) uncovered++;
+    const cell = rowOf[y] * grid.cols + colOf[x];
     cellTotal[cell]++;
     if (isLighter || isDarker) cellDiff[cell]++;
 
@@ -229,15 +297,13 @@ export function compareToReference(
   for (let row = 0; row < grid.rows; row++) {
     for (let col = 0; col < grid.cols; col++) {
       const k = row * grid.cols + col;
-      const x0 = Math.round(col * cellW);
-      const y0 = Math.round(row * cellH);
       cells.push({
         col,
         row,
-        x: x0,
-        y: y0,
-        width: Math.round((col + 1) * cellW) - x0,
-        height: Math.round((row + 1) * cellH) - y0,
+        x: xEdges[col],
+        y: yEdges[row],
+        width: xEdges[col + 1] - xEdges[col],
+        height: yEdges[row + 1] - yEdges[row],
         diffRatio: round(cellTotal[k] === 0 ? 0 : cellDiff[k] / cellTotal[k]),
       });
     }
@@ -251,12 +317,13 @@ export function compareToReference(
       width,
       height,
       threshold,
-      fidelity: round(relevant === 0 ? 1 : 1 - diffPixels / relevant),
+      fidelity: round(relevant === 0 ? 1 : 1 - (diffPixels + uncovered) / relevant),
       pixelFidelity: round(1 - diffRatio),
       diffRatio: round(diffRatio),
       relevantPixels: relevant,
       ignoredPixels: ignoredCount,
       diffPixels,
+      uncoveredPixels: uncovered,
       darkerPixels: darker,
       lighterPixels: lighter,
       rmse: round(Math.sqrt(sq / (counted * 3)), 3),
@@ -348,14 +415,8 @@ export interface Verdict {
   message: string;
 }
 
-/**
- * True when running under CI. GitHub Actions (and most CI systems) set CI=true;
- * an empty value, "0" or "false" counts as not CI so a stray export can be undone.
- */
-export function isCi(env: Readonly<Record<string, string | undefined>> = process.env): boolean {
-  const v = env.CI?.trim().toLowerCase();
-  return !!v && v !== '0' && v !== 'false';
-}
+/** Shared with test-support/chromium.ts (holodeck#79). */
+export { isCi } from '../test-support/ci';
 
 export function judge(
   record: FidelityRecord | undefined,

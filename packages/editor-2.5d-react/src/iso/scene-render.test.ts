@@ -19,14 +19,19 @@
  * Gate: tests/visual/reference-fidelity.json (per platform). A run fails when
  * fidelity drops more than epsilon below the record, or (CI only) when the
  * platform has no record; `pnpm visual:record`
- * (HOLODECK_VISUAL_RECORD=1) raises the record when a run beats it. Nothing
- * under tests/snapshots/ is written any more.
+ * (HOLODECK_VISUAL_RECORD=1) raises the record when a run beats it. This test
+ * only reads the committed reference in the snapshots folder, never writes there.
+ *
+ * Browser: the score is only comparable on a fixed build, so the gate refuses
+ * an unpinned (auto-updating system) Chrome: install Playwright's build with
+ * `pnpm exec playwright install chromium` or set HOLODECK_CHROMIUM
+ * (test-support/chromium.ts, holodeck#68).
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Browser } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CHROMIUM } from '../test-support/chromium';
+import { CHROMIUM, CHROMIUM_RESOLUTION } from '../test-support/chromium';
 import {
   collectPageLog,
   launchRenderBrowser,
@@ -144,6 +149,13 @@ describe.skipIf(!CHROMIUM)('renders scene.json', () => {
     writePng(files.diff, images.diff);
     writePng(files.heatmap, images.heatmap);
     writePng(files.overlay, images.overlay);
+
+    // Placement checks above ran and the images are written; the score itself
+    // is only comparable (and recordable) on a fixed browser build (holodeck#68).
+    expect(
+      CHROMIUM_RESOLUTION.pinned,
+      `Arcentry fidelity needs a fixed browser build, got ${CHROMIUM_RESOLUTION.reason}`,
+    ).toBe(true);
 
     let record = readRecord();
     const before = record.platforms[process.platform];

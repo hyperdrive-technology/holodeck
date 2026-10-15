@@ -37,7 +37,7 @@ twin where one exists:
 ```sh
 pnpm run parts:watch            # terminal 1: rebuild GLBs on script save
 pnpm run parts                  # terminal 2: vite page, full-reloads on GLB write
-npx vitest run src/iso/parts-render.test.ts   # headless: tests/snapshots/parts.png
+npx vitest run src/iso/parts-render.test.ts   # headless: artifacts/render/parts.png
 ```
 
 The render test fails on any `applyHolodeckStyle` warning, for example a

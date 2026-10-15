@@ -96,7 +96,10 @@ jobs:
       # (HOLODECK_CHROMIUM) with the SwiftShader software-Vulkan flags in
       # src/test-support/chromium.ts. Do NOT `playwright install` here: it hangs
       # while unpacking its browser archive on GitHub-hosted runners (holodeck#29).
-      # Other packages have no render tests; they skip explicitly.
+      # Other packages have no render tests; they skip explicitly. Without this
+      # step (or with a HOLODECK_CHROMIUM that does not exist) the guard test in
+      # src/test-support/render-harness.test.ts fails the job instead of every
+      # render test skipping quietly (holodeck#78).
       - name: Select browser for render tests
         run: |
           if [ "${{ matrix.package }}" = "editor-2.5d-react" ]; then

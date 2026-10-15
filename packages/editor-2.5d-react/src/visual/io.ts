@@ -56,5 +56,5 @@ export function writeRecord(record: FidelityRecordFile, file = FIDELITY_RECORD_P
 
 export const RECORD_DESCRIPTION =
   'Arcentry fidelity ratchet for src/iso/scene-render.test.ts: render of tests/scene.json vs tests/snapshots/reference-canvas.png ' +
-  '(760x540, DPR 1). fidelity = 1 - pixelmatch diff ratio (threshold 0.1, AA ignored). Runs fail below fidelity - epsilon; ' +
+  '(760x540, DPR 1). fidelity = 1 - (pixelmatch diffs + uncovered pixels) / relevant pixels (threshold 0.1, AA ignored; see src/visual/fidelity.ts). Runs fail below fidelity - epsilon; ' +
   '`pnpm visual:record` only raises the score. Lowering it is a deliberate hand edit with a reason in the PR.';

@@ -1,6 +1,6 @@
 /**
  * Headless render of the Hyperdrive brewhouse piping (bends and vessel
- * connections) -> tests/snapshots/brewhouse-routing.png, for review.
+ * connections) -> artifacts/render/brewhouse-routing.png, for review.
  *
  * The scene lives in the sibling core repo
  * (core/src/typescript/packages/hyperdrive-ui/examples/brewery/hmi). Its
@@ -11,17 +11,19 @@
  *
  * Needs local Chromium + WebGPU like the other *-render tests.
  */
-import { mkdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
 import { launchRenderBrowser, waitForRendered } from '../test-support/render-harness';
+import { artifactsDir } from '../visual/io';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { checkElbows, isAutoElbow, resolveAutoElbows } from '../routing/elbows';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
-const snapDir = path.join(pkgRoot, 'tests/snapshots');
+/** Review shots: gitignored, uploaded by CI's render-artifacts step (holodeck#73). */
+const snapDir = artifactsDir('render');
 const shotPath = path.join(snapDir, 'brewhouse-routing.png');
 // Vendored copy of core's brewhouse HMI scene; brewery-fixtures.test.ts keeps it in sync.
 const brewhousePath = path.join(pkgRoot, 'tests/fixtures/brewery/brewhouse.iso.json');
@@ -96,7 +98,6 @@ describe.skipIf(!CHROMIUM)('brewhouse piping render', () => {
       await page.waitForSelector('canvas');
       await waitForRendered(page);
       expect(errors).toEqual([]);
-      mkdirSync(snapDir, { recursive: true });
       await page.screenshot({ path: shotPath, type: 'png' });
     } finally {
       await browser.close();

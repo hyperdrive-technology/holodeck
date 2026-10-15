@@ -42,7 +42,7 @@
     "check:vite-consumer": "node ../../scripts/vite-consumer-check.mjs .",
     "visual": "vitest run src/iso/scene-render.test.ts",
     "visual:record": "HOLODECK_VISUAL_RECORD=1 vitest run src/iso/scene-render.test.ts",
-    "visual:reference": "node scripts/make-reference-canvas.mjs"
+    "visual:reference": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/make-reference-canvas.mjs"
   },
   "keywords": [
     "holodeck",
