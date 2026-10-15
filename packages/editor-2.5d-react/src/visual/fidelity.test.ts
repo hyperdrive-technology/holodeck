@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   compareToReference,
@@ -9,6 +10,7 @@ import {
   type FidelityRecordFile,
   type RgbaImage,
 } from './fidelity';
+import { readPng } from './io';
 
 function solid(width: number, height: number, rgb: [number, number, number], alpha = 255): RgbaImage {
   const data = new Uint8ClampedArray(width * height * 4);
@@ -86,7 +88,8 @@ describe('compareToReference', () => {
     const { metrics } = compareToReference(solid(8, 8, WHITE), solid(8, 8, BLACK));
     expect(metrics.rmse).toBe(255);
     expect(metrics.fidelity).toBe(0);
-    expect(metrics.inkRatio).toBe(1);
+    // Uniform black is its own background: no ink, the blank guard trips (holodeck#70).
+    expect(metrics.inkRatio).toBe(0);
   });
 
   it('a sub-threshold shading change moves rmse but not fidelity', () => {
@@ -111,6 +114,72 @@ describe('compareToReference', () => {
     expect(metrics.cells).toHaveLength(6);
     const area = metrics.cells.reduce((s, c) => s + c.width * c.height, 0);
     expect(area).toBe(70);
+  });
+
+  it('assigns pixels to the cell whose reported rectangle holds them, with uneven cells (holodeck#71)', () => {
+    // 10x7 on a 3x2 grid: cell edges fall on fractional pixels (10 / 3, 7 / 2).
+    // Ink in columns 3..6 lies inside the reported rect of column 1 only.
+    const ours = rect(solid(10, 7, WHITE), 3, 0, 4, 7, BLACK);
+    const { metrics } = compareToReference(solid(10, 7, WHITE), ours, { grid: { cols: 3, rows: 2 } });
+    const hit = metrics.cells.filter((c) => c.diffRatio > 0);
+    expect(hit.map((c) => c.col)).toEqual([1, 1]);
+    for (const c of hit) {
+      expect(c.x).toBeLessThanOrEqual(3);
+      expect(c.x + c.width).toBeGreaterThanOrEqual(7);
+    }
+    // Every cell's ratio is over the pixels its rectangle covers.
+    for (const c of metrics.cells) {
+      const inked = Math.max(0, Math.min(c.x + c.width, 7) - Math.max(c.x, 3)) * c.height;
+      expect(c.diffRatio).toBeCloseTo(inked / (c.width * c.height), 5);
+    }
+  });
+
+  it('fails a uniformly tinted render: the tint is background, not drawing (holodeck#70)', () => {
+    // Reference: white floor, a black block and a light-grey (#e5e5e5) block, like
+    // Arcentry's pale shading. Ours: nothing drawn, a uniform #e5e5e5 (luminance
+    // 229, under INK_LUMINANCE) that pixelmatch calls equal to white AND to the
+    // pale block. Before the fix every pixel was relevant and most "matched".
+    const ref = rect(rect(solid(100, 100, WHITE), 10, 10, 20, 50, BLACK), 50, 10, 20, 50, [0xe5, 0xe5, 0xe5]);
+    const { metrics } = compareToReference(ref, solid(100, 100, [0xe5, 0xe5, 0xe5]));
+    expect(metrics.relevantPixels).toBe(2000);
+    // Background never covers drawn reference pixels, even where the colours match:
+    // the pale block is uncovered, the black block a pixelmatch difference.
+    expect(metrics.uncoveredPixels).toBeGreaterThanOrEqual(1000);
+    expect(metrics.diffPixels + metrics.uncoveredPixels).toBe(2000);
+    expect(metrics.fidelity).toBe(0);
+    // Blank-render guard: a uniform image of any shade has no ink.
+    expect(metrics.inkRatio).toBe(0);
+    expect(compareToReference(ref, solid(100, 100, [0x80, 0x80, 0x80])).metrics.inkRatio).toBe(0);
+  });
+
+  it('scores every uniform image 0 against the committed Arcentry reference (holodeck#70)', () => {
+    // #e5e5e5 scored 0.30473 here before the fix, above the 0.283 darwin record.
+    const ref = readPng(path.join(import.meta.dirname, '../../tests/snapshots/reference-canvas.png'));
+    for (const shade of [0xe5, 0xee, 0xff, 0xd0, 0x00]) {
+      const { metrics } = compareToReference(ref, solid(ref.width, ref.height, [shade, shade, shade]));
+      expect(metrics.fidelity, `#${shade.toString(16)}`).toBe(0);
+      expect(metrics.inkRatio).toBe(0);
+    }
+  });
+
+  it('counts pale ink drawn on a blank reference area as a miss, both ways (holodeck#70)', () => {
+    const pale: [number, number, number] = [0xe5, 0xe5, 0xe5];
+    const ref = rect(solid(100, 100, WHITE), 10, 10, 20, 50, BLACK);
+    const ours = rect(rect(solid(100, 100, WHITE), 10, 10, 20, 50, BLACK), 50, 10, 20, 50, pale);
+    const { metrics } = compareToReference(ref, ours);
+    expect(metrics.diffPixels).toBe(0); // pixelmatch alone sees no difference
+    expect(metrics.uncoveredPixels).toBe(1000);
+    expect(metrics.fidelity).toBe(0.5);
+    expect(compareToReference(ours, ref).metrics.fidelity).toBe(0.5);
+  });
+
+  it('scores a correct drawing on a tinted floor by the drawing alone (holodeck#70)', () => {
+    const ref = rect(solid(100, 100, WHITE), 10, 10, 20, 50, BLACK);
+    const ours = rect(solid(100, 100, [0xe5, 0xe5, 0xe5]), 10, 10, 20, 50, BLACK);
+    const { metrics } = compareToReference(ref, ours);
+    expect(metrics.fidelity).toBe(1);
+    expect(metrics.relevantPixels).toBe(1000);
+    expect(metrics.inkRatio).toBe(0.1);
   });
 
   it('composites transparent pixels over white, so alpha alone is not a difference', () => {

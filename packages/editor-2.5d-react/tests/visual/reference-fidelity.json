@@ -1,18 +1,19 @@
 {
-  "description": "Arcentry fidelity ratchet for src/iso/scene-render.test.ts: render of tests/scene.json vs tests/snapshots/reference-canvas.png (760x540, DPR 1). fidelity = 1 - pixelmatch diff ratio (threshold 0.1, AA ignored). Runs fail below fidelity - epsilon; `pnpm visual:record` only raises the score. Lowering it is a deliberate hand edit with a reason in the PR.",
+  "description": "Arcentry fidelity ratchet for src/iso/scene-render.test.ts: render of tests/scene.json vs tests/snapshots/reference-canvas.png (760x540, DPR 1). fidelity = 1 - (pixelmatch diffs + uncovered pixels) / relevant pixels (threshold 0.1, AA ignored; see src/visual/fidelity.ts). Runs fail below fidelity - epsilon; `pnpm visual:record` only raises the score. Lowering it is a deliberate hand edit with a reason in the PR.",
   "platforms": {
     "darwin": {
-      "fidelity": 0.283,
+      "fidelity": 0.16487,
       "epsilon": 0.0005,
       "rmse": 25.34,
-      "recordedAt": "2026-10-14T05:00:43.737Z"
+      "recordedAt": "2026-10-16T03:30:00Z",
+      "source": "Hand-lowered for the holodeck#70 rescoring (0.283 -> 0.16487, same render): pnpm visual on the pinned Playwright 1.59.1 build chromium-1217 (Chrome for Testing 147.0.7727.15), macOS arm64; three runs byte-identical. The old 0.283 record (chromium-1193) scores 0.283 on this build under the old metric too."
     },
     "linux": {
-      "fidelity": 0.28371,
+      "fidelity": 0.1654,
       "epsilon": 0.0005,
       "rmse": 24.867,
-      "recordedAt": "2026-10-15T08:08:16Z",
-      "source": "CI run 38702345405 (PR #52 head 8507838), job editor-2.5d-react, attempts 1 and 2: GitHub ubuntu runner, preinstalled Google Chrome 154.0.8037.97 and 155.0.8059.39, SwiftShader; both renders byte-identical"
+      "recordedAt": "2026-10-16T03:30:00Z",
+      "source": "Hand-lowered for the holodeck#70 rescoring (0.28371 -> 0.1654): the render from main CI run 38738147143 (runner Google Chrome 154.0.8037.97, SwiftShader; byte-identical to PR #52's run 38702345405 on Chrome 155) rescored with the new metric; to be confirmed by this PR's CI run"
     }
   }
 }
