@@ -165,6 +165,7 @@ describe('contribution store (backs useIsoContributions)', () => {
   it('gives a stable snapshot until the registry changes, then a fresh one, and notifies', () => {
     const registry = createIsoRegistry();
     const store = getStore(registry);
+    const version = store.version();
     let calls = 0;
     const off = store.subscribe(() => (calls += 1));
     const empty = store.snapshot(HOLODECK_KINDS.isoPart);
@@ -172,12 +173,14 @@ describe('contribution store (backs useIsoContributions)', () => {
 
     registry.install({ id: 'late', version: '1', contributions: { [HOLODECK_KINDS.isoPart]: [part('late-part')] } });
     expect(calls).toBe(1);
+    expect(store.version()).toBe(version + 1);
     const after = store.snapshot(HOLODECK_KINDS.isoPart);
     expect(after).not.toBe(empty);
     expect(after.map((p) => p.id)).toEqual(['late-part']);
 
     registry.uninstall('late');
     expect(calls).toBe(2);
+    expect(store.version()).toBe(version + 2);
     expect(store.snapshot(HOLODECK_KINDS.isoPart)).toHaveLength(0);
 
     off();

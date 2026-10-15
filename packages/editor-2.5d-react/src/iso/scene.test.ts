@@ -10,6 +10,7 @@ import { DEFAULT_TANK_PARAMS, LIQUID_THETA_LENGTH, TANK_INNER_RATIO, TANK_BOWL_Y
 import { REFERENCE_ZOOM } from '../editor/ProcessSceneView';
 import { PROCESS_SCENE, loadProcessScene } from './load-process-scene';
 import { PROCESS_SNAPSHOT } from './ProcessLineSketch';
+import { hostPipeOf, positionOnPipe, segOf } from '../routing/inline';
 import { gridToWorld, parseSceneFile, sceneBounds, worldToGrid } from './scene';
 
 describe('scene document', () => {
@@ -380,5 +381,57 @@ describe('scene document', () => {
     const pressure = PROCESS_SCENE.objects.find((o) => o.id === 'label-pressure');
     // 0.30 read large vs r-press; 0.22 clamped to LABEL_SCREEN_PX_MIN 8px.
     expect(pressure).toMatchObject({ screenX: 358, screenY: 420, size: 0.26 });
+  });
+});
+
+describe('inline part attachment (onPipe / at)', () => {
+  const scene = (extra: Record<string, unknown>) => ({
+    id: 's',
+    name: 's',
+    gridCellSize: 1,
+    objects: [
+      { id: 'p', object: 'pipe', x: 0, y: 0, toX: 10, toY: 0 },
+      { id: 'v', object: 'valve', x: 4, y: 0, ...extra },
+    ],
+  });
+
+  it('parses old scenes (no attachment) unchanged', () => {
+    expect(parseSceneFile(scene({})).objects[1]).toEqual({ id: 'v', object: 'valve', x: 4, y: 0 });
+  });
+
+  it('round-trips onPipe and at', () => {
+    const parsed = parseSceneFile(scene({ onPipe: 'p', at: 0.4 }));
+    expect(parsed.objects[1]).toMatchObject({ onPipe: 'p', at: 0.4 });
+    expect(parseSceneFile(JSON.parse(JSON.stringify(parsed))).objects[1]).toMatchObject({ onPipe: 'p', at: 0.4 });
+  });
+
+  it('accepts onPipe without at, at on its bounds, and a dangling pipe id', () => {
+    expect(() => parseSceneFile(scene({ onPipe: 'p' }))).not.toThrow();
+    expect(() => parseSceneFile(scene({ onPipe: 'p', at: 0 }))).not.toThrow();
+    expect(() => parseSceneFile(scene({ onPipe: 'p', at: 1 }))).not.toThrow();
+    expect(() => parseSceneFile(scene({ onPipe: 'deleted-pipe', at: 0.5 }))).not.toThrow();
+  });
+
+  it.each([
+    [{ onPipe: 3 }, /onPipe must be a pipe id string/],
+    [{ onPipe: null }, /onPipe must be a pipe id string/],
+    [{ onPipe: 'p', at: 1.5 }, /at must be a number between 0 and 1/],
+    [{ onPipe: 'p', at: -0.1 }, /at must be a number between 0 and 1/],
+    [{ onPipe: 'p', at: '0.5' }, /at must be a number between 0 and 1/],
+    [{ onPipe: 'p', at: Number.NaN }, /at must be a number between 0 and 1/],
+  ])('rejects %j', (extra, message) => {
+    expect(() => parseSceneFile(scene(extra))).toThrow(message);
+  });
+
+  it('tests/scene.json attaches each valve that is drawn on a pipe, on the pipe it sits on', () => {
+    const byId = new Map(PROCESS_SCENE.objects.map((o) => [o.id, o]));
+    const attached = PROCESS_SCENE.objects.filter((o) => o.onPipe !== undefined);
+    expect(attached.map((o) => o.id).sort()).toEqual(['valve-a-in', 'valve-b', 'valve-b-in', 'valve-holding-out', 'valve-packaging']);
+    for (const v of attached) {
+      const host = byId.get(v.onPipe!)!;
+      expect(host.object).toBe('pipe');
+      expect(hostPipeOf(v, PROCESS_SCENE.objects)?.id).toBe(host.id);
+      expect(positionOnPipe(segOf(host), v.x, v.y)).toBeCloseTo(v.at!, 2);
+    }
   });
 });

@@ -55,10 +55,10 @@ export function Palette({
           font: FONT,
         }}
       />
-      <div style={{ overflow: 'auto', padding: '0 8px 12px' }}>
+      <div style={{ overflow: 'auto', flex: 1, minHeight: 0, padding: '0 8px 12px' }}>
         {groups.map(({ category, items }) => (
           <section key={category} aria-label={category}>
-            <div style={{ color: MUTED, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, padding: '8px 8px 4px' }}>
+            <div style={{ color: MUTED, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.6, padding: '8px 8px 4px' }}>
               {category}
             </div>
             {items.map((item) => {
