@@ -307,17 +307,23 @@ so a flow and the diagram next to it share one session per connection. It handle
 - When the hub replaces a session (because the config changed, the provider was installed or reinstalled, or the
   connection was re-added), the bridge moves the subscription to the new session.
 - **While a connection is down** (no session, or a status of `connecting`, `disconnected` or `error`), `signal.in`
-  holds its last value with quality `uncertain`. Writes reject with `ProviderHubError` `NOT_CONNECTED`. The
-  `signal.out` node is faulted and retries its latest value at most once per `writeRetryMs` (default 1 s). A
-  write with no answer after `writeTimeoutMs` (default 10 s) counts as failed, and its late answer is ignored.
+  holds its last value with quality `uncertain`. Anything the provider still delivers meanwhile (a queued or
+  cached sample, a late callback, the first delivery of a subscription made on a session that is already down)
+  is passed on at best `uncertain`, so it can never reopen the write gate. Writes to a down connection reject
+  with `ProviderHubError` `NOT_CONNECTED` without reaching the session. The `signal.out` node is faulted and
+  retries its latest value at most once per `writeRetryMs` (default 1 s). A write with no answer after
+  `writeTimeoutMs` (default 10 s) counts as failed.
 - When the connection is up again, the bridge subscribes afresh, so the provider's first delivery brings back the
   current value.
 - Dispose the bridge before, or together with, the hub.
 
-`signal.out` keeps at most one write in flight. The newest value wins, and a value equal to the last successful
-write is not sent again (a hold resets this: after a hold the value is sent again, and a write still in flight
-during the hold does not count as the target's value). If the value returns to the last successful write after a failed one, the fault clears
-without a write, because the failed value never landed. One bridge subscription serves every `signal.in` that reads the same signal. Without a
+`signal.out` keeps at most one write in flight. The newest value wins, and a value equal to the last acknowledged
+write is not sent again. Anything that makes the target's value unknown resets this, so the current value is sent
+again: a hold (and a write still in flight during the hold does not count as the target's value); a failed or
+timed-out write, because the bridge gives no rollback guarantee and the value may have landed anyway; and the late
+answer of a timed-out write, because timing out does not cancel it and it may have landed on top of a newer value
+(a write in flight when that answer arrives is not trusted either). The fault clears only on an acknowledged write.
+A timed-out write that never answers cannot be reconciled: that would need remote sequencing. One bridge subscription serves every `signal.in` that reads the same signal. Without a
 bridge, `signal.in` reads `null`/`bad`, `signal.out` is faulted, and deploy warns `NO_SIGNAL_BRIDGE`.
 
 The bridge depends on a document's hub, but the provider is installed per host, so a host passes a factory. The

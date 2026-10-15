@@ -9,7 +9,7 @@
  */
 
 import { ProviderHubError, type ProviderContext, type ProviderHub, type ProviderSession, type Sample, type SignalQuality } from '@holodeck/sdk';
-import { errorMessage, isFlowValue, isQuality, isRecord, pairKey, type FlowValue } from './values';
+import { errorMessage, isFlowValue, isQuality, isRecord, pairKey, worstQuality, type FlowValue } from './values';
 
 export interface SignalBridge {
   /**
@@ -73,8 +73,16 @@ const safeCall = (fn: unknown, log: ProviderContext['log'], what: string): void 
  *   value and quality `uncertain`; `signal.in` blocks hold that value. When
  *   the connection is up again the bridge subscribes afresh, so the
  *   provider's first delivery brings the current value.
- * - Writes go to the current session's `write`, and reject with
- *   `ProviderHubError` `NOT_CONNECTED` (no session) or `NOT_WRITABLE`.
+ * - Anything the provider delivers while the connection is down (a queued or
+ *   cached sample, a late callback, the synchronous first delivery of a
+ *   subscription made on a session that is already down) is passed on with
+ *   its quality lowered to at least `uncertain`: only a delivery on a
+ *   subscription made while the connection was up can be `good` (review P1).
+ *   Up-ness is checked at delivery time against the hub, not only at the
+ *   last sync, so a delivery racing the hub's status publish is covered too.
+ * - Writes go to the current session's `write` only while the connection is
+ *   up, and reject with `ProviderHubError` `NOT_CONNECTED` (no session, or
+ *   the session is connecting/disconnected/errored) or `NOT_WRITABLE`.
  *
  * Dispose the bridge before (or with) the hub: a disposed hub stops notifying
  * listeners, so the bridge cannot tell its sessions are gone.
@@ -151,8 +159,13 @@ export function createHubSignalBridge(hub: ProviderHub, options: HubSignalBridge
       };
     }
     if (!found) return;
+    // `sub.up` is only set true by `attach`, which also resubscribes on
+    // recovery; the live lookup catches a status change the hub has not
+    // published to us yet. Both must agree before a sample may stay `good`.
+    const live = lookup(sub.connection);
+    const up = sub.up && live.up && live.session === sub.session;
     sub.last = found.value;
-    emit(sub, found.value, found.quality, found.ts);
+    emit(sub, found.value, up ? found.quality : worstQuality(found.quality, 'uncertain'), found.ts);
   };
 
   const subscribeOn = (sub: Subscription, session: ProviderSession): void => {
@@ -251,8 +264,11 @@ export function createHubSignalBridge(hub: ProviderHub, options: HubSignalBridge
     async write(connection, source, value) {
       if (disposed) throw new ProviderHubError('signal bridge is disposed', 'DISPOSED');
       if (!isFlowValue(value)) throw new TypeError('value must be a JSON scalar');
-      const session = hub.session(connection);
+      const { session, up } = lookup(connection);
       if (!session) throw new ProviderHubError(`connection "${connection}" is not connected`, 'NOT_CONNECTED');
+      // A session that exists but is not live/stale may still accept the call
+      // (and queue or drop it): refuse, so the caller sees a fault instead.
+      if (!up) throw new ProviderHubError(`connection "${connection}" is down`, 'NOT_CONNECTED');
       if (typeof session.write !== 'function') {
         throw new ProviderHubError(`connection "${connection}" does not support write`, 'NOT_WRITABLE');
       }

@@ -7,73 +7,15 @@ import {
   ProviderHub,
   ProviderHubError,
   type HolodeckProvider,
-  type ProviderSession,
-  type ProviderStatus,
   type Sample,
 } from '@holodeck/sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FLOW_BLOCK_KIND } from './block';
 import { createHubSignalBridge, createMemorySignalBridge, type HubSignalBridge } from './bridge';
 import { createLocalFlowProvider } from './provider';
-import { flowDoc, graph, node, TEST_BLOCKS, wire } from './test-helpers';
+import { controllableProvider, flowDoc, graph, node, TEST_BLOCKS, wire } from './test-helpers';
 
 const PROVIDER_EXT = 'test.providers';
-
-/** A provider whose sessions we can drive by hand: status, deliveries, subscription count. */
-function controllableProvider(id = 'test.ctl', options: { writes?: Array<{ source: string; value: unknown }> } = {}) {
-  const sessions: Array<{
-    session: ProviderSession;
-    subscribers: Set<(samples: readonly Sample[]) => void>;
-    setStatus(state: ProviderStatus['state']): void;
-    deliver(samples: unknown): void;
-    closed: boolean;
-  }> = [];
-  const provider: HolodeckProvider = {
-    id,
-    label: 'Controllable',
-    capabilities: {},
-    async connect() {
-      const subscribers = new Set<(samples: readonly Sample[]) => void>();
-      const listeners = new Set<(s: ProviderStatus) => void>();
-      let status: ProviderStatus = { state: 'live', since: 0 };
-      const entry = {
-        subscribers,
-        closed: false,
-        setStatus(state: ProviderStatus['state']) {
-          status = { state, since: 0 };
-          for (const l of [...listeners]) l(status);
-        },
-        deliver(samples: unknown) {
-          for (const s of [...subscribers]) s(samples as readonly Sample[]);
-        },
-        session: {
-          status: () => status,
-          onStatus: (l: (s: ProviderStatus) => void) => {
-            listeners.add(l);
-            return () => listeners.delete(l);
-          },
-          subscribe: (_sources: readonly string[], cb: (samples: readonly Sample[]) => void) => {
-            subscribers.add(cb);
-            return () => subscribers.delete(cb);
-          },
-          close: async () => {
-            entry.closed = true;
-          },
-          ...(options.writes
-            ? {
-                write: async (source: string, value: unknown) => {
-                  options.writes!.push({ source, value });
-                },
-              }
-            : {}),
-        } as ProviderSession,
-      };
-      sessions.push(entry);
-      return entry.session;
-    },
-  };
-  return { provider, sessions };
-}
 
 function setup(providers: HolodeckProvider[]) {
   const registry = new ContributionRegistry();
@@ -220,6 +162,68 @@ describe('createHubSignalBridge with a controllable provider', () => {
     entry.setStatus('live');
     expect(entry.subscribers.size).toBe(1);
     expect([...entry.subscribers][0]).not.toBe(before); // fresh subscription after recovery
+  });
+
+  it('a late good delivery while down stays uncertain until recovery (GPT review P1)', async () => {
+    const { sessions, bridge } = await ctlSetup();
+    const samples: Sample[] = [];
+    bridge.subscribe('c', 'x', (s) => samples.push(s));
+    const entry = sessions[0]!;
+    entry.deliver([{ source: 'x', value: 10, ts: 1, quality: 'good' }]);
+    entry.setStatus('disconnected');
+    // A queued/cached sample arrives on the old (still active) subscription.
+    entry.deliver([{ source: 'x', value: 11, ts: 2, quality: 'good' }]);
+    expect(samples.at(-1)).toEqual({ source: 'x', value: 11, ts: 2, quality: 'uncertain' });
+    entry.deliver([{ source: 'x', value: 12, ts: 3, quality: 'bad' }]);
+    expect(samples.at(-1)).toMatchObject({ value: 12, quality: 'bad' }); // never upgraded
+    for (const state of ['connecting', 'error'] as const) {
+      entry.setStatus(state);
+      entry.deliver([{ source: 'x', value: 13, ts: 4 }]);
+      expect(samples.at(-1)).toMatchObject({ value: 13, quality: 'uncertain' });
+    }
+    entry.setStatus('live');
+    entry.deliver([{ source: 'x', value: 14, ts: 5, quality: 'good' }]);
+    expect(samples.at(-1)).toMatchObject({ value: 14, quality: 'good' }); // fresh subscription, up again
+    entry.setStatus('stale');
+    entry.deliver([{ source: 'x', value: 15, ts: 6, quality: 'good' }]);
+    expect(samples.at(-1)).toMatchObject({ value: 15, quality: 'good' }); // stale still counts as up
+  });
+
+  it('subscribing on an already-disconnected session downgrades its cached first delivery (GPT review P1)', async () => {
+    const ctl = controllableProvider('test.ctl', { cached: () => [{ source: 'x', value: 7, ts: 1, quality: 'good' }] });
+    const { hub } = setup([ctl.provider]);
+    hub.setConnections([{ id: 'c', provider: 'test.ctl' }]);
+    await hub.settled();
+    ctl.sessions[0]!.setStatus('disconnected');
+    const bridge = track(createHubSignalBridge(hub, { now: () => 5 }));
+    const samples: Sample[] = [];
+    bridge.subscribe('c', 'x', (s) => samples.push(s));
+    expect(samples).toEqual([{ source: 'x', value: 7, ts: 1, quality: 'uncertain' }]);
+    ctl.sessions[0]!.setStatus('live'); // recovery resubscribes: the cache is now trusted
+    expect(samples.at(-1)).toEqual({ source: 'x', value: 7, ts: 1, quality: 'good' });
+  });
+
+  it('refuses writes to a session that is not up, without calling it (GPT review P1)', async () => {
+    const writes: Array<{ source: string; value: unknown }> = [];
+    const ctl = controllableProvider('test.ctl', { writes });
+    const { hub } = setup([ctl.provider]);
+    hub.setConnections([{ id: 'c', provider: 'test.ctl' }]);
+    await hub.settled();
+    const bridge = track(createHubSignalBridge(hub));
+    const entry = ctl.sessions[0]!;
+    for (const state of ['disconnected', 'connecting', 'error'] as const) {
+      entry.setStatus(state);
+      await expect(bridge.write('c', 'y', 1)).rejects.toMatchObject({ name: 'ProviderHubError', code: 'NOT_CONNECTED' });
+    }
+    expect(writes).toEqual([]);
+    entry.setStatus('stale');
+    await bridge.write('c', 'y', 2);
+    entry.setStatus('live');
+    await bridge.write('c', 'y', 3);
+    expect(writes).toEqual([
+      { source: 'y', value: 2 },
+      { source: 'y', value: 3 },
+    ]);
   });
 
   it('picks the last matching sample of a batch and ignores junk', async () => {
@@ -493,6 +497,112 @@ describe('end to end: quality through the hub bridge (review P1)', () => {
     level.deliver([{ source: 'HighLevel', value: true, ts: 3, quality: 'good' }]);
     await scan();
     expect(writes.at(-1)).toEqual({ source: 'PumpRun', value: false });
+    await hub.dispose();
+  });
+});
+
+describe('end to end: disconnected connections never reopen the write gate (GPT review P1)', () => {
+  async function e2e(options: { cached?: () => readonly Sample[] | undefined } = {}) {
+    const manual = createManualSchedule();
+    const src = controllableProvider('test.src', options);
+    const writes: Array<{ source: string; value: unknown }> = [];
+    const sink = controllableProvider('test.sink', { writes });
+    const host = new HolodeckHost({ name: 'e2e' });
+    host.registry.registerKind(FLOW_BLOCK_KIND);
+    let hub!: ProviderHub;
+    host.registry.install({
+      id: 'e2e.providers',
+      version: '1.0.0',
+      contributions: {
+        [HOLODECK_KINDS.provider]: [
+          src.provider,
+          sink.provider,
+          createLocalFlowProvider({ schedule: manual.schedule, signals: () => createHubSignalBridge(hub), writeRetryMs: 0 }),
+        ],
+        [FLOW_BLOCK_KIND.kind]: [...TEST_BLOCKS],
+      },
+    });
+    hub = host.createProviderHub();
+    const connections = [
+      { id: 'level', provider: 'test.src' },
+      { id: 'pump', provider: 'test.sink' },
+      { id: 'flow', provider: 'holodeck.flow.local' },
+    ];
+    hub.setConnections(connections);
+    await hub.settled();
+    const doc = flowDoc(
+      graph(
+        [node('lvl', 'signal.in', { connection: 'level', source: 'HighLevel' }), node('n', 'test.not'), node('run', 'signal.out', { connection: 'pump', source: 'PumpRun' })],
+        [wire('w1', 'lvl.value', 'n.in'), wire('w2', 'n.out', 'run.value')],
+      ),
+      connections,
+    );
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    const scan = async () => {
+      manual.tick();
+      await settle();
+    };
+    return { hub, src, sink, writes, doc, scan, settle };
+  }
+
+  it('a late good sample after disconnect is not written through', async () => {
+    const { hub, src, writes, doc, scan, settle } = await e2e();
+    expect(await hub.session('flow')!.deploy!(doc)).toMatchObject({ ok: true });
+    await settle();
+    const level = src.sessions[0]!;
+    level.deliver([{ source: 'HighLevel', value: false, ts: 1, quality: 'good' }]);
+    await scan();
+    expect(writes).toEqual([{ source: 'PumpRun', value: true }]);
+    level.setStatus('disconnected');
+    await scan();
+    // The repro from the review: a late `good` sample with a new value arrives while still disconnected.
+    level.deliver([{ source: 'HighLevel', value: true, ts: 2, quality: 'good' }]);
+    await scan();
+    await scan();
+    expect(hub.getSnapshot().connections.level?.status.state).toBe('disconnected');
+    expect(await hub.session('flow')!.read!(['flow:lvl.value', 'flow:n.out'])).toMatchObject([
+      { value: true, quality: 'uncertain' },
+      { value: false, quality: 'uncertain' },
+    ]);
+    expect(writes).toEqual([{ source: 'PumpRun', value: true }]); // PumpRun=false never sent
+    level.setStatus('live');
+    level.deliver([{ source: 'HighLevel', value: true, ts: 3, quality: 'good' }]);
+    await scan();
+    expect(writes.at(-1)).toEqual({ source: 'PumpRun', value: false });
+    await hub.dispose();
+  });
+
+  it('deploying onto an already-disconnected source connection writes nothing, even from its cache', async () => {
+    const { hub, src, writes, doc, scan, settle } = await e2e({ cached: () => [{ source: 'HighLevel', value: false, ts: 1, quality: 'good' }] });
+    src.sessions[0]!.setStatus('disconnected');
+    expect(await hub.session('flow')!.deploy!(doc)).toMatchObject({ ok: true });
+    await settle();
+    await scan();
+    await scan();
+    expect(writes).toEqual([]);
+    expect((await hub.session('flow')!.read!(['flow:lvl.value']))[0]).toMatchObject({ value: false, quality: 'uncertain' });
+    src.sessions[0]!.setStatus('live'); // recovery: the resubscription's first delivery is trusted
+    await scan();
+    await scan();
+    expect(writes).toEqual([{ source: 'PumpRun', value: true }]);
+    await hub.dispose();
+  });
+
+  it('a disconnected target connection faults signal.out instead of writing; recovery writes', async () => {
+    const { hub, src, sink, writes, doc, scan, settle } = await e2e();
+    sink.sessions[0]!.setStatus('disconnected');
+    expect(await hub.session('flow')!.deploy!(doc)).toMatchObject({ ok: true });
+    await settle();
+    src.sessions[0]!.deliver([{ source: 'HighLevel', value: false, ts: 1, quality: 'good' }]);
+    await scan();
+    await scan();
+    expect(writes).toEqual([]);
+    expect((await hub.session('flow')!.read!(['flow:run.$fault']))[0]?.value).toMatch(/connection "pump" is down/);
+    sink.sessions[0]!.setStatus('live');
+    await scan();
+    await scan();
+    expect(writes).toEqual([{ source: 'PumpRun', value: true }]);
+    expect((await hub.session('flow')!.read!(['flow:run.$fault']))[0]?.value).toBeNull();
     await hub.dispose();
   });
 });

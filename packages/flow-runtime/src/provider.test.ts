@@ -471,10 +471,15 @@ describe('writes', () => {
     expect((await session.read!(['flow:out.$fault']))[0]?.value).toBeNull();
   });
 
-  it('clears the fault when the value returns to the last good write (review P2)', async () => {
+  it('re-sends after a rejected write, even a value equal to the last acknowledged one (GPT review P2)', async () => {
+    // A rejection is ambiguous: here 2 is applied remotely and *then* rejected
+    // (the acknowledgement was lost). Going back to 1 must send 1 again — the
+    // target holds 2, not the last acknowledged 1.
+    let remote: FlowValue = null;
     const bridge = createMemorySignalBridge({
       write: (_c, _s, value) => {
-        if (value === 2) throw new Error('rejected 2');
+        remote = value;
+        if (value === 2) throw new Error('ack lost for 2');
       },
     });
     const { session, manual } = await connect({ signals: bridge, writeRetryMs: 0 });
@@ -485,24 +490,51 @@ describe('writes', () => {
     bridge.set('plc', 'a', 1);
     await session.deploy!(doc);
     const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
-    for (const v of [2, 1]) {
-      bridge.set('plc', 'a', v);
-      manual.tick();
-      await settle();
-      manual.tick();
-      await settle();
-    }
+    await settle();
+    expect(remote).toBe(1);
+    bridge.set('plc', 'a', 2);
+    manual.tick();
+    await settle();
+    expect(remote).toBe(2);
+    manual.tick();
+    expect((await session.read!(['flow:o.$fault']))[0]?.value).toMatch(/ack lost for 2/);
+    bridge.set('plc', 'a', 1);
     for (let i = 0; i < 3; i++) {
       manual.tick();
       await settle();
     }
-    expect((await session.read!(['flow:o.$fault']))[0]?.value).toBeNull();
-    const values = bridge.writes.map((w) => w.value);
-    expect(values[0]).toBe(1);
-    expect(values.slice(1).every((v) => v === 2)).toBe(true); // 1 is never re-sent: the target still holds it
+    expect(remote).toBe(1); // re-asserted, not skipped as "already written"
+    expect(bridge.writes.map((w) => w.value).at(-1)).toBe(1);
+    expect((await session.read!(['flow:o.$fault']))[0]?.value).toBeNull(); // cleared by an acknowledged 1, not by assumption
   });
 
-  it('a write with no answer times out, faults the node, retries, and ignores the late answer', async () => {
+  it('a rejected write is retried with the same value until acknowledged (GPT review P2)', async () => {
+    let fail = true;
+    const bridge = createMemorySignalBridge({
+      write: () => {
+        if (fail) throw new Error('nope');
+      },
+    });
+    bridge.set('plc', 'a', false);
+    const { session, manual, time } = await connect({ signals: bridge, writeRetryMs: 100 });
+    await session.deploy!(flowDoc(signalBody(), [plc]));
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    await settle();
+    fail = false;
+    time.advance(100);
+    manual.tick();
+    await settle();
+    manual.tick();
+    expect(bridge.writes.map((w) => w.value)).toEqual([true, true]);
+    expect((await session.read!(['flow:out.$fault']))[0]?.value).toBeNull();
+    for (let i = 0; i < 3; i++) {
+      manual.tick();
+      await settle();
+    }
+    expect(bridge.writes).toHaveLength(2); // acknowledged: no more resends
+  });
+
+  it('a write with no answer times out, faults the node, retries, and re-asserts when the late answer comes', async () => {
     const pending: Array<{ value: FlowValue; resolve: () => void }> = [];
     const bridge = createMemorySignalBridge({ write: (_c, _s, value) => new Promise<void>((resolve) => pending.push({ value, resolve })) });
     bridge.set('plc', 'a', false);
@@ -520,15 +552,112 @@ describe('writes', () => {
     time.advance(1000);
     manual.tick(); // retry
     expect(pending).toHaveLength(2);
-    pending[0]!.resolve(); // the timed-out write answers late: ignored
+    pending[0]!.resolve(); // the timed-out write answers late: it does not clear the fault
     await new Promise((resolve) => setTimeout(resolve, 0));
     manual.tick();
     expect((await session.read!(['flow:out.$fault']))[0]?.value).toMatch(/no answer/);
     pending[1]!.resolve();
     await new Promise((resolve) => setTimeout(resolve, 0));
     manual.tick();
-    manual.tick();
     expect((await session.read!(['flow:out.$fault']))[0]?.value).toBeNull();
+    // pending[1] was in flight when the orphan answered, so it is not trusted: one re-assert.
+    expect(pending.map((p) => p.value)).toEqual([true, true, true]);
+    pending[2]!.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    manual.tick();
+    manual.tick();
+    expect(pending).toHaveLength(3); // settled: nothing more
+  });
+
+  it('a timed-out write landing after a newer acknowledged one is corrected (GPT review P2: reverse completion order)', async () => {
+    // Remote target: applies a write when its promise settles (that is when the backend "finishes").
+    let remote: FlowValue = null;
+    const pending: Array<{ value: FlowValue; resolve: () => void }> = [];
+    const bridge = createMemorySignalBridge({
+      write: (_c, _s, value) =>
+        new Promise<void>((resolve) =>
+          pending.push({
+            value,
+            resolve: () => {
+              remote = value;
+              resolve();
+            },
+          }),
+        ),
+    });
+    const { session, manual, time } = await connect({ signals: bridge, writeTimeoutMs: 1000, writeRetryMs: 0 });
+    const doc = flowDoc(
+      graph([node('i', 'signal.in', { connection: 'plc', source: 'a' }), node('o', 'signal.out', { connection: 'plc', source: 'b' })], [wire('w', 'i.value', 'o.value')]),
+      [plc],
+    );
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    bridge.set('plc', 'a', 1);
+    await session.deploy!(doc);
+    expect(pending.map((p) => p.value)).toEqual([1]); // write 1 stalls…
+    time.advance(1000);
+    bridge.set('plc', 'a', 2);
+    manual.tick(); // …times out; 2 is sent
+    expect(pending.map((p) => p.value)).toEqual([1, 2]);
+    pending[1]!.resolve(); // 2 acknowledged
+    await settle();
+    manual.tick();
+    expect(remote).toBe(2);
+    expect((await session.read!(['flow:o.$fault']))[0]?.value).toBeNull();
+    pending[0]!.resolve(); // the orphaned 1 finally lands, on top of 2
+    await settle();
+    expect(remote).toBe(1);
+    manual.tick();
+    expect(pending.map((p) => p.value)).toEqual([1, 2, 2]); // 2 is re-asserted
+    pending[2]!.resolve();
+    await settle();
+    for (let i = 0; i < 3; i++) manual.tick();
+    expect(remote).toBe(2);
+    expect(pending).toHaveLength(3);
+    expect((await session.read!(['flow:o.$fault']))[0]?.value).toBeNull();
+  });
+
+  it('an orphan answering while a newer write is in flight makes that write untrusted (GPT review P2)', async () => {
+    // Remote order: newer 2 applied, then orphan 1 applied, then 1 answers, then 2 answers.
+    let remote: FlowValue = null;
+    const pending: Array<{ value: FlowValue; apply: () => void; resolve: () => void }> = [];
+    const bridge = createMemorySignalBridge({
+      write: (_c, _s, value) =>
+        new Promise<void>((resolve) =>
+          pending.push({
+            value,
+            apply: () => {
+              remote = value;
+            },
+            resolve,
+          }),
+        ),
+    });
+    const { session, manual, time } = await connect({ signals: bridge, writeTimeoutMs: 1000, writeRetryMs: 0 });
+    const doc = flowDoc(
+      graph([node('i', 'signal.in', { connection: 'plc', source: 'a' }), node('o', 'signal.out', { connection: 'plc', source: 'b' })], [wire('w', 'i.value', 'o.value')]),
+      [plc],
+    );
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    bridge.set('plc', 'a', 1);
+    await session.deploy!(doc);
+    time.advance(1000);
+    bridge.set('plc', 'a', 2);
+    manual.tick();
+    expect(pending.map((p) => p.value)).toEqual([1, 2]);
+    pending[1]!.apply();
+    pending[0]!.apply();
+    pending[0]!.resolve();
+    await settle();
+    pending[1]!.resolve();
+    await settle();
+    manual.tick();
+    expect(pending.map((p) => p.value)).toEqual([1, 2, 2]);
+    pending[2]!.apply();
+    pending[2]!.resolve();
+    await settle();
+    manual.tick();
+    expect(remote).toBe(2);
+    expect(pending).toHaveLength(3);
   });
 
   it('quality drop holds: a failing write is not retried while the input is not good (review P1)', async () => {

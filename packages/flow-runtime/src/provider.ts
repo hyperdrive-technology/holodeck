@@ -197,28 +197,42 @@ interface Deployment {
 /**
  * Forwards one `signal.out` node's value to the bridge:
  * - at most one write in flight; the newest value wins (intermediate values are skipped);
- * - a value equal to the last successful write is not sent again, and if the
- *   node was faulted by a failed write of some other value, the fault clears
- *   (that value never landed, so the target already holds this one);
+ * - a value equal to the last *acknowledged* write is not sent again;
  * - after a failure the node is faulted and the latest value is retried no
- *   sooner than `retryMs` later;
- * - a write with no answer after `timeoutMs` counts as failed (its late
- *   answer is ignored), so a hung backend cannot block the node for good;
+ *   sooner than `retryMs` later. A failure is ambiguous — the bridge contract
+ *   gives no rollback guarantee, so a rejected (or timed-out) write may still
+ *   have been applied remotely — so it also forgets the last acknowledged
+ *   write: the current value is sent again even if it equals that write
+ *   (review P2: "rejection after remote application");
+ * - a write with no answer after `timeoutMs` counts as failed, so a hung
+ *   backend cannot block the node for good. Timing out does not cancel it,
+ *   though: it may still land remotely after a newer write. So when such an
+ *   *orphaned* write finally answers (either way), the writer forgets the
+ *   last acknowledged write and re-asserts the current value; a write that
+ *   was in flight while an orphan answered is not remembered either (review
+ *   P2: "reverse completion order"). An orphan that never answers cannot be
+ *   reconciled from here — that would need remote sequencing/cancellation,
+ *   which the `SignalBridge` contract does not offer;
  * - `hold()` (the run's input reading stopped being `good`) drops the pending
  *   value, so nothing computed from data that is now in doubt is retried, and
- *   forgets the last successful write, so the value is sent again once the
+ *   forgets the last acknowledged write, so the value is sent again once the
  *   reading is good. A write already in flight cannot be recalled; if it
  *   succeeds after the hold it is not remembered as written.
  * Time is the provider's clock and every check runs on a request or a scan.
  */
 class SignalWriter {
   private desired: FlowValue | undefined;
+  /** Last value the bridge acknowledged, while we still trust the target to hold it. */
   private written: FlowValue | undefined;
-  /** The write in flight: its token (late answers of older ones are ignored), start time and hold epoch. */
-  private attempt: { token: number; startedAt: number; holds: number } | undefined;
+  /** The write in flight: its token, start time and the `epoch` it started in. */
+  private attempt: { token: number; startedAt: number; epoch: number } | undefined;
   private tokens = 0;
-  /** Bumped by every `hold()`. */
-  private holds = 0;
+  /**
+   * Bumped whenever what the target holds becomes unknown while a write may
+   * be in flight (`hold()`, an orphaned write answering): an attempt that
+   * started in an older epoch is not remembered as written when it succeeds.
+   */
+  private epoch = 0;
   private failedAt: number | undefined;
   private retired = false;
 
@@ -240,8 +254,7 @@ class SignalWriter {
   /** Stop writing: drop the pending value and forget the last write (see the class comment). The fault, if any, stays. */
   hold(): void {
     this.desired = undefined;
-    this.written = undefined;
-    this.holds++;
+    this.forget();
   }
 
   /** Called on every request and once per scan. */
@@ -259,7 +272,7 @@ class SignalWriter {
     if (this.failedAt !== undefined && this.now() - this.failedAt < this.retryMs) return;
     const value = this.desired;
     const token = ++this.tokens;
-    this.attempt = { token, startedAt: this.now(), holds: this.holds };
+    this.attempt = { token, startedAt: this.now(), epoch: this.epoch };
     let writing: Promise<void>;
     try {
       writing = Promise.resolve(this.bridge.write(this.ref.connection, this.ref.source, value));
@@ -280,20 +293,36 @@ class SignalWriter {
   }
 
   private settle(token: number, value: FlowValue, error: unknown): void {
-    // Retired, timed out, or superseded: this answer no longer matters.
-    if (this.retired || this.attempt?.token !== token) return;
-    const heldSince = this.attempt.holds !== this.holds;
+    if (this.retired) return;
+    if (this.attempt?.token !== token) {
+      // An orphan: this write timed out earlier, and a newer one may have been
+      // acknowledged since. Whatever the answer, it may just have landed on
+      // top of that newer value, so the target is unknown again: forget and
+      // re-assert the current value (subject to the retry wait, if faulted).
+      this.forget();
+      this.pump();
+      return;
+    }
+    const stale = this.attempt.epoch !== this.epoch;
     this.attempt = undefined;
     if (error !== undefined) {
       this.fail(error);
       return;
     }
-    if (!heldSince) this.written = value;
+    if (!stale) this.written = value;
     this.clearFault();
     this.pump();
   }
 
+  /** The target's value is unknown: nothing acknowledged so far, or in flight now, can be trusted. */
+  private forget(): void {
+    this.written = undefined;
+    this.epoch++;
+  }
+
+  /** A failed or timed-out write. Ambiguous: it may have been applied remotely, so forget the last acknowledged value. */
   private fail(error: unknown): void {
+    this.forget();
     this.failedAt = this.now();
     this.run.reportFault(this.ref.node, `write to ${quote(this.ref.source)} on ${quote(this.ref.connection)} failed: ${errorMessage(error)}`);
     this.log('warn', `signal.out ${quote(this.ref.node)}: write failed`, error);

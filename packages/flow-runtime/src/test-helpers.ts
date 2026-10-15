@@ -3,7 +3,16 @@
  * Small generic blocks stand in for the logic library (lane F3).
  */
 
-import { ContributionRegistry, type HolodeckDocument, type HolodeckEngine, type ProviderConnection } from '@holodeck/sdk';
+import {
+  ContributionRegistry,
+  type HolodeckDocument,
+  type HolodeckEngine,
+  type HolodeckProvider,
+  type ProviderConnection,
+  type ProviderSession,
+  type ProviderStatus,
+  type Sample,
+} from '@holodeck/sdk';
 import { FLOW_BLOCK_KIND, type FlowBlockDefinition } from './block';
 import { collectFlowBindings, FLOW_ENGINE_API_VERSION, FLOW_ENGINE_ID, validateFlowBody } from './engine';
 import { flowGraphFormat, type FlowGraphBody, type FlowGraphNode, type FlowGraphWire } from './graph';
@@ -155,3 +164,68 @@ export const standInFlowEngine: HolodeckEngine<FlowGraphBody> = Object.freeze({
   validateBody: (body: unknown) => validateFlowBody(body),
   collectBindings: (body: FlowGraphBody) => collectFlowBindings(body),
 });
+
+/** A provider whose sessions we can drive by hand: status, deliveries, subscription count. */
+export function controllableProvider(
+  id = 'test.ctl',
+  options: {
+    writes?: Array<{ source: string; value: unknown }>;
+    /** Delivered synchronously to every new subscriber, like a provider's value cache. */
+    cached?: () => readonly Sample[] | undefined;
+  } = {},
+) {
+  const sessions: Array<{
+    session: ProviderSession;
+    subscribers: Set<(samples: readonly Sample[]) => void>;
+    setStatus(state: ProviderStatus['state']): void;
+    deliver(samples: unknown): void;
+    closed: boolean;
+  }> = [];
+  const provider: HolodeckProvider = {
+    id,
+    label: 'Controllable',
+    capabilities: {},
+    async connect() {
+      const subscribers = new Set<(samples: readonly Sample[]) => void>();
+      const listeners = new Set<(s: ProviderStatus) => void>();
+      let status: ProviderStatus = { state: 'live', since: 0 };
+      const entry = {
+        subscribers,
+        closed: false,
+        setStatus(state: ProviderStatus['state']) {
+          status = { state, since: 0 };
+          for (const l of [...listeners]) l(status);
+        },
+        deliver(samples: unknown) {
+          for (const s of [...subscribers]) s(samples as readonly Sample[]);
+        },
+        session: {
+          status: () => status,
+          onStatus: (l: (s: ProviderStatus) => void) => {
+            listeners.add(l);
+            return () => listeners.delete(l);
+          },
+          subscribe: (_sources: readonly string[], cb: (samples: readonly Sample[]) => void) => {
+            subscribers.add(cb);
+            const cached = options.cached?.();
+            if (cached) cb(cached);
+            return () => subscribers.delete(cb);
+          },
+          close: async () => {
+            entry.closed = true;
+          },
+          ...(options.writes
+            ? {
+                write: async (source: string, value: unknown) => {
+                  options.writes!.push({ source, value });
+                },
+              }
+            : {}),
+        } as ProviderSession,
+      };
+      sessions.push(entry);
+      return entry.session;
+    },
+  };
+  return { provider, sessions };
+}
