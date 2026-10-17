@@ -94,6 +94,7 @@ before these tokens existed fall back to `HOLODECK_ANNOTATION_STYLE`.
 
 ## Not here yet
 
-- The `chart` widget (time series from a provider's `history`) is a follow-up.
-- Editor UX for drawing connectors between objects (click a port, click a port) is a follow-up;
-  today connectors are placed from the palette and anchored in the scene JSON or by a host.
+- The `chart` widget (time series from a provider's `history`): holodeck#90.
+- Editor UX for drawing and re-anchoring connectors (holodeck#91); today connectors are placed from
+  the palette and anchored in the scene JSON or by a host.
+- Inspector editing of `meta`, `opacity` and `z` (holodeck#92).
