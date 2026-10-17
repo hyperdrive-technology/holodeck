@@ -32,7 +32,7 @@ import type { IsoPartDefinition } from '../registry/types';
 import type { RouteEnd } from './astar';
 import { headingOf } from './elbows';
 import type { GridPoint, Heading } from './grid';
-import { NON_OBSTACLE_PARTS, rotatedFootprint } from './occupancy';
+import { isFloorPart, rotatedFootprint } from './occupancy';
 
 export interface PipeRun {
   /** Pipes and interior elbows, in no particular order. */
@@ -51,8 +51,10 @@ const isPipe = (o: IsoPlacement) => o.object === 'pipe' && typeof o.toX === 'num
 
 /** Single-node parts a run must stop at and stay attached to (not pipes, elbows, floor annotations or vessels). */
 export function isInlinePart(o: IsoPlacement, registry: ContributionRegistry): boolean {
-  if (o.object === 'pipe' || o.object === 'elbow' || NON_OBSTACLE_PARTS.has(o.object)) return false;
-  const { w, h } = rotatedFootprint(registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, o.object), o.rotation, o);
+  if (o.object === 'pipe' || o.object === 'elbow') return false;
+  const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, o.object);
+  if (isFloorPart(o.object, def)) return false;
+  const { w, h } = rotatedFootprint(def, o.rotation, o);
   return w <= 1 && h <= 1;
 }
 

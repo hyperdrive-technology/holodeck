@@ -4,6 +4,7 @@ import {
   type ContributionKind,
 } from '@holodeck/sdk';
 import type { IsoAnimator, IsoInspectorPanel, IsoPartDefinition, IsoPartParamSpec, IsoTheme } from './types';
+import { assetUrlProblem, isHexColor, paramValueProblem } from '../objects/validate';
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object';
 const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
@@ -11,15 +12,26 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 /** A React component is a function, or an object (`memo`, `forwardRef`, `lazy`). */
 const isComponent = (v: unknown): boolean => typeof v === 'function' || (isObj(v) && '$$typeof' in v);
 
-const PARAM_TYPES = ['number', 'boolean', 'string', 'enum'];
+const PARAM_TYPES = ['number', 'boolean', 'string', 'enum', 'color'];
 
 export function isParamSpec(v: unknown): v is IsoPartParamSpec {
   if (!isObj(v) || !PARAM_TYPES.includes(v.type as string) || typeof v.label !== 'string' || !('default' in v)) {
     return false;
   }
-  if (v.type === 'enum') return Array.isArray(v.options) && v.options.length > 0;
-  return true;
+  if (v.type === 'enum' && !(Array.isArray(v.options) && v.options.length > 0 && v.options.every((o) => typeof o === 'string'))) {
+    return false;
+  }
+  for (const bound of ['min', 'max', 'step', 'maxLength'] as const) {
+    if (v[bound] !== undefined && !isNum(v[bound])) return false;
+  }
+  if (isNum(v.min) && isNum(v.max) && v.min > v.max) return false;
+  // The default must itself be a value the spec accepts (undefined = "no default").
+  return paramValueProblem(v as unknown as IsoPartParamSpec, v.default) === null;
 }
+
+/** Largest data-only block / logo size in world units: a part, not a landscape. */
+const MAX_DATA_PART_SIZE = 64;
+const isPositiveSize = (v: unknown): boolean => isNum(v) && v > 0 && v <= MAX_DATA_PART_SIZE;
 
 const isParamSpecMap = (v: unknown): boolean => isObj(v) && Object.values(v).every(isParamSpec);
 
@@ -28,7 +40,21 @@ export function isIsoPartDefinition(item: unknown): item is IsoPartDefinition {
   const fp = item.footprint;
   if (!isObj(fp) || !isNum(fp.w) || !isNum(fp.h) || fp.w <= 0 || fp.h <= 0) return false;
   if (!isParamSpecMap(item.params)) return false;
-  if (!isComponent(item.component)) return false;
+  // component is optional: data-only parts render through DataPart (model / logo / colours).
+  if (item.component !== undefined && !isComponent(item.component)) return false;
+  if (item.logo !== undefined) {
+    if (!isObj(item.logo) || assetUrlProblem(item.logo.url) !== null) return false;
+    if (item.logo.size !== undefined && !isPositiveSize(item.logo.size)) return false;
+  }
+  if (item.colors !== undefined) {
+    if (!isObj(item.colors)) return false;
+    for (const [key, value] of Object.entries(item.colors)) {
+      if (!['body', 'accent', 'edge'].includes(key) || !isHexColor(value)) return false;
+    }
+  }
+  if (item.blockHeight !== undefined && !isPositiveSize(item.blockHeight)) return false;
+  if (item.floor !== undefined && typeof item.floor !== 'boolean') return false;
+  if (item.extent !== undefined && typeof item.extent !== 'function') return false;
   if (item.instanced && !isComponent(item.instancedRenderer)) return false;
   if (item.model !== undefined && typeof item.model !== 'string') return false;
   if (item.animNodes !== undefined) {

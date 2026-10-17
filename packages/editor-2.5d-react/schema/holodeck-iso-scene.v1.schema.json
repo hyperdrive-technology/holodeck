@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hyperdrive-technology/holodeck/packages/editor-2.5d-react/schema/holodeck-iso-scene.v1.schema.json",
+  "title": "Holodeck iso scene (holodeck.iso.scene.v1)",
+  "description": "Body of a holodeck.iso document: placements of installed parts on the iso grid. The TypeScript validator (parseSceneFile / validateSceneGeometry in src/iso/scene.ts and src/objects/validate.ts) is authoritative for rules JSON Schema cannot express: part ids must be installed, param values are checked against the installed part's param specs, effective footprints must stay within the routing limits, and ids must be unique. src/objects/scene-schema.test.ts keeps the two in step.",
+  "type": "object",
+  "required": ["objects"],
+  "properties": {
+    "id": { "type": "string" },
+    "name": { "type": "string" },
+    "gridCellSize": { "type": "number", "exclusiveMinimum": 0, "maximum": 1e6 },
+    "theme": { "type": "string" },
+    "extensions": { "type": "object" },
+    "objects": { "type": "array", "items": { "$ref": "#/$defs/placement" } }
+  },
+  "$defs": {
+    "gridNumber": {
+      "description": "Grid coordinate or size: finite and within +-MAX_GRID_COORD (16384), holodeck#8.",
+      "type": "number",
+      "minimum": -16384,
+      "maximum": 16384
+    },
+    "finiteNumber": {
+      "description": "Any finite number. JSON has no Infinity, but 1e400 parses to it; the bounds reject that.",
+      "type": "number",
+      "minimum": -1.7976931348623157e308,
+      "maximum": 1.7976931348623157e308
+    },
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": { "x": { "$ref": "#/$defs/gridNumber" }, "y": { "$ref": "#/$defs/gridNumber" } }
+    },
+    "linkEnd": {
+      "description": "Connector end: a placement (optionally one of its ports) or a free grid point.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["object"],
+          "properties": {
+            "object": { "type": "string", "minLength": 1 },
+            "port": { "type": "string", "minLength": 1 }
+          }
+        },
+        { "$ref": "#/$defs/point" }
+      ]
+    },
+    "link": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "from": { "$ref": "#/$defs/linkEnd" },
+        "to": { "$ref": "#/$defs/linkEnd" },
+        "via": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/point" } }
+      }
+    },
+    "meta": {
+      "description": "Metadata plane rows: short key -> scalar.",
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": { "minLength": 1, "maxLength": 64 },
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string", "maxLength": 256 },
+          { "$ref": "#/$defs/finiteNumber" },
+          { "type": "boolean" }
+        ]
+      }
+    },
+    "signalBinding": {
+      "description": "Live binding (holodeck-sdk holodeck-document.v1 signalBinding); the SDK validator checks transforms.",
+      "type": "object",
+      "required": ["connection", "source"],
+      "properties": {
+        "connection": { "type": "string", "minLength": 1 },
+        "source": { "type": "string", "minLength": 1 },
+        "transform": { "type": "object" }
+      }
+    },
+    "paramValue": {
+      "description": "Param values are checked against the installed part's param specs by the TS validator; here only JSON-level finiteness.",
+      "oneOf": [
+        { "type": ["string", "boolean", "null", "object", "array"] },
+        { "$ref": "#/$defs/finiteNumber" }
+      ]
+    },
+    "placement": {
+      "type": "object",
+      "required": ["id", "object", "x", "y"],
+      "description": "Unknown fields are allowed (legacy `fill` / `text` / `bind` are migrated or dropped on load).",
+      "properties": {
+        "id": { "type": "string" },
+        "object": { "type": "string", "description": "Part id (holodeck.iso.part contribution)." },
+        "x": { "$ref": "#/$defs/gridNumber" },
+        "y": { "$ref": "#/$defs/gridNumber" },
+        "toX": { "$ref": "#/$defs/gridNumber" },
+        "toY": { "$ref": "#/$defs/gridNumber" },
+        "width": { "$ref": "#/$defs/gridNumber" },
+        "height": { "$ref": "#/$defs/gridNumber" },
+        "size": { "$ref": "#/$defs/gridNumber" },
+        "rotation": { "$ref": "#/$defs/finiteNumber" },
+        "nudgeX": { "$ref": "#/$defs/finiteNumber" },
+        "nudgeY": { "$ref": "#/$defs/finiteNumber" },
+        "screenX": { "$ref": "#/$defs/finiteNumber" },
+        "screenY": { "$ref": "#/$defs/finiteNumber" },
+        "onPipe": { "type": "string" },
+        "at": { "type": "number", "minimum": 0, "maximum": 1 },
+        "fillColor": { "type": "string" },
+        "handwheel": { "type": "string" },
+        "band": { "type": "string" },
+        "color": { "type": "string" },
+        "params": { "type": "object", "additionalProperties": { "$ref": "#/$defs/paramValue" } },
+        "animation": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["animator"],
+            "properties": { "animator": { "type": "string" }, "settings": { "type": "object" } }
+          }
+        },
+        "bindings": { "type": "object", "additionalProperties": { "$ref": "#/$defs/signalBinding" } },
+        "extensions": { "type": "object" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "z": { "type": "integer", "minimum": -1000, "maximum": 1000 },
+        "meta": { "$ref": "#/$defs/meta" },
+        "metaHidden": { "type": "boolean" },
+        "link": { "$ref": "#/$defs/link" }
+      }
+    }
+  }
+}

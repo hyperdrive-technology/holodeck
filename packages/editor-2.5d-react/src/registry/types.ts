@@ -12,9 +12,14 @@ import type { FittingParams } from '../../assets/process/fitting-params';
 import type { TankParams } from '../../assets/process/tank-params';
 import type { IsoPlacement } from '../iso/scene';
 import type { PipeRunSpec } from '../iso/pipe-runs';
+import type { ConnectorPath } from '../objects/connector';
 
 export interface IsoPartParamSpec {
-  type: 'number' | 'boolean' | 'string' | 'enum';
+  /**
+   * `color`: a `#rgb` / `#rrggbb` / `#rrggbbaa` hex string, or `''` for "the
+   * theme's colour". Validated by `paramValueProblem` (src/objects/validate.ts).
+   */
+  type: 'number' | 'boolean' | 'string' | 'enum' | 'color';
   label: string;
   default: unknown;
   min?: number;
@@ -25,6 +30,39 @@ export interface IsoPartParamSpec {
   options?: string[];
   /** Real param (scene files and hosts may set it) but no inspector control, e.g. object-valued params. */
   hidden?: boolean;
+  /** `type: 'string'`: longest accepted value (default `MAX_PARAM_STRING`, 4096). */
+  maxLength?: number;
+  /** `type: 'string'`: `url` = an asset URL (http(s), blob:, data:image or relative; see `assetUrlProblem`). */
+  format?: 'url';
+}
+
+/**
+ * Brand logo drawn on a data-only part (`IsoPartDefinition.logo`).
+ *
+ * Placement contract (shared with the Blender archetypes, lane A1): when the
+ * GLB has a node named `logo` (an empty), the logo plane sits on that node,
+ * facing up (+Y), sized by the empty's X/Z scale unless `size` is set. Without
+ * one, the plane sits on the model's top face (bounding-box top + a hair),
+ * centred, `size` world units across (default 60% of the footprint's short side).
+ */
+export interface IsoPartLogo {
+  /** Image URL (SVG, PNG, data: URL). Loaded with the browser's image decoder. */
+  url: string;
+  /** Edge length in world units (the plane is square; the image is letterboxed). */
+  size?: number;
+}
+
+/**
+ * Per-part colours for data-only parts. Each beats the active theme for this
+ * part only; absent = the theme (`HolodeckStyle`) value. Hex strings.
+ */
+export interface IsoPartColors {
+  /** `hd.white` finish (unlit body). */
+  body?: string;
+  /** `hd.accent` finish (brand stripe / handwheel). A placement's `color` beats it. */
+  accent?: string;
+  /** Outline colour. */
+  edge?: string;
 }
 
 /** Editor-wide tuning knobs the tuner page passes through; absent in normal use. */
@@ -38,6 +76,8 @@ export interface IsoPartTuning {
    * computed once in SceneGraph so unique-mesh pipes match the pooled ones.
    */
   pipeRuns?: ReadonlyMap<string, PipeRunSpec>;
+  /** Resolved connector polylines by placement id (objects/connector.ts), computed once in SceneGraph. */
+  connectorPaths?: ReadonlyMap<string, ConnectorPath>;
 }
 
 export interface IsoPartProps {
@@ -134,7 +174,37 @@ export interface IsoPartDefinition extends Contribution {
   instancedWhen?: (placement: IsoPlacement) => boolean;
   /** `'run'`: palette click-click draws a manhattan run of `pipe` + `elbow` (see routing.ts). */
   draw?: 'run';
-  component: ComponentType<IsoPartProps>;
+  /**
+   * React renderer. Optional: a **data-only** part (`model` and/or `logo` +
+   * `colors`, no code) renders through `DataPart` (src/registry/DataPart.tsx):
+   * the GLB styled by the theme, or a plain block of `blockHeight` when there
+   * is no model, plus the logo plane on top. Packs can ship such parts as JSON.
+   */
+  component?: ComponentType<IsoPartProps>;
+  /** Data-only parts: brand logo on the top face. */
+  logo?: IsoPartLogo;
+  /** Data-only parts: colour overrides for this part. */
+  colors?: IsoPartColors;
+  /** Data-only parts without a `model`: block height in world units (default 1). */
+  blockHeight?: number;
+  /**
+   * Floor annotation (area, label, connector, icon, image): never an obstacle
+   * for pipe / connector routing. The built-ins are also listed in
+   * `NON_OBSTACLE_PARTS` (routing/occupancy.ts); this flag is how a pack opts in.
+   */
+  floor?: boolean;
+  /**
+   * The part is a connector: SceneGraph resolves its line (`placement.link`,
+   * objects/connector.ts) once per scene change and hands it over in
+   * `tuning.connectorPaths`.
+   */
+  connector?: boolean;
+  /**
+   * Grid-space extent of one placement, for parts that reach beyond their
+   * footprint (a connector's far end, an image's size). `sceneBounds` and
+   * fit-to-view add it to the footprint box.
+   */
+  extent?: (placement: IsoPlacement) => { minX: number; minY: number; maxX: number; maxY: number } | null;
   /** Optional GLB url (`HolodeckModel` path); `GlbPart` renders it. */
   model?: string;
   /**

@@ -59,6 +59,11 @@ export function sceneWorldBox(
         add(p.toX, p.toY, 0.15, 0.15);
       }
     }
+    const extent = def?.extent?.(p);
+    if (extent) {
+      add(extent.minX, extent.minY, 0, 0);
+      add(extent.maxX, extent.maxY, 0, 0);
+    }
     max[1] = Math.max(max[1], placementHeight(p, def));
   }
   if (!Number.isFinite(min[0])) return { min: [0, 0, 0], max: [1, 1, 1] };
