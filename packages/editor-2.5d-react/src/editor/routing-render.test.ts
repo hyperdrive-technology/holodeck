@@ -6,10 +6,10 @@
 import { statSync } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
-import type { Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
-import { animationFrames, launchRenderBrowser, settle, waitForRendered } from '../test-support/render-harness';
+import { launchRenderBrowser, settle, waitForRendered } from '../test-support/render-harness';
+import { calibrateGrid, clickCell } from '../test-support/grid-pointer';
 import { artifactsDir } from '../visual/io';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { footprintCells } from '../routing/occupancy';
@@ -36,42 +36,6 @@ afterAll(async () => {
   await server?.close();
 });
 
-/** Orthographic camera => screen = affine(grid). Probe three pointer positions and invert. */
-async function calibrate(page: Page) {
-  const root = page.getByTestId('process-editor');
-  const box = (await page.locator('canvas').boundingBox())!;
-  const probe = async (px: number, py: number) => {
-    await page.mouse.move(px, py);
-    await page.waitForFunction(() => document.querySelector('[data-testid="process-editor"]')?.getAttribute('data-cursor'));
-    // Let the reducer commit this pointer position.
-    await animationFrames(page, 2);
-    const [gx, gy] = (await root.getAttribute('data-cursor'))!.split(',').map(Number);
-    return { px, py, gx: gx!, gy: gy! };
-  };
-  const cx = box.x + box.width / 2;
-  const cy = box.y + box.height / 2;
-  // Large offsets so half-cell snapping error is small relative to the baseline.
-  const a = await probe(cx, cy);
-  const b = await probe(cx + 200, cy);
-  const c = await probe(cx, cy + 200);
-  // grid = M * (px - a.px, py - a.py) + a.g ; solve M columns from b and c.
-  const m = {
-    xx: (b.gx - a.gx) / 200,
-    yx: (b.gy - a.gy) / 200,
-    xy: (c.gx - a.gx) / 200,
-    yy: (c.gy - a.gy) / 200,
-  };
-  const det = m.xx * m.yy - m.xy * m.yx;
-  return (gx: number, gy: number) => {
-    const dx = gx - a.gx;
-    const dy = gy - a.gy;
-    return {
-      x: a.px + (m.yy * dx - m.xy * dy) / det,
-      y: a.py + (-m.yx * dx + m.xx * dy) / det,
-    };
-  };
-}
-
 describe.skipIf(!CHROMIUM)('auto pipe routing in the editor', () => {
   it('routes a pipe around the middle tank', async () => {
     const address = server.httpServer?.address();
@@ -90,23 +54,11 @@ describe.skipIf(!CHROMIUM)('auto pipe routing in the editor', () => {
       // Top-down (X) so no tank hides a floor cell from the pointer.
       await page.keyboard.press('x');
       await settle(page);
-      const toScreen = await calibrate(page);
+      const toScreen = await calibrateGrid(page);
 
       await page.keyboard.press('p');
       const click = async (gx: number, gy: number) => {
-        // Half-cell snapping makes the affine fit approximate: nudge by the residual until exact.
-        let target = { gx, gy };
-        for (let i = 0; i < 6; i += 1) {
-          const { x, y } = toScreen(target.gx, target.gy);
-          await page.mouse.move(x, y);
-          await animationFrames(page, 2);
-          const [cx, cy] = (await root.getAttribute('data-cursor'))!.split(',').map(Number);
-          if (cx === gx && cy === gy) break;
-          target = { gx: target.gx + (gx - cx!) * 0.5, gy: target.gy + (gy - cy!) * 0.5 };
-        }
-        expect(await root.getAttribute('data-cursor')).toBe(`${gx},${gy}`);
-        await page.mouse.down();
-        await page.mouse.up();
+        await clickCell(page, toScreen, gx, gy);
       };
       // Click inside tank-1: it snaps to the east port (ties with west resolve in
       // declaration order). Window ports are valid: the pipe is clipped at the

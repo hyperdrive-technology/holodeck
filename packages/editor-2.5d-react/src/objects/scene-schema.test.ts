@@ -94,12 +94,39 @@ describe('iso scene JSON Schema', () => {
     ['params not an object', { params: [] }],
     ['params non-finite value', { params: { level: JSON.parse('1e400') } }],
     ['missing id', { id: undefined }],
+    ['layer empty string', { layer: '' }],
+    ['layer not a string', { layer: 3 }],
+    ['group too long', { group: 'g'.repeat(65) }],
   ];
 
   it.each(bothReject)('both reject: %s', (_name, patch) => {
     const placement: Record<string, unknown> = { ...base, ...patch };
     for (const key of Object.keys(placement)) if (placement[key] === undefined) delete placement[key];
     const s = scene(placement);
+    expect(schemaOk(s), 'schema accepted').toBe(false);
+    expect(tsOk(s), 'TS validator accepted').toBe(false);
+  });
+
+  it('accepts layers and groups (E3) in both validators', () => {
+    const s = {
+      ...scene({ ...base, id: 'a', layer: 'piping', group: 'group-1' }, { ...base, id: 'b', group: 'group-1' }),
+      layers: [{ id: 'default', name: 'Base', locked: true }, { id: 'piping', name: 'Piping', hidden: true }],
+    };
+    expect(schemaOk(s), ajv.errorsText(validate.errors)).toBe(true);
+    expect(tsOk(s)).toBe(true);
+  });
+
+  const badLayers: Array<[string, unknown]> = [
+    ['not an array', { default: {} }],
+    ['missing name', [{ id: 'a' }]],
+    ['empty id', [{ id: '', name: 'x' }]],
+    ['hidden not boolean', [{ id: 'a', name: 'a', hidden: 1 }]],
+    ['unknown field', [{ id: 'a', name: 'a', color: 'red' }]],
+    ['too many layers', Array.from({ length: 65 }, (_, i) => ({ id: `l${i}`, name: `l${i}` }))],
+  ];
+
+  it.each(badLayers)('both reject scene.layers: %s', (_name, layers) => {
+    const s = { ...scene(base), layers };
     expect(schemaOk(s), 'schema accepted').toBe(false);
     expect(tsOk(s), 'TS validator accepted').toBe(false);
   });
@@ -112,6 +139,7 @@ describe('iso scene JSON Schema', () => {
     ['image src with a javascript: URL', scene({ ...base, object: 'image', params: { src: 'javascript:alert(1)' } })],
     ['nested non-finite param', scene({ ...base, params: { labels: { a: JSON.parse('1e400') } } })],
     ['duplicate ids', scene(base, base)],
+    ['duplicate layer ids', { ...scene(base), layers: [{ id: 'a', name: 'A' }, { id: 'a', name: 'B' }] }],
   ];
 
   it.each(tsOnly)('TS-only rule: %s (schema accepts, TS rejects)', (_name, s) => {

@@ -4,12 +4,18 @@ import { getDefaultIsoRegistry } from '../registry/default';
 import type { IsoPartDefinition } from '../registry/types';
 import { rotateOffset, type Heading } from '../routing/grid';
 import { resolveRouteEnd } from '../routing/ports';
-import { carryHostedParts, chainFrom, detachFrom, hostPipeOf, INLINE_PART_LENGTH, isPipePlacement, positionOnPipe, segOf, splitChainAtParts, withAttachment } from '../routing/inline';
+import { carryHostedParts, chainFrom, hostPipeOf, INLINE_PART_LENGTH, isPipePlacement, positionOnPipe, segOf, splitChainAtParts, withAttachment } from '../routing/inline';
 import { headingOf, pipeArmsAt } from '../routing/elbows';
 import { findRun, isInlinePart } from '../routing/run';
 import { routeToPlacements, type GridPoint } from './routing';
 import { sameCell } from './snap';
 import { snapParamValue } from '../registry/params';
+import type { IsoLayer, IsoLinkEnd } from '../objects/validate';
+import { MAX_Z } from '../objects/validate';
+import { alignObjects, distributeObjects, moveBy, moveObjects, rotateObjectsAbout, type AlignEdge, type DistributeAxis } from './arrange';
+import { copyObjects, pasteObjects, removeObjects } from './clipboard';
+import { anchorAt, buildConnector, reanchor, sameLinkEnd } from './connect';
+import { DEFAULT_LAYER_ID, DEFAULT_LAYER_NAME, expandGroups, isPlacementEditable, isPlacementHidden, nextFreeId, sceneLayers, withLayer } from './layers';
 
 /** Which on-canvas handle a resize drag grabbed. */
 export type ResizeHandle = 'radius' | 'height';
@@ -26,7 +32,13 @@ export const RETAINED_CONNECTIONS_NO_ROUTE_NOTICE = 'Reroute rejected — could 
 
 /** `run` = view only; `edit` = place / drag / delete. Set by the host via `ProcessEditor`'s `mode`. */
 export type EditorHostMode = 'run' | 'edit';
-export type EditorMode = 'select' | 'place' | 'draw-pipe';
+export type EditorMode = 'select' | 'place' | 'draw-pipe' | 'draw-connector';
+
+/** Shown when the connector tool is used but no `connector` part is installed. */
+export const NO_CONNECTOR_PART_NOTICE = 'No connector part installed';
+
+/** Which end of a connector a handle drag grabbed. */
+export type LinkEndName = 'from' | 'to';
 
 export interface EditorState {
   scene: IsoSceneFile;
@@ -35,14 +47,45 @@ export interface EditorState {
   mode: EditorMode;
   /** Part id being stamped in `place` mode. */
   placing: string | null;
+  /**
+   * Primary selection: the last object clicked, the one the inspector edits.
+   * Always the last entry of `selectedIds` (or null when nothing is selected).
+   */
   selectedId: string | null;
+  /**
+   * Every selected placement id, scene order not guaranteed (click order).
+   * Selecting a grouped placement selects its whole group. Hidden and (edit
+   * mode) locked placements are never selected.
+   */
+  selectedIds: string[];
+  /** Copied placements (`copy` / `cut`), kept across documents for cross-document paste. */
+  clipboard: IsoPlacement[] | null;
+  /** Layer new placements go on (place, pipe, connector, paste). Editor state, not part of the document. */
+  activeLayer: string;
+  /** First end of a connector being drawn (`draw-connector` mode). */
+  linkStart: IsoLinkEnd | null;
+  /** Connector end handle being dragged (holodeck#91); drops at `cursor`. */
+  linkDrag: { id: string; end: LinkEndName } | null;
+  /**
+   * Id of the placement the last action stamped from `place` mode, else null.
+   * Cleared by the next action; `ProcessEditor` reports it via `onPlaced`.
+   */
+  placed: string | null;
   pipeStart: GridPoint | null;
   /** Required exit direction at `pipeStart` (outward port heading), or null for a bare cell. */
   pipeStartHeading: Heading | null;
   /** One-line inline message (e.g. the routing fallback). Cleared by the next non-pointer action. */
   notice: string | null;
   cursor: GridPoint | null;
-  drag: { id: string; origin: IsoPlacement; grab: GridPoint; /** Single-node part, computed once so drag-move frames stay O(1) in footprint calls. */ inline: boolean } | null;
+  drag: {
+    id: string;
+    origin: IsoPlacement;
+    grab: GridPoint;
+    /** Single-node part, computed once so drag-move frames stay O(1) in footprint calls. */
+    inline: boolean;
+    /** Origins of the other selected placements moving with `id` (multi-select drag). */
+    others: Array<{ origin: IsoPlacement; inline: boolean }>;
+  } | null;
   /**
    * Live resize drag (radius / height handle). `param` is the number param
    * the handle edits, `origin` its value when the handle was grabbed, so a
@@ -66,7 +109,45 @@ export type EditorAction =
   | { type: 'pipe-mode' }
   | { type: 'cursor'; x: number; y: number }
   | { type: 'floor-click'; x: number; y: number }
-  | { type: 'select'; id: string | null }
+  /**
+   * Select one placement (and its group). `additive` (shift-click) toggles it
+   * in or out of the current selection instead of replacing it.
+   */
+  | { type: 'select'; id: string | null; additive?: boolean }
+  /** Marquee / host selection: replace (or, `additive`, extend) the selection with `ids`. */
+  | { type: 'select-many'; ids: readonly string[]; additive?: boolean }
+  | { type: 'select-all' }
+  /** Connector tool: click an object / port / cell, then another (holodeck#91). */
+  | { type: 'connector-mode' }
+  /** Grab a selected connector's end handle; `link-drag-end` re-anchors it at the drop cell. */
+  | { type: 'link-drag-start'; id: string; end: LinkEndName }
+  | { type: 'link-drag-end'; x?: number; y?: number }
+  /** Copy the selection to the editor clipboard (not a commit). */
+  | { type: 'copy' }
+  /** Copy, then delete the selection. One undo step. */
+  | { type: 'cut' }
+  /** Paste `objects` (e.g. from the system clipboard) or the editor clipboard. One undo step. */
+  | { type: 'paste'; objects?: readonly IsoPlacement[] }
+  /** Copy + paste the selection without touching the clipboard. One undo step. */
+  | { type: 'duplicate' }
+  /** Move the selection by whole cells (arrow keys). */
+  | { type: 'nudge'; dx: number; dy: number }
+  | { type: 'align'; edge: AlignEdge }
+  | { type: 'distribute'; axis: DistributeAxis }
+  | { type: 'group-selected' }
+  | { type: 'ungroup-selected' }
+  /** Draw order of the selection (`placement.z`). */
+  | { type: 'z-order'; to: 'forward' | 'backward' | 'front' | 'back' }
+  /** Add a layer (`scene.layers`) and make it the active layer. */
+  | { type: 'add-layer'; name?: string }
+  /** Rename / hide / lock a layer (the default layer included). */
+  | { type: 'update-layer'; id: string; patch: Partial<Omit<IsoLayer, 'id'>> }
+  /** Remove a layer; its placements move to the default layer. */
+  | { type: 'remove-layer'; id: string }
+  /** Move the selection to a layer. */
+  | { type: 'assign-layer'; layer: string }
+  /** Layer that new placements go on (editor state, not a commit). */
+  | { type: 'set-active-layer'; id: string }
   | { type: 'drag-start'; id: string; x: number; y: number }
   | { type: 'drag-move'; x: number; y: number }
   | { type: 'drag-end' }
@@ -87,8 +168,10 @@ export type EditorAction =
   | { type: 'new-document' }
   /** Edit one `placement.params` entry on the selection (inspector control). */
   | { type: 'set-param'; param: string; value: unknown }
-  /** Merge fields onto the selection (host inspector panels). */
+  /** Merge fields onto the primary selection (host inspector panels). */
   | { type: 'patch-selected'; patch: Partial<IsoPlacement> }
+  /** Merge fields onto every selected placement (multi-edit: opacity, meta...). One undo step. */
+  | { type: 'patch-selection'; patch: Partial<IsoPlacement> }
   /**
    * Replace the scene from outside (controlled `scene` prop). Not a commit.
    * Same `scene.id`: an external update of the open document, history kept.
@@ -104,6 +187,7 @@ const HISTORY_CAP = 50;
 /** Actions that only move the view / selection and are safe in run mode. */
 const RUN_MODE_ACTIONS: ReadonlySet<EditorAction['type']> = new Set([
   'select',
+  'copy',
   'cursor',
   'cancel',
   'select-mode',
@@ -130,6 +214,12 @@ export function createEditorState(
     mode: 'select',
     placing: null,
     selectedId: null,
+    selectedIds: [],
+    clipboard: null,
+    activeLayer: DEFAULT_LAYER_ID,
+    linkStart: null,
+    linkDrag: null,
+    placed: null,
     pipeStart: null,
     pipeStartHeading: null,
     notice: null,
@@ -169,6 +259,22 @@ export function stamp(
   return { ...defaults, ...run, id, object: kind, x, y };
 }
 
+/**
+ * Host-side palette stamp (holodeck#100): the placement the palette would
+ * create for part `partId` at (x, y). `id` defaults to the next free
+ * `<partId>-N` among `objects`. Hosts placing parts from their own library
+ * use this so they cannot drift from the editor's defaults.
+ */
+export function stampPlacement(
+  registry: ContributionRegistry,
+  partId: string,
+  x: number,
+  y: number,
+  opts: { id?: string; objects?: readonly IsoPlacement[] } = {},
+): IsoPlacement {
+  return stamp(registry, partId, x, y, opts.id ?? nextId(partId, opts.objects ?? []));
+}
+
 function commit(state: EditorState, scene: IsoSceneFile, extra: Partial<EditorState> = {}): EditorState {
   return {
     ...state,
@@ -182,26 +288,6 @@ function commit(state: EditorState, scene: IsoSceneFile, extra: Partial<EditorSt
   };
 }
 
-function moveBy(obj: IsoPlacement, dx: number, dy: number): IsoPlacement {
-  const next: IsoPlacement = { ...obj, x: obj.x + dx, y: obj.y + dy };
-  if (typeof obj.toX === 'number') {
-    next.toX = obj.toX + dx;
-  }
-  if (typeof obj.toY === 'number') {
-    next.toY = obj.toY + dy;
-  }
-  // A connector's free anchors and waypoints travel with it; object anchors stay put.
-  if (obj.link) {
-    const shift = (end: NonNullable<IsoPlacement['link']>['from']) =>
-      end && 'x' in end ? { x: end.x + dx, y: end.y + dy } : end;
-    next.link = { ...obj.link };
-    if (obj.link.from) next.link.from = shift(obj.link.from);
-    if (obj.link.to) next.link.to = shift(obj.link.to);
-    if (obj.link.via) next.link.via = obj.link.via.map((p) => ({ x: p.x + dx, y: p.y + dy }));
-  }
-  return next;
-}
-
 function placeAt(state: EditorState, x: number, y: number): EditorState {
   if (!state.placing) {
     return state;
@@ -209,11 +295,14 @@ function placeAt(state: EditorState, x: number, y: number): EditorState {
   const id = nextId(state.placing, state.scene.objects);
   const stamped = stamp(state.registry, state.placing, x, y, id);
   // A single-node part dropped inside a pipe records that pipe (holodeck#22).
-  const added = isInlinePart(stamped, state.registry) ? withAttachment(stamped, state.scene.objects) : stamped;
+  const added = withLayer(
+    isInlinePart(stamped, state.registry) ? withAttachment(stamped, state.scene.objects) : stamped,
+    activeLayerOf(state),
+  );
   return commit(
     state,
     { ...state.scene, objects: [...state.scene.objects, added] },
-    { selectedId: id },
+    { selectedId: id, selectedIds: [id], placed: id },
   );
 }
 
@@ -239,9 +328,10 @@ function finishPipe(state: EditorState, click: GridPoint): EditorState {
   }
   // Chaining continues from the end cell with no required heading: a port's
   // outward heading points back out of the pipe we just drew into it.
+  const layer = activeLayerOf(state);
   return commit(
     state,
-    { ...state.scene, objects: [...state.scene.objects, ...placements] },
+    { ...state.scene, objects: [...state.scene.objects, ...placements.map((o) => withLayer(o, layer))] },
     {
       pipeStart: end.cell,
       pipeStartHeading: null,
@@ -361,13 +451,182 @@ function updateSelected(state: EditorState, fn: (o: IsoPlacement) => IsoPlacemen
   return commit(state, { ...state.scene, objects });
 }
 
+/** Merge `patch` onto a placement; `undefined` values remove the field (e.g. opacity back to 1). The id never changes. */
+function applyPatch(o: IsoPlacement, patch: Partial<IsoPlacement>): IsoPlacement {
+  const next: Record<string, unknown> = { ...o, ...patch, id: o.id };
+  for (const [key, value] of Object.entries(patch)) if (value === undefined) delete next[key];
+  return next as unknown as IsoPlacement;
+}
+
+/** Apply `fn` to every selected placement for which `when` holds. One commit; none when nothing changed. */
+function updateSelection(
+  state: EditorState,
+  fn: (o: IsoPlacement) => IsoPlacement,
+  when: (o: IsoPlacement) => boolean = () => true,
+): EditorState {
+  const ids = new Set(state.selectedIds);
+  if (ids.size === 0) return state;
+  let changed = false;
+  const objects = state.scene.objects.map((o) => {
+    if (!ids.has(o.id) || !when(o)) return o;
+    changed = true;
+    return fn(o);
+  });
+  return changed ? commit(state, { ...state.scene, objects }) : state;
+}
+
+/** Commit `objects` only when the arrangement actually changed (align of already-aligned parts is a no-op). */
+function commitObjects(state: EditorState, objects: IsoPlacement[], extra: Partial<EditorState> = {}): EditorState {
+  return objects === state.scene.objects ? state : commit(state, { ...state.scene, objects }, extra);
+}
+
+/** Inline parts among `ids` re-attach to whatever pipe they now sit on (after a move of several parts). */
+function reattach(objects: IsoPlacement[], ids: ReadonlySet<string>, registry: ContributionRegistry): IsoPlacement[] {
+  return objects.map((o) => (ids.has(o.id) && isInlinePart(o, registry) ? withAttachment(o, objects) : o));
+}
+
+/** Active layer when it still exists (a removed / undone layer falls back to the default). */
+function activeLayerOf(state: EditorState): string {
+  return sceneLayers(state.scene).some((l) => l.id === state.activeLayer) ? state.activeLayer : DEFAULT_LAYER_ID;
+}
+
+/** May the user select / edit this placement? (run mode: anything visible) */
+function selectable(state: EditorState, o: IsoPlacement): boolean {
+  return state.readOnly ? !isPlacementHidden(state.scene, o) : isPlacementEditable(state.scene, o);
+}
+
+/** Selection fields for `ids` (primary = last). */
+function selection(ids: readonly string[]): Pick<EditorState, 'selectedId' | 'selectedIds'> {
+  return { selectedIds: [...ids], selectedId: ids[ids.length - 1] ?? null };
+}
+
+/** `select` reducer: replace with the clicked id's group, or toggle that group (`additive`). */
+function selectClick(state: EditorState, id: string | null, additive: boolean): EditorState {
+  const reset = { mode: 'select' as const, placing: null, pipeStart: null, linkStart: null };
+  if (id === null) return { ...state, ...reset, ...(additive ? {} : selection([])) };
+  const target = state.scene.objects.find((o) => o.id === id);
+  // Unknown ids keep the old single-id behaviour (a host may select before the scene arrives).
+  if (target && !selectable(state, target)) return { ...state, ...reset };
+  const unit = target && !state.readOnly ? expandGroups(state.scene, [id]) : [id];
+  if (!additive) {
+    // Primary = the clicked id, so a controlled `selectedId` echo matches.
+    return { ...state, ...reset, ...selection([...unit.filter((u) => u !== id), id]) };
+  }
+  const current = state.selectedIds;
+  if (current.includes(id)) {
+    const drop = new Set(unit);
+    return { ...state, ...reset, ...selection(current.filter((c) => !drop.has(c))) };
+  }
+  return { ...state, ...reset, ...selection([...current.filter((c) => !unit.includes(c)), ...unit.filter((u) => u !== id), id]) };
+}
+
+function selectMany(state: EditorState, ids: readonly string[], additive: boolean): EditorState {
+  const byId = new Map(state.scene.objects.map((o) => [o.id, o]));
+  const ok = ids.filter((id) => {
+    const o = byId.get(id);
+    return o !== undefined && selectable(state, o);
+  });
+  const expanded = expandGroups(state.scene, ok);
+  const base = additive ? state.selectedIds.filter((id) => !expanded.includes(id)) : [];
+  return { ...state, mode: 'select', placing: null, pipeStart: null, linkStart: null, ...selection([...base, ...expanded]) };
+}
+
+/** Delete the selection: hosted parts detach, connector anchors to deleted parts become free points. */
+function deleteSelection(state: EditorState): EditorState {
+  if (state.selectedIds.length === 0) return state;
+  const objects = removeObjects(state.scene.objects, new Set(state.selectedIds), state.registry);
+  return commit(state, { ...state.scene, objects }, selection([]));
+}
+
+function pasteInto(state: EditorState, clip: readonly IsoPlacement[]): EditorState {
+  if (clip.length === 0) return state;
+  const layer = activeLayerOf(state);
+  const { objects, ids } = pasteObjects(state.scene, clip, state.registry, layer === DEFAULT_LAYER_ID ? {} : { layer });
+  return commit(state, { ...state.scene, objects }, { ...selection(ids), mode: 'select', placing: null, pipeStart: null, linkStart: null });
+}
+
+/** Connector tool click: first click picks the start, the second draws the line and starts over. */
+function connectorClick(state: EditorState, click: GridPoint): EditorState {
+  const anchor = anchorAt(state.scene, state.registry, click);
+  if (!state.linkStart) return { ...state, linkStart: anchor };
+  if (sameLinkEnd(state.linkStart, anchor)) return state;
+  if (!state.registry.get(HOLODECK_KINDS.isoPart, 'connector')) return { ...state, notice: NO_CONNECTOR_PART_NOTICE };
+  const id = nextId('connector', state.scene.objects);
+  const built = buildConnector(stamp(state.registry, 'connector', click.x, click.y, id), state.scene, state.registry, state.linkStart, anchor);
+  if (!built) return { ...state, linkStart: null };
+  return commit(
+    state,
+    { ...state.scene, objects: [...state.scene.objects, withLayer(built, activeLayerOf(state))] },
+    { ...selection([id]), linkStart: null },
+  );
+}
+
+function linkDragEnd(state: EditorState, cell: GridPoint | null): EditorState {
+  const drag = state.linkDrag;
+  if (!drag) return state;
+  const connector = state.scene.objects.find((o) => o.id === drag.id);
+  if (!connector || !cell) return { ...state, linkDrag: null };
+  const anchor = anchorAt(state.scene, state.registry, cell, new Set([connector.id]));
+  const current = connector.link?.[drag.end];
+  const unchanged = current
+    ? sameLinkEnd(current, anchor)
+    : 'x' in anchor && (drag.end === 'from'
+      ? connector.x === anchor.x && connector.y === anchor.y
+      : connector.toX === anchor.x && connector.toY === anchor.y);
+  if (unchanged) return { ...state, linkDrag: null };
+  const next = reanchor(connector, drag.end, anchor);
+  const objects = state.scene.objects.map((o) => (o.id === connector.id ? next : o));
+  return commit(state, { ...state.scene, objects }, { linkDrag: null });
+}
+
+function zOrder(state: EditorState, to: 'forward' | 'backward' | 'front' | 'back'): EditorState {
+  const clamp = (z: number) => Math.max(-MAX_Z, Math.min(MAX_Z, z));
+  const selected = new Set(state.selectedIds);
+  // Front / back are relative to the parts NOT being moved, so repeating "to front" is a no-op.
+  const others = state.scene.objects.filter((o) => !selected.has(o.id)).map((o) => o.z ?? 0);
+  const front = clamp(Math.max(0, ...others) + 1);
+  const back = clamp(Math.min(0, ...others) - 1);
+  const target = (z: number) =>
+    to === 'forward' ? clamp(z + 1) : to === 'backward' ? clamp(z - 1) : to === 'front' ? Math.max(z, front) : Math.min(z, back);
+  return updateSelection(state, (o) => {
+    const next = target(o.z ?? 0);
+    if (next === 0) {
+      const { z: _z, ...rest } = o;
+      return rest;
+    }
+    return { ...o, z: next };
+  }, (o) => target(o.z ?? 0) !== (o.z ?? 0));
+}
+
+function setLayers(state: EditorState, layers: IsoLayer[], objects = state.scene.objects, extra: Partial<EditorState> = {}): EditorState {
+  const scene: IsoSceneFile = { ...state.scene, objects };
+  if (layers.length) scene.layers = layers;
+  else delete scene.layers;
+  return commit(state, scene, extra);
+}
+
+function updateLayer(state: EditorState, id: string, patch: Partial<Omit<IsoLayer, 'id'>>): EditorState {
+  const known = sceneLayers(state.scene).find((l) => l.id === id);
+  if (!known) return state;
+  const merged: IsoLayer = { ...known, ...patch, id };
+  // Store flags only when set, so a shown / unlocked layer round-trips without noise.
+  if (!merged.hidden) delete merged.hidden;
+  if (!merged.locked) delete merged.locked;
+  if (JSON.stringify(merged) === JSON.stringify(known)) return state;
+  const declared = state.scene.layers ?? [];
+  const layers = declared.some((l) => l.id === id)
+    ? declared.map((l) => (l.id === id ? merged : l))
+    : [merged, ...declared];
+  return setLayers(state, layers);
+}
+
 /** Does this part draw as a click-click run (the palette's pipe)? */
 function isRunPart(state: EditorState, partId: string): boolean {
   return state.registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, partId)?.draw === 'run';
 }
 
 /** Pointer/release actions keep notices visible; other actions dismiss old notices. */
-const NOTICE_KEEPERS: ReadonlySet<EditorAction['type']> = new Set(['cursor', 'drag-move', 'drag-end', 'resize-move', 'resize-end', 'load', 'set-read-only']);
+const NOTICE_KEEPERS: ReadonlySet<EditorAction['type']> = new Set(['cursor', 'drag-move', 'drag-end', 'resize-move', 'resize-end', 'load', 'set-read-only', 'link-drag-end']);
 
 /** The number-param spec a resize handle edits, or null when the part is not resizable that way. */
 function resizeParam(state: EditorState, partId: string, handle: ResizeHandle): { param: string; spec: IsoPartDefinition['params'][string] } | null {
@@ -420,8 +679,46 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
   if (next.pipeStart === null && next.pipeStartHeading !== null) {
     next = { ...next, pipeStartHeading: null };
   }
+  // Pointer frames never add / remove placements or change layers: skip the O(n) selection pass.
+  if (action.type !== 'cursor' && action.type !== 'drag-move' && action.type !== 'resize-move') {
+    next = normalizeSelection(state, next);
+  }
+  if (next.placed !== null && next.placed === state.placed) {
+    next = { ...next, placed: null };
+  }
   const setsNotice = next.notice !== state.notice || action.type === 'floor-click' || action.type === 'reroute-selected';
   return next.notice && !setsNotice && !NOTICE_KEEPERS.has(action.type) ? { ...next, notice: null } : next;
+}
+
+/**
+ * Keep `selectedId` / `selectedIds` consistent after any action. Code that
+ * only sets `selectedId` (place, pipe, reroute, load...) gets a one-element
+ * `selectedIds`; ids that no longer exist or are no longer selectable (layer
+ * hidden / locked, undo removed them) drop out; the primary is the last id.
+ */
+function normalizeSelection(prev: EditorState, next: EditorState): EditorState {
+  if (next.scene === prev.scene && next.selectedIds === prev.selectedIds && next.selectedId === prev.selectedId && next.readOnly === prev.readOnly) {
+    return next;
+  }
+  let ids = next.selectedIds;
+  if (ids === prev.selectedIds && next.selectedId !== prev.selectedId) {
+    ids = next.selectedId ? [next.selectedId] : [];
+  }
+  const byId = new Map(next.scene.objects.map((o) => [o.id, o]));
+  const seen = new Set<string>();
+  const kept = ids.filter((id) => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    const o = byId.get(id);
+    // Unknown ids survive only as a lone host selection (see selectClick).
+    return o ? selectable(next, o) : ids.length === 1 && id === next.selectedId;
+  });
+  const primary = next.selectedId !== null && kept.includes(next.selectedId) ? next.selectedId : (kept[kept.length - 1] ?? null);
+  const ordered = primary === null ? kept : [...kept.filter((id) => id !== primary), primary];
+  if (primary === next.selectedId && ordered.length === next.selectedIds.length && ordered.every((id, i) => id === next.selectedIds[i])) {
+    return next;
+  }
+  return { ...next, selectedIds: ordered, selectedId: primary };
 }
 
 function reduce(state: EditorState, action: EditorAction): EditorState {
@@ -430,14 +727,16 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
   }
   switch (action.type) {
     case 'select-mode':
-      return { ...state, mode: 'select', placing: null, pipeStart: null, drag: null, resize: null };
+      return { ...state, mode: 'select', placing: null, pipeStart: null, linkStart: null, drag: null, resize: null };
     case 'place-mode':
       if (isRunPart(state, action.object)) {
-        return { ...state, mode: 'draw-pipe', placing: null, pipeStart: null, pipeStartHeading: null, selectedId: null, drag: null };
+        return { ...state, mode: 'draw-pipe', placing: null, pipeStart: null, pipeStartHeading: null, linkStart: null, ...selection([]), drag: null };
       }
-      return { ...state, mode: 'place', placing: action.object, pipeStart: null, selectedId: null, drag: null };
+      return { ...state, mode: 'place', placing: action.object, pipeStart: null, linkStart: null, ...selection([]), drag: null };
     case 'pipe-mode':
-      return { ...state, mode: 'draw-pipe', placing: null, pipeStart: null, pipeStartHeading: null, selectedId: null, drag: null };
+      return { ...state, mode: 'draw-pipe', placing: null, pipeStart: null, pipeStartHeading: null, linkStart: null, ...selection([]), drag: null };
+    case 'connector-mode':
+      return { ...state, mode: 'draw-connector', placing: null, pipeStart: null, linkStart: null, ...selection([]), drag: null, resize: null };
     case 'cursor':
       return { ...state, cursor: { x: action.x, y: action.y } };
     case 'floor-click': {
@@ -448,38 +747,65 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
       if (state.mode === 'draw-pipe') {
         return finishPipe({ ...state, cursor: pt }, pt);
       }
-      return { ...state, selectedId: null, cursor: pt };
+      if (state.mode === 'draw-connector') {
+        return connectorClick({ ...state, cursor: pt }, pt);
+      }
+      return { ...state, ...selection([]), cursor: pt };
     }
     case 'select':
-      return { ...state, selectedId: action.id, mode: 'select', placing: null, pipeStart: null };
+      return selectClick(state, action.id, action.additive === true);
+    case 'select-many':
+      return selectMany(state, action.ids, action.additive === true);
+    case 'select-all':
+      return selectMany(state, state.scene.objects.map((o) => o.id), false);
     case 'drag-start': {
       const obj = state.scene.objects.find((o) => o.id === action.id);
-      if (!obj) {
+      if (!obj || !selectable(state, obj)) {
         return state;
       }
+      // Pressing on part of the current selection drags all of it; anything else selects that part (and its group) first.
+      const ids = state.selectedIds.includes(action.id)
+        ? state.selectedIds
+        : expandGroups(state.scene, [action.id]);
+      const others = state.scene.objects
+        .filter((o) => o.id !== action.id && ids.includes(o.id))
+        .map((o) => ({ origin: structuredClone(o), inline: isInlinePart(o, state.registry) }));
+      const keep = state.selectedIds.includes(action.id);
       return {
         ...state,
-        selectedId: action.id,
+        ...(keep ? { selectedId: action.id, selectedIds: [...ids.filter((id) => id !== action.id), action.id] } : selection([...ids.filter((id) => id !== action.id), action.id])),
         mode: 'select',
         placing: null,
         pipeStart: null,
-        drag: { id: action.id, origin: structuredClone(obj), grab: { x: action.x, y: action.y }, inline: isInlinePart(obj, state.registry) },
+        linkStart: null,
+        drag: { id: action.id, origin: structuredClone(obj), grab: { x: action.x, y: action.y }, inline: isInlinePart(obj, state.registry), others },
       };
     }
     case 'drag-move': {
       if (!state.drag) {
         return { ...state, cursor: { x: action.x, y: action.y } };
       }
-      const dx = action.x - state.drag.grab.x;
-      const dy = action.y - state.drag.grab.y;
-      const objects = state.scene.objects.map((o) => {
-        if (o.id !== state.drag?.id) {
-          return o;
-        }
-        const moved = moveBy(state.drag.origin, dx, dy);
-        // Keep the pipe attachment in step with where the part is dropped.
-        return state.drag.inline ? withAttachment(moved, state.scene.objects) : moved;
+      const drag = state.drag;
+      const dx = action.x - drag.grab.x;
+      const dy = action.y - drag.grab.y;
+      if (drag.others.length === 0) {
+        const objects = state.scene.objects.map((o) => {
+          if (o.id !== drag.id) {
+            return o;
+          }
+          const moved = moveBy(drag.origin, dx, dy);
+          // Keep the pipe attachment in step with where the part is dropped.
+          return drag.inline ? withAttachment(moved, state.scene.objects) : moved;
+        });
+        return { ...state, cursor: { x: action.x, y: action.y }, scene: { ...state.scene, objects } };
+      }
+      const origins = new Map([[drag.id, { origin: drag.origin, inline: drag.inline }], ...drag.others.map((o) => [o.origin.id, o] as const)]);
+      const moved = state.scene.objects.map((o) => {
+        const from = origins.get(o.id);
+        return from ? moveBy(from.origin, dx, dy) : o;
       });
+      // Inline parts re-attach against the moved pipes (a valve dragged with its pipe stays on it).
+      const objects = moved.map((o) => (origins.get(o.id)?.inline ? withAttachment(o, moved) : o));
       return { ...state, cursor: { x: action.x, y: action.y }, scene: { ...state.scene, objects } };
     }
     case 'drag-end': {
@@ -488,20 +814,22 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
       }
       const current = state.scene.objects.find((o) => o.id === state.drag?.id);
       const moved = current && (current.x !== state.drag.origin.x || current.y !== state.drag.origin.y);
+      const allOrigins = new Map([state.drag.origin, ...state.drag.others.map((o) => o.origin)].map((o) => [o.id, o]));
       if (!moved) {
         // A drag out and back is a no-op, including attachment metadata.
         const origin = state.drag.origin;
-        if (current && JSON.stringify(current) === JSON.stringify(origin)) return { ...state, drag: null };
-        const objects = state.scene.objects.map((o) => o.id === origin.id ? { ...origin } : o);
+        if (state.drag.others.length === 0 && current && JSON.stringify(current) === JSON.stringify(origin)) return { ...state, drag: null };
+        const objects = state.scene.objects.map((o) => {
+          const back = allOrigins.get(o.id);
+          return back ? { ...back } : o;
+        });
         return { ...state, scene: { ...state.scene, objects }, drag: null };
       }
       const before = cloneScene(state.scene);
       before.objects = before.objects.map((o) => {
-        if (o.id !== state.drag?.id) {
-          return o;
-        }
         // Coordinates alone lose onPipe/at after withAttachment detaches it.
-        return { ...state.drag.origin };
+        const back = allOrigins.get(o.id);
+        return back ? { ...back } : o;
       });
       return {
         ...state,
@@ -582,27 +910,103 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
         revision: state.revision + 1,
       };
     }
-    case 'delete': {
-      if (!state.selectedId) {
-        return state;
-      }
-      return commit(
-        state,
-        { ...state.scene, objects: detachFrom(state.scene.objects, state.selectedId).filter((o) => o.id !== state.selectedId) },
-        { selectedId: null },
-      );
-    }
+    case 'delete':
+      return deleteSelection(state);
     case 'reroute-selected':
       return rerouteSelected(state);
     case 'rotate-selected':
+      if (state.selectedIds.length > 1) {
+        return commitObjects(state, rotateObjectsAbout(state.scene.objects, new Set(state.selectedIds), action.direction, state.registry));
+      }
       return updateSelected(state, (o) => ({
         ...o,
         rotation: (o.rotation ?? 0) + action.direction * (Math.PI / 2),
       }));
-    case 'set-param':
-      return updateSelected(state, (o) => ({ ...o, params: { ...o.params, [action.param]: action.value } }));
+    case 'set-param': {
+      // Multi-edit: the inspector shows the primary's params; every selected placement of the same part gets the value.
+      const kind = selectedObject(state)?.object;
+      return updateSelection(
+        state,
+        (o) => ({ ...o, params: { ...o.params, [action.param]: action.value } }),
+        (o) => o.object === kind,
+      );
+    }
     case 'patch-selected':
-      return updateSelected(state, (o) => ({ ...o, ...action.patch, id: o.id }));
+      return updateSelected(state, (o) => applyPatch(o, action.patch));
+    case 'patch-selection':
+      return updateSelection(state, (o) => applyPatch(o, action.patch));
+    case 'copy':
+      if (state.selectedIds.length === 0) return state;
+      return { ...state, clipboard: copyObjects(state.scene, new Set(state.selectedIds), state.registry) };
+    case 'cut': {
+      if (state.selectedIds.length === 0) return state;
+      const clipboard = copyObjects(state.scene, new Set(state.selectedIds), state.registry);
+      return { ...deleteSelection(state), clipboard };
+    }
+    case 'paste':
+      return pasteInto(state, action.objects ?? state.clipboard ?? []);
+    case 'duplicate':
+      return pasteInto(state, copyObjects(state.scene, new Set(state.selectedIds), state.registry));
+    case 'nudge': {
+      if (!Number.isFinite(action.dx) || !Number.isFinite(action.dy)) return state;
+      const ids = new Set(state.selectedIds);
+      const moved = moveObjects(state.scene.objects, ids, action.dx, action.dy);
+      return commitObjects(state, moved === state.scene.objects ? moved : reattach(moved, ids, state.registry));
+    }
+    case 'align': {
+      const ids = new Set(state.selectedIds);
+      const moved = alignObjects(state.scene.objects, ids, action.edge, state.registry);
+      return commitObjects(state, moved === state.scene.objects ? moved : reattach(moved, ids, state.registry));
+    }
+    case 'distribute': {
+      const ids = new Set(state.selectedIds);
+      const moved = distributeObjects(state.scene.objects, ids, action.axis, state.registry);
+      return commitObjects(state, moved === state.scene.objects ? moved : reattach(moved, ids, state.registry));
+    }
+    case 'group-selected': {
+      if (state.selectedIds.length < 2) return state;
+      const group = nextFreeId('group', state.scene.objects.flatMap((o) => (o.group ? [o.group] : [])));
+      return updateSelection(state, (o) => ({ ...o, group }));
+    }
+    case 'ungroup-selected':
+      return updateSelection(state, (o) => {
+        const { group: _group, ...rest } = o;
+        return rest;
+      }, (o) => o.group !== undefined);
+    case 'z-order':
+      return zOrder(state, action.to);
+    case 'add-layer': {
+      const layers = sceneLayers(state.scene);
+      const id = nextFreeId('layer', layers.map((l) => l.id));
+      const name = action.name?.trim() || `Layer ${layers.length + 1}`;
+      return setLayers(state, [...(state.scene.layers ?? []), { id, name }], state.scene.objects, { activeLayer: id });
+    }
+    case 'update-layer':
+      return updateLayer(state, action.id, action.patch);
+    case 'remove-layer': {
+      if (action.id === DEFAULT_LAYER_ID || !state.scene.layers?.some((l) => l.id === action.id)) return state;
+      const objects = state.scene.objects.map((o) => (o.layer === action.id ? withLayer(o, DEFAULT_LAYER_ID) : o));
+      return setLayers(state, state.scene.layers.filter((l) => l.id !== action.id), objects, {
+        activeLayer: state.activeLayer === action.id ? DEFAULT_LAYER_ID : state.activeLayer,
+      });
+    }
+    case 'assign-layer': {
+      if (!sceneLayers(state.scene).some((l) => l.id === action.layer)) return state;
+      return updateSelection(state, (o) => withLayer(o, action.layer), (o) => (o.layer ?? DEFAULT_LAYER_ID) !== action.layer);
+    }
+    case 'set-active-layer':
+      return sceneLayers(state.scene).some((l) => l.id === action.id) ? { ...state, activeLayer: action.id } : state;
+    case 'link-drag-start': {
+      const connector = state.scene.objects.find((o) => o.id === action.id);
+      if (!connector || !selectable(state, connector) || !state.registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, connector.object)?.connector) {
+        return state;
+      }
+      return { ...state, ...selection([action.id]), mode: 'select', placing: null, pipeStart: null, linkStart: null, drag: null, resize: null, linkDrag: { id: action.id, end: action.end } };
+    }
+    case 'link-drag-end': {
+      const cell = action.x !== undefined && action.y !== undefined ? { x: action.x, y: action.y } : state.cursor;
+      return linkDragEnd(state, cell);
+    }
     case 'undo': {
       const prev = state.past[state.past.length - 1];
       if (!prev) {
@@ -633,7 +1037,9 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
     }
     case 'new-document':
       return commit(state, { ...emptyScene(state.scene.id), theme: state.scene.theme, extensions: state.scene.extensions }, {
-        selectedId: null,
+        ...selection([]),
+        activeLayer: DEFAULT_LAYER_ID,
+        linkStart: null,
         pipeStart: null,
         pipeStartHeading: null,
         placing: null,
@@ -644,13 +1050,15 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
     case 'set-read-only':
       return action.readOnly === state.readOnly
         ? state
-        : { ...state, readOnly: action.readOnly, mode: 'select', placing: null, pipeStart: null, drag: null, resize: null };
+        : { ...state, readOnly: action.readOnly, mode: 'select', placing: null, pipeStart: null, linkStart: null, linkDrag: null, drag: null, resize: null };
     case 'cancel':
       return {
         ...state,
         mode: 'select',
         placing: null,
         pipeStart: null,
+        linkStart: null,
+        linkDrag: null,
         drag: null,
         resize: null,
       };
@@ -675,15 +1083,25 @@ function loadDocument(state: EditorState, scene: IsoSceneFile): EditorState {
     // Keep `revision` monotonic (ProcessEditor compares it) and don't bump it:
     // a load is not a commit, so nothing is emitted. Keep the caller's object
     // (createEditorState clones) so the controlled-prop echo check still works.
-    return { ...fresh, scene, revision: state.revision };
+    // The clipboard survives so a copy in one document pastes into the next.
+    return { ...fresh, scene, revision: state.revision, clipboard: state.clipboard };
   }
   const selectedId = scene.objects.some((o) => o.id === state.selectedId) ? state.selectedId : null;
-  return { ...state, scene, selectedId, drag: null, resize: null };
+  // normalizeSelection prunes selectedIds that the new scene no longer has.
+  return { ...state, scene, selectedId, drag: null, resize: null, linkDrag: null };
 }
 
 export function selectedObject(state: EditorState): IsoPlacement | undefined {
   return state.scene.objects.find((o) => o.id === state.selectedId);
 }
+
+/** Every selected placement, in scene order. */
+export function selectedObjects(state: Pick<EditorState, 'scene' | 'selectedIds'>): IsoPlacement[] {
+  const ids = new Set(state.selectedIds);
+  return state.scene.objects.filter((o) => ids.has(o.id));
+}
+
+export { DEFAULT_LAYER_ID, DEFAULT_LAYER_NAME };
 
 /**
  * The scene to hand to `onChange` after `prev -> next`, or null when nothing
