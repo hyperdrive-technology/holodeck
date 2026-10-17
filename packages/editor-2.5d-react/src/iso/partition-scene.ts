@@ -2,6 +2,7 @@ import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoPartDefinition } from '../registry/types';
 import { getDefaultIsoRegistry } from '../registry/default';
 import type { IsoPlacement } from './scene';
+import { needsAppearance } from '../objects/appearance';
 
 /** One InstancedMesh per pool. Extra objects wrap into another pool. */
 export const INSTANCE_LIMIT = 1024;
@@ -20,7 +21,8 @@ export function partitionByPart(
   const unique: IsoPlacement[] = [];
   for (const object of objects) {
     const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, object.object);
-    if (def?.instanced && def.instancedRenderer && (def.instancedWhen?.(object) ?? true)) {
+    // Faded or z-ordered placements need their own materials / renderOrder: never pooled.
+    if (def?.instanced && def.instancedRenderer && !needsAppearance(object) && (def.instancedWhen?.(object) ?? true)) {
       const pool = pools.get(def.id);
       if (pool) pool.push(object);
       else pools.set(def.id, [object]);

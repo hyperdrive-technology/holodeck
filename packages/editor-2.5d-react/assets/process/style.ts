@@ -49,7 +49,41 @@ export type Finish = UnlitFinish | IsoFinish;
 /** Finish names. A GLB material named `hd.<name>` picks the matching finish. */
 export type FinishName = 'white' | 'shaded' | 'vessel' | 'flask' | 'accent';
 
+/**
+ * Tokens for the Arcentry-parity annotation objects (connectors, area
+ * variants, icons, metadata plane; holodeck#36). Optional on `HolodeckStyle`
+ * so pack themes written before these objects existed still validate; read
+ * them through `annotationStyle(style)`, which falls back to the defaults.
+ */
+export type AnnotationStyle = {
+  /** Connector line colour when the placement sets none. */
+  connector: string;
+  /** Connector ribbon width (world units) when the placement sets none. */
+  connectorWidth: number;
+  /** Moving dots of an animated connector (`flow: true`). */
+  flow: string;
+  /** Floor text colour for connector captions, icons' glyph labels and plain text. */
+  text: string;
+  /** Default icon colour. */
+  icon: string;
+  /** Dashed / dotted area outline ribbon width (world units). */
+  areaOutlineWidth: number;
+  /** Walled ("VPN") area: wall fill, its opacity and default height. */
+  areaWall: string;
+  areaWallOpacity: number;
+  areaWallHeight: number;
+  /** Area drop shadow colour and opacity per shadow level (1..3). */
+  shadow: string;
+  shadowOpacity: number;
+  /** Metadata plane panel. */
+  metaFill: string;
+  metaEdge: string;
+  metaText: string;
+};
+
 export type HolodeckStyle = {
+  /** Annotation-object tokens; absent = `HOLODECK_ANNOTATION_STYLE`. Read via `annotationStyle()`. */
+  annotation?: AnnotationStyle;
   colors: {
     /** Unlit body fill for pipes, fittings, caps. */
     body: string;
@@ -117,7 +151,32 @@ export type HolodeckStyle = {
   };
 };
 
+export const HOLODECK_ANNOTATION_STYLE: AnnotationStyle = {
+  // Same grey as the part outlines: connectors read as part of the drawing.
+  connector: '#666666',
+  connectorWidth: 0.08,
+  flow: '#4aa3d9',
+  // The label fill (Label maps the #666 default to this darker grey for 8 px legibility).
+  text: '#4a4a4a',
+  icon: '#666666',
+  areaOutlineWidth: 0.05,
+  areaWall: '#ffffff',
+  areaWallOpacity: 0.55,
+  areaWallHeight: 0.6,
+  shadow: '#000000',
+  shadowOpacity: 0.07,
+  metaFill: '#ffffff',
+  metaEdge: '#c8c8c8',
+  metaText: '#4a4a4a',
+};
+
+/** The annotation tokens of `style`, defaulted for themes that predate them. */
+export function annotationStyle(style: HolodeckStyle): AnnotationStyle {
+  return style.annotation ?? HOLODECK_ANNOTATION_STYLE;
+}
+
 export const HOLODECK_STYLE: HolodeckStyle = {
+  annotation: HOLODECK_ANNOTATION_STYLE,
   colors: {
     body: '#ffffff',
     // Edges stay #666. Phong + lights flattened the plant to an even grey,
