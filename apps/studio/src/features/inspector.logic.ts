@@ -11,12 +11,6 @@ export function rotationDegrees(rotation: number | undefined): number {
   return deg < 0 ? deg + 360 : deg === 360 ? 0 : deg;
 }
 
-/** Quarter-turn a rotation (radians), normalised to [0, 2π) so it never drifts. */
-export function rotateQuarter(rotation: number | undefined, direction: 1 | -1): number {
-  const quarters = Math.round(((rotation ?? 0) / (Math.PI / 2)) % 4) + direction;
-  return (((quarters % 4) + 4) % 4) * (Math.PI / 2);
-}
-
 /** The value the part renders with: the placement's own, else the spec default. */
 export function paramValue(placement: IsoPlacement, name: string, spec: IsoPartParamSpec): unknown {
   const own = placement.params?.[name];

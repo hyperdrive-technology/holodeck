@@ -1,7 +1,7 @@
 import { HOLODECK_DOCUMENT_FORMAT, type HolodeckDocument } from '@holodeck/sdk';
 import type { IsoSceneFile } from '@holodeck/editor-2.5d-react';
 import { IDBFactory } from 'fake-indexeddb';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { openStudioDb, STUDIO_DB_VERSION, type StudioDb } from './db';
 import { withDocumentId } from './document-ops';
 import { createIsoDocument } from './new-document';
@@ -138,6 +138,30 @@ describe('DocumentStore', () => {
     await store.create(doc);
     doc.body.objects.push({ id: 'x', object: 'tank', x: 0, y: 0 });
     expect(objectIds((await store.get('a'))?.document)).toEqual([]);
+  });
+
+  // holodeck#117 (2): a rejected put left `tx.done` unawaited -> unhandled rejection.
+  it('reports a failed put as the save error, with no unhandled rejection', async () => {
+    const store = makeStore();
+    await store.create(createIsoDocument('A', 'a'));
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    const put = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore) {
+      // What a quota failure looks like: the request fails and the transaction aborts.
+      this.transaction.abort();
+      throw new DOMException('quota', 'QuotaExceededError');
+    });
+    try {
+      await expect(store.save(createIsoDocument('A2', 'a'), 1)).rejects.toThrow('quota');
+      // Let any stray rejection surface.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    } finally {
+      put.mockRestore();
+      process.off('unhandledRejection', onUnhandled);
+    }
+    expect(unhandled).toEqual([]);
+    expect((await store.get('a'))?.document.name).toBe('A');
   });
 
   it('refuses a save that changes the id', async () => {
@@ -296,7 +320,7 @@ describe('DocumentStore', () => {
       [{ zoom: Number.NaN, target: [0, 0, 0] }, 'zoom'],
       [{ zoom: 10, target: [0, 0] }, 'target'],
       [{ zoom: 10, target: [0, Infinity, 0] }, 'target'],
-      [{ zoom: 10, target: [0, 0, 0], yaw: 4 }, 'yaw'],
+      [{ zoom: 10, target: [0, 0, 0], yaw: Number.NaN }, 'yaw'],
       [{ zoom: 10, target: [0, 0, 0], topDown: 'yes' }, 'topDown'],
     ])('rejects an invalid camera %j', async (camera, field) => {
       const store = makeStore();

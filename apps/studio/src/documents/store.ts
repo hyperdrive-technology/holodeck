@@ -85,8 +85,8 @@ function cameraProblems(camera: StudioCamera): string[] {
   if (!Array.isArray(camera.target) || camera.target.length !== 3 || !camera.target.every(Number.isFinite)) {
     problems.push('camera.target: must be three finite numbers');
   }
-  if (camera.yaw !== undefined && !(Number.isInteger(camera.yaw) && camera.yaw >= 0 && camera.yaw <= 3)) {
-    problems.push('camera.yaw: must be an integer 0-3');
+  if (camera.yaw !== undefined && !Number.isFinite(camera.yaw)) {
+    problems.push('camera.yaw: must be a finite number (radians)');
   }
   if (camera.topDown !== undefined && typeof camera.topDown !== 'boolean') problems.push('camera.topDown: must be a boolean');
   return problems;
@@ -251,8 +251,16 @@ export class DocumentStore {
       createdAt: existing?.createdAt ?? at,
       updatedAt: at,
     };
-    await tx.store.put(record);
-    await tx.done;
+    try {
+      await tx.store.put(record);
+      await tx.done;
+    } catch (error) {
+      // A failed put (QuotaExceededError …) aborts the transaction, so
+      // `tx.done` rejects too; it was never awaited on this path and surfaced
+      // as an unhandled rejection (holodeck#117). Settle it, report the put.
+      await tx.done.catch(() => undefined);
+      throw error;
+    }
     this.onChange?.({ type: 'saved', id, revision: record.revision });
     return { document: stamped, revision: record.revision };
   }

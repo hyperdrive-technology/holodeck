@@ -48,13 +48,13 @@ test('create, place, reload, export, import', async ({ page }, testInfo) => {
   await expect(page.getByTestId('document-list').getByRole('link', { name: 'E2E Plant' })).toBeVisible();
 
   // Place from the library: a tank, then a valve found by search.
-  await page.locator('[data-library-item="tank"]').click();
+  await page.locator('[data-library-add="tank"]').click();
   await expect(editor(page)).toHaveAttribute('data-object-count', '1');
   await expect(page.getByTestId('inspector-selected-id')).toHaveText('tank-1');
 
   await page.getByLabel('Search the library').fill('valve');
   await expect(page.locator('[data-library-item="tank"]')).toHaveCount(0);
-  await page.locator('[data-library-item="valve"]').click();
+  await page.locator('[data-library-add="valve"]').click();
   await expect(editor(page)).toHaveAttribute('data-object-count', '2');
   await expect(page.getByTestId('inspector-selected-id')).toHaveText('valve-1');
 
@@ -124,19 +124,24 @@ test('two tabs: an idle tab picks up the other tab’s save; Mod+S reports the r
   await expect(editor(other)).toHaveAttribute('data-object-count', '0');
 
   // Tab 1 places a tank; tab 2 is idle, so it adopts revision 2 (BroadcastChannel).
-  await page.locator('[data-library-item="tank"]').click();
+  await page.locator('[data-library-add="tank"]').click();
   await expect(page.getByTestId('canvas')).toHaveAttribute('data-revision', '2');
   await expect(editor(other)).toHaveAttribute('data-object-count', '1');
   await expect(other.getByTestId('canvas')).toHaveAttribute('data-revision', '2');
 
   // Tab 2 continues from it without a conflict.
-  await other.locator('[data-library-item="valve"]').click();
+  await other.locator('[data-library-add="valve"]').click();
   await expect(other.getByTestId('canvas')).toHaveAttribute('data-revision', '3');
   await expect(other.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved');
   await expect(editor(page)).toHaveAttribute('data-object-count', '2');
 
+  // holodeck#118: Mod+S on a clean document writes nothing (no new revision for the other tab to adopt).
+  const epochBefore = await page.getByTestId('canvas').getAttribute('data-editor-epoch');
   await other.keyboard.press('ControlOrMeta+s');
   await expect(other.getByTestId('notice').filter({ hasText: 'All changes are saved' })).toBeVisible();
+  await expect(other.getByTestId('canvas')).toHaveAttribute('data-revision', '3');
+  await expect(page.getByTestId('canvas')).toHaveAttribute('data-revision', '3');
+  await expect(page.getByTestId('canvas')).toHaveAttribute('data-editor-epoch', epochBefore!);
   await expect(other.getByTestId('conflict-dialog')).toHaveCount(0);
 });
 
@@ -150,7 +155,7 @@ test('Undo after adopting another tab’s version cannot resurrect the old scene
   const url = page.url();
 
   // Tab A: place a tank, then delete it on the canvas (a real editor commit, so A has undo history).
-  await page.locator('[data-library-item="tank"]').click();
+  await page.locator('[data-library-add="tank"]').click();
   await expect(editor(page)).toHaveAttribute('data-object-count', '1');
   await page.keyboard.press('Delete');
   await expect(editor(page)).toHaveAttribute('data-object-count', '0');
@@ -164,7 +169,7 @@ test('Undo after adopting another tab’s version cannot resurrect the old scene
   });
   await other.goto(url);
   await expect(other.getByTestId('canvas')).toHaveAttribute('data-revision', '3');
-  await other.locator('[data-library-item="valve"]').click();
+  await other.locator('[data-library-add="valve"]').click();
   await expect(other.getByTestId('canvas')).toHaveAttribute('data-revision', '4');
 
   // Tab A was clean, so it adopts B's version.
@@ -210,7 +215,7 @@ test('deleted in another tab while this tab has unsaved edits: save mine as a co
       throw new DOMException('simulated write failure', 'QuotaExceededError');
     };
   });
-  await page.locator('[data-library-item="tank"]').click();
+  await page.locator('[data-library-add="tank"]').click();
   await expect(page.getByTestId('canvas')).toHaveAttribute('data-save-status', 'error');
   await expect(page.getByTestId('canvas')).toHaveAttribute('data-dirty', 'true');
   await page.evaluate(() => (window as { __restorePut?: () => void }).__restorePut?.());
@@ -234,4 +239,98 @@ test('deleted in another tab while this tab has unsaved edits: save mine as a co
   await expect(page.getByTestId('document-list').getByRole('link', { name: /\(my version\)/ })).toBeVisible();
   await page.reload();
   await expect(editor(page)).toHaveAttribute('data-object-count', '1');
+});
+
+
+// holodeck#111: studio library and inspector edits share the canvas undo history.
+test('library add and inspector edits are undoable on the canvas', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('welcome').getByRole('button', { name: 'New document' }).click();
+  await expect(page).toHaveURL(/\/d\/[0-9a-f-]{36}$/);
+
+  // Add from the library, then undo / redo it.
+  await page.locator('[data-library-add="tank"]').click();
+  await expect(editor(page)).toHaveAttribute('data-object-count', '1');
+  await expect(page.getByTestId('inspector-selected-id')).toHaveText('tank-1');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(editor(page)).toHaveAttribute('data-object-count', '0');
+  await page.keyboard.press('ControlOrMeta+Shift+z');
+  await expect(editor(page)).toHaveAttribute('data-object-count', '1');
+
+  // Inspector rotate, then undo it (undo/redo keep the selection, so the inspector still shows tank-1).
+  await expect(page.getByTestId('inspector-selected-id')).toHaveText('tank-1');
+  const rotation = page.getByTestId('inspector-rotation');
+  await expect(rotation).toHaveText('0°');
+  await page.getByRole('button', { name: 'Rotate right' }).click();
+  await expect(rotation).toHaveText('90°');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(rotation).toHaveText('0°');
+
+  // Inspector delete, then undo it.
+  await page.getByRole('button', { name: /Delete object/ }).click();
+  await expect(editor(page)).toHaveAttribute('data-object-count', '0');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(editor(page)).toHaveAttribute('data-object-count', '1');
+
+  // Everything above was saved: a reload shows the same scene.
+  await expect(page.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved');
+  await page.reload();
+  await expect(editor(page)).toHaveAttribute('data-object-count', '1');
+});
+
+// holodeck#117: reopening a document must show what another tab saved meanwhile, not a cached copy.
+test('reopening a document after another tab saved it shows the latest and edits without a conflict', async ({ page, context }) => {
+  await page.goto('/');
+  await page.getByTestId('welcome').getByRole('button', { name: 'New document' }).click();
+  await expect(page).toHaveURL(/\/d\/[0-9a-f-]{36}$/);
+  const urlX = page.url();
+  // Switch A to another document (X's detail stays cached).
+  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await expect(page).not.toHaveURL(urlX);
+  await expect(editor(page)).toHaveAttribute('data-object-count', '0');
+
+  // Tab B edits X.
+  const other = await context.newPage();
+  other.on('pageerror', (error) => pageErrors.push(error));
+  await other.addInitScript(() => {
+    delete (Navigator.prototype as { gpu?: unknown }).gpu;
+  });
+  await other.goto(urlX);
+  await other.locator('[data-library-add="valve"]').click();
+  await expect(other.getByTestId('canvas')).toHaveAttribute('data-revision', '2');
+
+  // A reopens X from the document list: B's valve is there, at B's revision.
+  await page.getByTestId('document-list').getByRole('link', { name: 'Untitled', exact: true }).click();
+  await expect(page).toHaveURL(urlX);
+  await expect(editor(page)).toHaveAttribute('data-object-count', '1');
+  await expect(page.getByTestId('canvas')).toHaveAttribute('data-revision', '2');
+
+  // And A's next edit saves without a conflict.
+  await page.locator('[data-library-add="tank"]').click();
+  await expect(page.getByTestId('canvas')).toHaveAttribute('data-revision', '3');
+  await expect(page.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved');
+  await expect(page.getByTestId('conflict-dialog')).toHaveCount(0);
+});
+
+// Review of holodeck#128: "+" on a pipe added nothing; inspector delete with a
+// canvas multi-selection removed every selected object (#129).
+test('library "+" adds a pipe; inspector delete with a multi-selection removes only the shown object', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('welcome').getByRole('button', { name: 'New document' }).click();
+  await expect(page).toHaveURL(/\/d\/[0-9a-f-]{36}$/);
+
+  await page.locator('[data-library-add="pipe"]').click();
+  await expect(editor(page)).not.toHaveAttribute('data-object-count', '0');
+  const pipes = Number(await editor(page).getAttribute('data-object-count'));
+  await page.locator('[data-library-add="tank"]').click();
+  await page.locator('[data-library-add="valve"]').click();
+  await expect(editor(page)).toHaveAttribute('data-object-count', String(pipes + 2));
+
+  // Select everything on the canvas (Mod+A); the inspector shows the primary (last) object.
+  await page.keyboard.press('ControlOrMeta+a');
+  await expect(page.getByTestId('inspector-selected-id')).toBeVisible();
+  await page.getByRole('button', { name: /Delete object/ }).click();
+  await expect(editor(page)).toHaveAttribute('data-object-count', String(pipes + 1));
+  await page.reload();
+  await expect(editor(page)).toHaveAttribute('data-object-count', String(pipes + 1));
 });

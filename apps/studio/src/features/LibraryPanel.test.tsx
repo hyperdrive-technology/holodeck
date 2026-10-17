@@ -29,31 +29,38 @@ describe('<LibraryPanel />', () => {
     renderPanel();
     const pkg = screen.getByRole('region', { name: 'Holodeck 2.5D engine' });
     expect(within(pkg).getByRole('group', { name: 'Vessels' })).toBeInTheDocument();
-    expect(within(pkg).getByRole('button', { name: /Tank/ })).toBeInTheDocument();
+    expect(within(pkg).getByRole('button', { name: /^Tank/ })).toBeInTheDocument();
   });
 
   it('disables items until a document is open, then places through the active document', () => {
     renderPanel();
-    const tank = screen.getByRole('button', { name: /Tank/ });
+    const tank = screen.getByRole('button', { name: /^Tank/ });
     expect(tank).toBeDisabled();
     expect(screen.getByText('Open a document to place components.')).toBeInTheDocument();
-    const placeItem = vi.fn();
-    act(() => activeDocumentStore.setState(() => ({ id: 'd', placeItem, exportFile: vi.fn(), save: vi.fn() })));
+    const armItem = vi.fn();
+    const addItem = vi.fn();
+    act(() => activeDocumentStore.setState(() => ({ id: 'd', placing: null, armItem, addItem, exportFile: vi.fn(), save: vi.fn() })));
     expect(tank).toBeEnabled();
+    expect(tank).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(tank);
-    expect(placeItem).toHaveBeenCalledWith('holodeck.iso.part', 'tank');
+    expect(armItem).toHaveBeenCalledWith('holodeck.iso.part', 'tank');
+    fireEvent.click(screen.getByRole('button', { name: 'Add Tank to the document' }));
+    expect(addItem).toHaveBeenCalledWith('holodeck.iso.part', 'tank');
+    // The armed item shows as pressed.
+    act(() => activeDocumentStore.setState((s) => (s ? { ...s, placing: 'tank' } : s)));
+    expect(tank).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('filters by search and clears on Escape', () => {
     renderPanel();
     const search = screen.getByRole('searchbox', { name: 'Search the library' });
     fireEvent.change(search, { target: { value: 'valve' } });
-    expect(screen.queryByRole('button', { name: /Tank/ })).toBeNull();
-    expect(screen.getByRole('button', { name: /Valve/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Tank/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /^Valve/ })).toBeInTheDocument();
     fireEvent.change(search, { target: { value: 'zzz' } });
     expect(screen.getByText(/Nothing matches/)).toBeInTheDocument();
     fireEvent.keyDown(search, { key: 'Escape' });
     expect(search).toHaveValue('');
-    expect(screen.getByRole('button', { name: /Tank/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Tank/ })).toBeInTheDocument();
   });
 });

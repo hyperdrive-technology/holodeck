@@ -1,11 +1,12 @@
 import { HOLODECK_KINDS, type HolodeckDocument } from '@holodeck/sdk';
-import { ISO_ENGINE_ID, ProcessEditor, type IsoPlacement, type IsoSceneFile } from '@holodeck/editor-2.5d-react';
+import { ISO_ENGINE_ID, ProcessEditor, type IsoSceneFile, type ProcessEditorHandle } from '@holodeck/editor-2.5d-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useBlocker, useNavigate } from '@tanstack/react-router';
 import { useSelector } from '@tanstack/react-store';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { addPart, removePlacement, updatePlacement, usedIsoContributions } from '../documents/iso-scene';
-import { documentKeys, useDocument } from '../documents/queries';
+import type { StudioCamera } from '../documents/db';
+import { libraryDropPoint, usedIsoContributions } from '../documents/iso-scene';
+import { documentKeys, useDocument, useDocumentCamera, useSaveCamera } from '../documents/queries';
 import { withDocumentName } from '../documents/document-ops';
 import type { VersionedDocument } from '../documents/store';
 import { DocumentWriter } from '../documents/writer';
@@ -17,28 +18,33 @@ import { useStudio } from '../studio-context';
 import { activeDocumentStore } from './active-document';
 import { CanvasErrorBoundary } from './CanvasErrorBoundary';
 import { ConflictDialog } from './ConflictDialog';
+import { inspectorActions, libraryAddActions } from './editor-commands';
 import { downloadDocument } from './file-io';
-import { Inspector } from './Inspector';
+import { Inspector, type InspectorEdit } from './Inspector';
 import { describeSaveStatus } from './save-status';
 import { useStudioActions } from './use-studio-actions';
 
 type IsoDoc = HolodeckDocument<IsoSceneFile>;
-const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** Route component for `/d/$docId`: loads the document, then hands it to the editor. */
 export function DocumentRoute({ docId }: { docId: string }) {
-  const { data, isPending, error } = useDocument(docId);
+  const { data, isPending, error, isFetchedAfterMount } = useDocument(docId);
+  const camera = useDocumentCamera(docId);
   // The version this route last opened. If the document then disappears
   // (deleted in another tab, holodeck#115), the workspace stays mounted with
   // its working copy until it is clean or the user has chosen what to keep;
   // unmounting it here would drop unsaved edits without any prompt.
   const [opened, setOpened] = useState<VersionedDocument | null>(null);
-  if (data && data !== opened) setOpened(data);
+  // Open only on a read made after mount: a cached copy can be stale (holodeck#117).
+  // ... and only once the stored camera is known too: opening first would mount
+  // the editor without it and the camera arriving later would be ignored
+  // (review of holodeck#128).
+  if (data && isFetchedAfterMount && !camera.isPending && data !== opened) setOpened(data);
   const kept = opened?.document.id === docId ? opened : null;
   const release = useCallback(() => setOpened(null), []);
-  if (isPending && !kept) return <CenteredMessage>Loading document…</CenteredMessage>;
   if (error && !kept) return <CenteredMessage tone="error">Could not open the document: {error.message}</CenteredMessage>;
-  const current = data ?? kept;
+  if (!kept && (isPending || !isFetchedAfterMount || camera.isPending)) return <CenteredMessage>Loading document…</CenteredMessage>;
+  const current = (isFetchedAfterMount ? data : undefined) ?? kept;
   if (!current) return <CenteredMessage>This document does not exist (it may have been deleted).</CenteredMessage>;
   if (current.document.engine !== ISO_ENGINE_ID) return <CenteredMessage>No editor for engine “{current.document.engine}” yet.</CenteredMessage>;
   // key: a different document gets fresh editor state (selection, working copy, writer).
@@ -46,6 +52,7 @@ export function DocumentRoute({ docId }: { docId: string }) {
     <DocumentWorkspace
       key={current.document.id}
       initial={current}
+      initialCamera={camera.data ?? undefined}
       deletedElsewhere={!isPending && data === null}
       onReleased={release}
     />
@@ -67,10 +74,13 @@ function CenteredMessage({ children, tone }: { children: React.ReactNode; tone?:
  */
 function DocumentWorkspace({
   initial,
+  initialCamera,
   deletedElsewhere,
   onReleased,
 }: {
   initial: VersionedDocument;
+  /** The camera stored for this document; undefined = fit the scene. */
+  initialCamera: StudioCamera | undefined;
   /** The stored document is gone (another tab deleted it). */
   deletedElsewhere: boolean;
   /** Let the route drop this workspace (nothing here needs keeping). */
@@ -80,6 +90,16 @@ function DocumentWorkspace({
   const client = useQueryClient();
   const [doc, setDoc] = useState<IsoDoc>(initial.document as IsoDoc);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** Part armed on the canvas place tool from the library (controlled `placing`). */
+  const [placing, setPlacing] = useState<string | null>(null);
+  const editorRef = useRef<ProcessEditorHandle>(null);
+  /**
+   * Latest view, as the editor reported it (debounced to gesture end).
+   * Persisted per document, and handed back to the editor when it remounts
+   * on adopt so the view does not jump (holodeck#118).
+   */
+  const cameraRef = useRef<StudioCamera | undefined>(initialCamera);
+  const { mutate: saveCamera } = useSaveCamera();
   const { deleteDocument, openDocument } = useStudioActions();
   const navigate = useNavigate();
   const inspectorOpen = useSelector(panelStore, (s) => s.inspectorOpen);
@@ -103,7 +123,9 @@ function DocumentWorkspace({
    * `loadDocument`), so without a remount Undo after adopting another
    * version restored a pre-adopt scene and saved it at the adopted revision:
    * the other version vanished with no conflict (review of holodeck#102 @
-   * 2b2a498). A history-reset prop on ProcessEditor would be cleaner (#100).
+   * 2b2a498). ProcessEditor has no history-reset action yet, so the remount
+   * stays; the camera and selection are passed back in so it is seamless
+   * (holodeck#118).
    */
   const [editorEpoch, setEditorEpoch] = useState(0);
 
@@ -111,12 +133,20 @@ function DocumentWorkspace({
   const adopt = useCallback(
     (version: VersionedDocument) => {
       const next = version.document as IsoDoc;
+      // The live view: `cameraRef` only updates after the editor's gesture
+      // debounce, so a pan just before an adopt would otherwise be undone (#130).
+      const live = editorRef.current?.getCamera();
+      if (live) cameraRef.current = live;
       docRef.current = next;
       setDoc(next);
       setEditorEpoch((n) => n + 1);
+      setSelectedId((id) => (id && next.body.objects.some((o) => o.id === id) ? id : null));
+      setPlacing(null);
       writer.adopt(version);
+      // Keep the query cache on the adopted version (holodeck#117).
+      client.setQueryData(documentKeys.detail(version.document.id), version);
     },
-    [writer],
+    [client, writer],
   );
 
   // Unsaved, failed or conflicting edits: warn before the tab closes or the
@@ -171,46 +201,54 @@ function DocumentWorkspace({
     [adopt, channel, initial.document.id, store, writer],
   );
 
-  const placeItem = useCallback(
+  /** Library click: arm the canvas place tool (click again to disarm); the next floor click stamps it. */
+  const armItem = useCallback((kind: string, itemId: string) => {
+    if (kind !== HOLODECK_KINDS.isoPart) return;
+    setPlacing((current) => (current === itemId ? null : itemId));
+  }, []);
+
+  /**
+   * Library "+": stamp the part next to the scene through the editor's own
+   * place tool (`place-mode` + `floor-click`), so it is one undoable step
+   * with the palette's defaults and inline-part attachment (holodeck#111).
+   */
+  const addItem = useCallback(
     (kind: string, itemId: string) => {
-      if (kind !== HOLODECK_KINDS.isoPart) return;
-      try {
-        const { scene, id } = addPart(docRef.current.body, host.registry, itemId);
-        commitScene(scene);
-        setSelectedId(id);
-      } catch (error) {
-        notify({ tone: 'error', title: 'Could not place the component', details: [messageOf(error)] });
-      }
+      const editor = editorRef.current;
+      if (kind !== HOLODECK_KINDS.isoPart || !editor) return;
+      const at = libraryDropPoint(docRef.current.body, host.registry);
+      for (const action of libraryAddActions(host.registry, itemId, at)) editor.dispatch(action);
     },
-    [commitScene, host],
+    [host],
   );
 
   // Publish this document's commands to the shell (library, header, hotkeys).
   useEffect(() => {
     activeDocumentStore.setState(() => ({
       id: initial.document.id,
-      placeItem,
+      placing,
+      armItem,
+      addItem,
       exportFile: () => downloadDocument(docRef.current),
-      save: async () => {
-        // Re-save the working copy (a retry after a failure), then report the real outcome.
-        if (writer.getState().status.kind !== 'conflict') void writer.save(docRef.current);
-        return writer.flush();
-      },
+      // Writes only when something is unsaved; reports the real outcome (holodeck#118).
+      save: () => writer.persist(docRef.current),
     }));
     return () => activeDocumentStore.setState((current) => (current?.id === initial.document.id ? null : current));
-  }, [initial.document.id, placeItem, writer]);
+  }, [initial.document.id, placing, armItem, addItem, writer]);
 
-  const onPatch = useCallback(
-    (id: string, patch: Partial<Omit<IsoPlacement, 'id' | 'object'>>) => commitScene(updatePlacement(docRef.current.body, id, patch)),
-    [commitScene],
-  );
-  const onDeleteObject = useCallback(
-    (id: string) => {
-      commitScene(removePlacement(docRef.current.body, id));
-      setSelectedId(null);
-    },
-    [commitScene],
-  );
+  /**
+   * Inspector edits run as editor actions on the selected object, so they
+   * share the canvas undo history (holodeck#111). Delete is the editor's
+   * `delete`, which detaches connector anchors and hosted inline parts
+   * (`removeObjects`, holodeck#124).
+   */
+  const runOnObject = useCallback((id: string, edit: InspectorEdit | { kind: 'delete' }) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    for (const action of inspectorActions(editor.getState().selectedIds, id, edit)) editor.dispatch(action);
+  }, []);
+  const onEdit = useCallback((id: string, edit: InspectorEdit) => runOnObject(id, edit), [runOnObject]);
+  const onDeleteObject = useCallback((id: string) => runOnObject(id, { kind: 'delete' }), [runOnObject]);
   const onRename = useCallback(
     (name: string) => {
       // Optimistic in the working copy; the store applies it to the stored
@@ -234,11 +272,6 @@ function DocumentWorkspace({
 
   const conflict = writerState.status.kind === 'conflict' ? writerState.status : null;
 
-  // TODO(holodeck#100, lane E2): persist the camera per document. The
-  // store side is done (DocumentStore.getCamera / saveCamera, `views` object
-  // store), but ProcessEditor keeps zoom / target / pose in private state
-  // with no props to read or restore them. Needs `camera` + `onCameraChange`
-  // props on ProcessEditor (packages/editor-2.5d-react, owned by lane E2).
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
       <main
@@ -250,6 +283,7 @@ function DocumentWorkspace({
         data-revision={writerState.revision}
         data-dirty={writerState.dirty ? 'true' : 'false'}
         data-editor-epoch={editorEpoch}
+        data-placing={placing ?? ''}
       >
         <CanvasErrorBoundary resetKey={doc.id}>
           <ProcessEditor
@@ -260,6 +294,15 @@ function DocumentWorkspace({
             registry={host.registry}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            editorRef={editorRef}
+            chrome="canvas"
+            camera={cameraRef.current}
+            onCameraChange={(camera) => {
+              cameraRef.current = camera;
+              saveCamera({ id: initial.document.id, camera });
+            }}
+            placing={placing}
+            onPlacingChange={setPlacing}
           />
         </CanvasErrorBoundary>
       </main>
@@ -269,7 +312,7 @@ function DocumentWorkspace({
             doc={doc}
             selectedId={selectedId}
             onRename={onRename}
-            onPatch={onPatch}
+            onEdit={onEdit}
             onDeleteObject={onDeleteObject}
             onDeleteDocument={() => {
               leaving.current = true;

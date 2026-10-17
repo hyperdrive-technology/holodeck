@@ -20,7 +20,10 @@ const documentRoute = createRoute({
   path: '/d/$docId',
   component: function DocumentPage() {
     const { docId } = documentRoute.useParams();
-    return <DocumentRoute docId={docId} />;
+    // key: a fresh route per document, so its queries re-read on mount
+    // (refetchOnMount 'always'); without it a key change reuses the observer
+    // and a cached copy is never re-read (holodeck#117).
+    return <DocumentRoute key={docId} docId={docId} />;
   },
 });
 

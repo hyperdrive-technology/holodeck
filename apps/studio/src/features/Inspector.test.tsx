@@ -2,12 +2,11 @@ import type { HolodeckHost } from '@holodeck/sdk';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { openStudioDb } from '../documents/db';
-import { addPart } from '../documents/iso-scene';
 import { createIsoDocument } from '../documents/new-document';
 import { DocumentStore } from '../documents/store';
 import { createStudioHost } from '../host/studio-host';
 import { StudioProvider } from '../studio-context';
-import { NO_CHANNEL } from '../test-support';
+import { NO_CHANNEL, withPart } from '../test-support';
 import type { IsoPartDefinition } from '@holodeck/editor-2.5d-react';
 import { Inspector, type InspectorProps } from './Inspector';
 import { visibleParams } from './inspector.logic';
@@ -19,12 +18,12 @@ beforeAll(async () => {
 
 function setup(over: Partial<InspectorProps> = {}) {
   const doc = createIsoDocument('Plant', 'p');
-  doc.body = addPart(doc.body, host.registry, 'tank').scene;
+  doc.body = withPart(doc.body, host.registry, 'tank').scene;
   const props: InspectorProps = {
     doc,
     selectedId: null,
     onRename: vi.fn(),
-    onPatch: vi.fn(),
+    onEdit: vi.fn(),
     onDeleteObject: vi.fn(),
     onDeleteDocument: vi.fn(),
     ...over,
@@ -80,9 +79,9 @@ describe('<Inspector />', () => {
     const x = screen.getByLabelText('X');
     fireEvent.change(x, { target: { value: '4.567' } });
     fireEvent.blur(x);
-    expect(props.onPatch).toHaveBeenLastCalledWith('tank-1', { x: 4.57 });
+    expect(props.onEdit).toHaveBeenLastCalledWith('tank-1', { kind: 'move', patch: { x: 4.57 } });
     fireEvent.click(screen.getByRole('button', { name: 'Rotate right' }));
-    expect(props.onPatch).toHaveBeenLastCalledWith('tank-1', { rotation: Math.PI / 2 });
+    expect(props.onEdit).toHaveBeenLastCalledWith('tank-1', { kind: 'rotate', direction: 1 });
     fireEvent.click(screen.getByRole('button', { name: /Delete object/ }));
     expect(props.onDeleteObject).toHaveBeenCalledWith('tank-1');
   });

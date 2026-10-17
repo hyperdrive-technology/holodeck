@@ -27,9 +27,13 @@ PLC or Hyperdrive code: the studio is a plain Holodeck host.
   Every problem is listed at once. Re-importing an existing id makes a copy.
   Files can also be dropped anywhere on the window.
 - **Library** sidebar: placeable items of every installed package, grouped by
-  package and category, with multi-term search.
+  package and category, with multi-term search. Click an item to arm the
+  canvas place tool (then click the floor); "+" adds it next to the scene.
 - **Inspector**: document properties (name, packages used, timestamps) or the
   selected object (position, rotation, part params).
+- **Canvas**: the engine's `ProcessEditor` with `chrome="canvas"`. Library and
+  inspector edits run as editor actions (`editorRef.dispatch`), so they share
+  the canvas undo history. The camera is stored per document.
 - **Layout**: T3 Code idioms: resizable, persisted side panels
   (`src/layout/`), TanStack Store for UI state, TanStack Hotkeys for
   shortcuts (`Mod+/` lists them).
@@ -61,9 +65,8 @@ rendering is covered by the engine's render tests.
 
 ## Known gaps (follow-ups)
 
-- The engine's `ProcessEditor` brings its own palette, inspector and toolbar,
-  so they show next to the studio's; it also has no camera props, so camera
-  persistence is stored (`DocumentStore.saveCamera`) but not wired to the
-  canvas yet. Both need `ProcessEditor` props (lane E2, holodeck#100).
 - Connections panel and binding editor (provider config, secrets in session
   storage, source picker via `browse`): holodeck#101.
+- Adopting another tab's version still remounts the canvas to reset undo
+  history (no history-reset action on `ProcessEditor` yet); camera and
+  selection are carried over, an in-progress drag is dropped.
