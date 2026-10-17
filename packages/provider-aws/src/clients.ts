@@ -85,6 +85,15 @@ export interface ClientDeps {
  */
 const EXPIRY_MARGIN_MS = 5 * 60_000;
 
+/**
+ * Standard regional endpoints only (holodeck#150). In Node the SDK would
+ * otherwise read AWS_USE_FIPS_ENDPOINT / AWS_USE_DUALSTACK_ENDPOINT (or
+ * ~/.aws/config) and switch to `monitoring-fips.*` / dual-stack hosts, which
+ * `AWS_ORIGINS` deliberately does not list. Supporting FIPS would mean adding
+ * those origins to the manifest and a config switch.
+ */
+const ENDPOINT_SETTINGS = { useFipsEndpoint: false, useDualstackEndpoint: false } as const;
+
 /** Silent SDK logger: the SDK never writes to the console on our behalf. */
 const SILENT_LOGGER = { trace() {}, debug() {}, info() {}, warn() {}, error() {} };
 
@@ -131,11 +140,15 @@ export function memoizeCredentials(
   redact: Redactor,
   now: () => number,
 ): AwsCredentialIdentityProvider {
-  let current: Promise<AwsCredentialIdentity> | undefined;
+  let current: AwsCredentialIdentity | undefined;
   let refreshAt = Infinity;
+  // The one load in flight, shared by every caller until it settles
+  // (holodeck#147): concurrent requests after expiry make one STS/Cognito call.
+  let pending: Promise<AwsCredentialIdentity> | undefined;
   return async () => {
-    if (!current || now() >= refreshAt) {
-      const pending = (async () => {
+    if (current && now() < refreshAt) return current;
+    if (!pending) {
+      const load_ = (async () => {
         const creds = await load();
         if (!creds || typeof creds.accessKeyId !== 'string' || typeof creds.secretAccessKey !== 'string' || !creds.accessKeyId || !creds.secretAccessKey) {
           throw new AwsProviderError('credentials are incomplete (need accessKeyId and secretAccessKey)', 'auth');
@@ -144,15 +157,21 @@ export function memoizeCredentials(
         const loadedAt = now();
         const expiresAt = creds.expiration instanceof Date ? creds.expiration.getTime() : Infinity;
         refreshAt = expiresAt - Math.min(EXPIRY_MARGIN_MS, Math.max(0, (expiresAt - loadedAt) / 2));
+        current = creds;
         return creds;
       })();
-      current = pending;
-      // A failed load is not cached: the next request tries again.
-      pending.catch(() => {
-        if (current === pending) current = undefined;
-      });
+      pending = load_;
+      // Clear the slot when it settles; a failed load is not cached, so the next call retries.
+      load_.then(
+        () => {
+          if (pending === load_) pending = undefined;
+        },
+        () => {
+          if (pending === load_) pending = undefined;
+        },
+      );
     }
-    return current;
+    return pending;
   };
 }
 
@@ -179,7 +198,17 @@ function hostProvider(deps: ClientDeps): () => Promise<AwsCredentialIdentity> {
   if (!hostCredentials) {
     throw new AwsProviderError('credentials type needs a host credentials callback (AwsProviderOptions.credentials), and none is installed', 'config');
   }
-  return async () => hostCredentials({ connectionId: ctx.connectionId, region: config.region });
+  return async () => {
+    try {
+      return await hostCredentials({ connectionId: ctx.connectionId, region: config.region });
+    } catch (error) {
+      // The callback's own message may quote the token it was refused with, a
+      // value the redactor cannot know (holodeck#149). Keep at most a plain
+      // error name.
+      const name = error instanceof Error && /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(error.name) && error.name !== 'Error' ? error.name : undefined;
+      throw new AwsProviderError(`host credentials callback failed${name ? ` (${name})` : ''}`, 'auth');
+    }
+  };
 }
 
 /** A session's credentials, plus the STS / Cognito client (if any) to destroy on close. */
@@ -211,7 +240,7 @@ export async function resolveCredentials(deps: ClientDeps, handler: FetchHttpHan
   const { config, ctx, redact, signal } = deps;
   const now = () => ctx.now();
   const creds = config.credentials;
-  const clientCommon = { requestHandler: handler, streamCollector, maxAttempts: config.maxAttempts, retryMode: 'standard' as const, logger: SILENT_LOGGER };
+  const clientCommon = { ...ENDPOINT_SETTINGS, requestHandler: handler, streamCollector, maxAttempts: config.maxAttempts, retryMode: 'standard' as const, logger: SILENT_LOGGER };
   switch (creds.type) {
     case 'static': {
       const identity = await staticSecrets(ctx, redact);
@@ -268,6 +297,7 @@ export function createClients(config: AwsConnectionConfig, handler: FetchHttpHan
   const cw = new Map<string, CloudWatchClient>();
   const tg = new Map<string, ResourceGroupsTaggingAPIClient>();
   const common = (region: string) => ({
+    ...ENDPOINT_SETTINGS,
     region,
     credentials,
     requestHandler: handler,

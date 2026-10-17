@@ -70,7 +70,8 @@ alarm:<region>/<AlarmName>
 
 - **The poll period comes from the source:** a metric is polled once per `period`, never faster than
   `minPollIntervalMs` (default 60 s; polling faster only re-reads the same datapoint, and every metric in a
-  `GetMetricData` call is billed). Alarms are polled every `alarmPollIntervalMs` (default 60 s).
+  `GetMetricData` call is billed), and at least once a day (a 30-day `period` is re-read daily). Alarms are polled
+  every `alarmPollIntervalMs` (default 60 s).
 - Sources are grouped by (kind, region, interval). Each group makes one request per tick however many objects
   bind to it: `GetMetricData` with up to 500 queries and under 100,000 datapoints per request, `DescribeAlarms`
   with up to 100 names.
