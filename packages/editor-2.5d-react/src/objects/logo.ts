@@ -21,10 +21,15 @@ export interface LogoAnchor {
    * the image top (the `logo` empty contract). Identity for every top-face
    * slot (normal +Y, image top toward -Z); `cloud:billboard` authors its
    * empty on the sign's front face, rotated so the normal is +Z (holodeck#138).
+   * Optional so anchors a host builds for the exported `LogoPlane` keep
+   * working (holodeck#142): omitted = identity, a flat top-face logo.
    */
-  quaternion: [number, number, number, number];
-  /** Unit face normal in the model frame (slot local +Y); `position` is lifted along it. */
-  normal: [number, number, number];
+  quaternion?: [number, number, number, number];
+  /**
+   * Unit face normal in the model frame (slot local +Y); `position` is
+   * already lifted along it. Informational; omitted = +Y (holodeck#142).
+   */
+  normal?: [number, number, number];
   /** `node`: from the GLB's `logo` empty; `top`: from the bounding box; `block`: the code-built block. */
   source: 'node' | 'top' | 'block';
 }
@@ -91,7 +96,8 @@ export function logoAnchorFromModel(model: Object3D): LogoAnchor | null {
 }
 
 /** Orientation of a top-face slot: no rotation, normal +Y. */
-const FLAT: Pick<LogoAnchor, 'quaternion' | 'normal'> = { quaternion: [0, 0, 0, 1], normal: [0, 1, 0] };
+const FLAT_QUATERNION: [number, number, number, number] = [0, 0, 0, 1];
+const FLAT: Required<Pick<LogoAnchor, 'quaternion' | 'normal'>> = { quaternion: FLAT_QUATERNION, normal: [0, 1, 0] };
 
 /**
  * Rotation of the logo plane mesh for `anchor`. three's PlaneGeometry lies in
@@ -100,7 +106,7 @@ const FLAT: Pick<LogoAnchor, 'quaternion' | 'normal'> = { quaternion: [0, 0, 0, 
  * the slot's -Z, then the slot's own rotation carries it onto its face.
  */
 export function logoPlaneQuaternion(anchor: Pick<LogoAnchor, 'quaternion'>): Quaternion {
-  const [x, y, z, w] = anchor.quaternion;
+  const [x, y, z, w] = anchor.quaternion ?? FLAT_QUATERNION;
   const toFlat = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), -Math.PI / 2);
   return new Quaternion(x, y, z, w).multiply(toFlat);
 }

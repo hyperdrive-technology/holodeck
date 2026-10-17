@@ -62,8 +62,9 @@ const branded: IsoPartDefinition = {
 
 /**
  * holodeck#138: @holodeck/library-cloud's billboard, whose `logo` empty sits
- * on the sign's upright front face. Resolved with a glob so the harness still
- * builds on a checkout without that GLB (it arrived with lane A1 batch 2).
+ * on the sign's upright front face. Resolved with a glob (not a static
+ * import) so a missing GLB is a clear test failure (`__objects.billboard`
+ * false) rather than a Vite import error that blanks the whole harness.
  */
 const billboardUrl = Object.values(
   import.meta.glob<string>('../../../library-cloud/assets/models/billboard.glb', { query: '?url', import: 'default', eager: true }),

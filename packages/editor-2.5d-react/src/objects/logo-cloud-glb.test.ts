@@ -27,25 +27,26 @@ async function load(name: string) {
 
 describe('logo anchors on the library-cloud GLBs', () => {
   it('finds the library-cloud models', () => {
-    expect(names.length).toBeGreaterThanOrEqual(13);
+    expect(names.length).toBeGreaterThanOrEqual(26);
   });
 
   it.each(names.filter((n) => n !== 'billboard'))('%s: flat top-face slot (normal +Y, image top -Z)', async (name) => {
     const a = logoAnchorFromModel(await load(name))!;
     expect(a.source).toBe('node');
-    expect(a.normal[1]).toBeCloseTo(1, 5);
+    expect(a.normal![1]).toBeCloseTo(1, 5);
     const q = logoPlaneQuaternion(a);
     expect(new Vector3(0, 0, 1).applyQuaternion(q).y).toBeCloseTo(1, 5);
     expect(new Vector3(0, 1, 0).applyQuaternion(q).z).toBeCloseTo(-1, 5);
   });
 
-  it.runIf(names.includes('billboard'))('billboard: upright slot on the +Z front face, image top up', async () => {
+  it('billboard: upright slot on the +Z front face, image top up', async () => {
+    expect(names, 'cloud:billboard GLB shipped by library-cloud').toContain('billboard');
     const scene = await load('billboard');
     const a = logoAnchorFromModel(scene)!;
     expect(a.source).toBe('node');
-    expect(a.normal[0]).toBeCloseTo(0, 5);
-    expect(a.normal[1]).toBeCloseTo(0, 5);
-    expect(a.normal[2]).toBeCloseTo(1, 5);
+    expect(a.normal![0]).toBeCloseTo(0, 5);
+    expect(a.normal![1]).toBeCloseTo(0, 5);
+    expect(a.normal![2]).toBeCloseTo(1, 5);
     // Authored at Y=1.36 on the sign's front face (z=0.08), edge 1.00; lifted off the face along +Z.
     expect(a.position[1]).toBeCloseTo(1.36, 3);
     expect(a.position[2]).toBeCloseTo(0.08 + LOGO_LIFT, 3);

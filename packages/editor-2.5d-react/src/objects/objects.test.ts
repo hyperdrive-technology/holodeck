@@ -9,7 +9,7 @@ import { HOLODECK_STYLE_DARK } from '../registry/themes';
 import { applyAppearance, AppearanceState, needsAppearance, Z_RENDER_STEP } from './appearance';
 import { captionPose, connectorLook, flowOffset, flowSpacing, gridPolylineToWorld, MAX_FLOW_DOTS } from './ConnectorLine';
 import { BUILTIN_ICON_NAMES, BUILTIN_ICONS, drawIcon, MAX_GLYPH_LENGTH } from './icons';
-import { fitAspect, LOGO_LIFT, logoAnchorForBlock, logoAnchorFromModel, logoPlaneQuaternion } from './logo';
+import { fitAspect, LOGO_LIFT, logoAnchorForBlock, logoAnchorFromModel, logoPlaneQuaternion, type LogoAnchor } from './logo';
 import { fitBox, metaLines } from './Marks';
 
 describe('logoAnchorFromModel', () => {
@@ -65,9 +65,9 @@ describe('logoAnchorFromModel', () => {
     logo.scale.set(1, 1, 1);
     root.add(logo);
     const a = logoAnchorFromModel(root)!;
-    expect(a.normal[0]).toBeCloseTo(0);
-    expect(a.normal[1]).toBeCloseTo(0);
-    expect(a.normal[2]).toBeCloseTo(1);
+    expect(a.normal![0]).toBeCloseTo(0);
+    expect(a.normal![1]).toBeCloseTo(0);
+    expect(a.normal![2]).toBeCloseTo(1);
     expect(a.position[1]).toBeCloseTo(1.36);
     expect(a.position[2]).toBeCloseTo(0.08 + LOGO_LIFT);
     expect(a.size).toBeCloseTo(1);
@@ -77,6 +77,16 @@ describe('logoAnchorFromModel', () => {
     const top = new Vector3(0, 1, 0).applyQuaternion(q);
     expect(facing.z).toBeCloseTo(1);
     expect(top.y).toBeCloseTo(1);
+  });
+
+  // holodeck#142: hosts build anchors for the exported LogoPlane without the
+  // orientation fields added in #138; they must still type-check and lie flat.
+  it('an anchor without quaternion / normal (host-built, pre-#138 shape) is a flat slot', () => {
+    const legacy: LogoAnchor = { position: [0, 1, 0], size: 0.5, source: 'block' };
+    const q = logoPlaneQuaternion(legacy);
+    expect(new Vector3(0, 0, 1).applyQuaternion(q).y).toBeCloseTo(1);
+    expect(new Vector3(0, 1, 0).applyQuaternion(q).z).toBeCloseTo(-1);
+    expect(q.equals(logoPlaneQuaternion(logoAnchorForBlock(1, 1, 1)))).toBe(true);
   });
 
   it('a flat slot keeps the old plane: facing +Y, image top toward -Z', () => {

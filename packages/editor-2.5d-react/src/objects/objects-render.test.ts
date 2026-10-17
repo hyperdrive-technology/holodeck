@@ -90,6 +90,7 @@ describe.skipIf(!CHROMIUM)('Arcentry-parity objects in a real canvas', () => {
         return out;
       });
       const billboardShown = await page.evaluate(() => (window as any).__objects.billboard as boolean);
+      expect(billboardShown, 'the harness found library-cloud billboard.glb').toBe(true);
       const upright = logos.filter((l) => Math.abs(l.facing[1]!) < 0.5);
       for (const l of logos.filter((x) => !upright.includes(x))) expect(l.facing[1], `flat logo ${l.id} faces up`).toBeCloseTo(1, 2);
       expect(upright.length, 'upright logos (only the billboard)').toBe(billboardShown ? 1 : 0);
