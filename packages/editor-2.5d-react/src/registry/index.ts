@@ -33,5 +33,7 @@ export {
   HOLODECK_THEME_DEFAULT,
 } from './themes';
 export { GlbPart } from './GlbPart';
+export { DataPart, DATA_BLOCK_HEIGHT, LogoPlane } from './DataPart';
+export { ANNOTATION_PARTS, CONNECTOR_PART, ICON_PART, IMAGE_PART } from './annotation-parts';
 export { partScale } from './part-scale';
 export { formatLabelText, formatLabelValue } from './label-text';

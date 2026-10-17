@@ -119,7 +119,7 @@ describe('registerIsoKinds / createIsoRegistry', () => {
 });
 
 describe('built-in extension', () => {
-  it('installs cleanly with the nine original parts, two themes and five animators', () => {
+  it('installs cleanly with the nine original parts plus connector / icon / image, two themes and five animators', () => {
     const registry = createIsoRegistryWithBuiltins();
     expect(BUILTIN_ISO_EXTENSION.id).toBe('holodeck.iso.builtin');
     expect(
@@ -127,7 +127,7 @@ describe('built-in extension', () => {
         .list<IsoPartDefinition>(HOLODECK_KINDS.isoPart)
         .map((p) => p.id)
         .sort(),
-    ).toEqual(['area', 'elbow', 'end-cap', 'label', 'mixer', 'pipe', 'shaft', 'tank', 'valve']);
+    ).toEqual(['area', 'connector', 'elbow', 'end-cap', 'icon', 'image', 'label', 'mixer', 'pipe', 'shaft', 'tank', 'valve']);
     expect(registry.list(HOLODECK_KINDS.isoTheme)).toHaveLength(2);
     expect(
       registry

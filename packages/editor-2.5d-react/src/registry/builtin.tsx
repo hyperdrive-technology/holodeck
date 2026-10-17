@@ -6,7 +6,9 @@
 
 import { HOLODECK_KINDS, type HolodeckExtension } from '@holodeck/sdk';
 import { Area, Elbow, EndCap, Label, Mixer, Pipe, Shaft, Tank, Valve } from '../../assets/process';
-import { LABEL_PLANE_Y } from '../../assets/process/Label';
+import { LABEL_PLANE_Y, type FloorTextStyle } from '../../assets/process/Label';
+import { AREA_MAX_SHADOW } from '../../assets/process/Area';
+import { ANNOTATION_PARTS } from './annotation-parts';
 import { formatLabelText } from './label-text';
 import { mergeFittingParams } from '../../assets/process/fitting-params';
 import { pipeWorldY } from '../../assets/process/pipe-math';
@@ -147,9 +149,24 @@ function ElbowPart({ placement, tuning }: IsoPartProps) {
   );
 }
 
-function AreaPart({ placement }: IsoPartProps) {
+const str = (v: unknown): string | undefined => (typeof v === 'string' && v !== '' ? v : undefined);
+const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+
+function AreaPart({ placement, params }: IsoPartProps) {
   const [wx, , wz] = gridToWorld(placement.x, placement.y);
-  return <Area position={[wx, 0, wz]} size={[placement.width ?? 1, placement.height ?? 1]} />;
+  const outlineStyle = params.outlineStyle;
+  return (
+    <Area
+      position={[wx, 0, wz]}
+      size={[placement.width ?? 1, placement.height ?? 1]}
+      fill={str(params.fill)}
+      outline={str(params.outline)}
+      outlineStyle={outlineStyle === 'dashed' || outlineStyle === 'dotted' || outlineStyle === 'none' ? outlineStyle : 'solid'}
+      shadow={num(params.shadow)}
+      walled={params.walled === true}
+      wallHeight={num(params.wallHeight)}
+    />
+  );
 }
 
 function LabelPart({ placement, params, style, tuning }: IsoPartProps) {
@@ -167,10 +184,22 @@ function LabelPart({ placement, params, style, tuning }: IsoPartProps) {
       screenX={placement.screenX}
       screenY={placement.screenY}
       labelId={placement.id}
+      textStyle={labelTextStyle(params)}
+      align={params.align === 'left' || params.align === 'center' || params.align === 'right' ? params.align : 'auto'}
+      orient={params.orient === 'upright' ? 'upright' : 'flat'}
     >
       {formatLabelText(params)}
     </Label>
   );
+}
+
+/** Bold / italic / outline params -> FloorText style; undefined when all are off (the original look). */
+function labelTextStyle(params: Record<string, unknown>): FloorTextStyle | undefined {
+  const bold = params.bold === true;
+  const italic = params.italic === true;
+  const outline = str(params.outline);
+  if (!bold && !italic && !outline) return undefined;
+  return { weight: bold ? 800 : undefined, italic, outlineColor: outline };
 }
 
 function EndCapPart({ placement, tuning }: IsoPartProps) {
@@ -326,12 +355,19 @@ export const BUILTIN_ISO_PARTS: readonly IsoPartDefinition[] = [
     params: {
       text: { type: 'string', label: 'Text', default: '' },
       // Live reading (bind a tag here). Absent = static label. See label-text.ts.
-      value: { type: 'number', label: 'Value', default: undefined },
+      // A number, an ON/OFF boolean (`format: 'onoff'`) or a text state: see label-text.ts.
+      value: { type: 'number', label: 'Value', default: undefined, reading: true },
       unit: { type: 'string', label: 'Unit', default: '' },
       format: { type: 'enum', label: 'Format', default: 'auto', options: ['auto', 'int', 'onoff'] },
       // `{"0":"HeatHLT"}` or "0=HeatHLT,1=FillMash"; object-valued in scene files, so no inspector control.
       labels: { type: 'string', label: 'Value labels', default: '', hidden: true },
       alarm: { type: 'boolean', label: 'Alarm colour', default: false },
+      bold: { type: 'boolean', label: 'Bold', default: false },
+      italic: { type: 'boolean', label: 'Italic', default: false },
+      align: { type: 'enum', label: 'Align', default: 'auto', options: ['auto', 'left', 'center', 'right'] },
+      // Halo colour behind the glyphs; '' = none.
+      outline: { type: 'color', label: 'Outline', default: '' },
+      orient: { type: 'enum', label: 'Orientation', default: 'flat', options: ['flat', 'upright'] },
     },
     defaults: { params: { text: 'Label' } },
     component: LabelPart,
@@ -342,10 +378,19 @@ export const BUILTIN_ISO_PARTS: readonly IsoPartDefinition[] = [
     hint: 'pad / room',
     category: ANNOTATION,
     footprint: { w: 8, h: 6 },
-    params: {},
+    params: {
+      // '' = the theme's areaFill / areaEdge.
+      fill: { type: 'color', label: 'Fill', default: '' },
+      outline: { type: 'color', label: 'Outline', default: '' },
+      outlineStyle: { type: 'enum', label: 'Outline style', default: 'solid', options: ['solid', 'dashed', 'dotted', 'none'] },
+      shadow: { type: 'number', label: 'Shadow', default: 0, min: 0, max: AREA_MAX_SHADOW, step: 1 },
+      walled: { type: 'boolean', label: 'Walled', default: false },
+      wallHeight: { type: 'number', label: 'Wall height', default: 0.6, min: 0.1, max: 8, step: 0.1 },
+    },
     defaults: { width: 8, height: 6 },
     component: AreaPart,
   },
+  ...ANNOTATION_PARTS,
 ];
 
 export const BUILTIN_ISO_EXTENSION: HolodeckExtension = {

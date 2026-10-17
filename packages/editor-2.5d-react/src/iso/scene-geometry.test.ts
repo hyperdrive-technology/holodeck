@@ -64,14 +64,16 @@ describe('parseSceneFile geometry bounds', () => {
     expect(plan.points.every((c) => Math.abs(c.x) <= MAX_GRID_COORD && Math.abs(c.y) <= MAX_GRID_COORD)).toBe(true);
   });
 
+  // Non-finite params are now caught by param validation (holodeck#36) before
+  // the footprint check runs; either way the placement is rejected by name.
   it.each([Infinity, NaN, -1, 256])('rejects an effective footprint size of %s', (size) => {
     expect(() => parseSceneFile(scene({ object: 'sized', params: { w: size, h: size } }), sizedRegistry))
-      .toThrow(/placement o: footprint/);
+      .toThrow(/placement o: (footprint|params\.w must be finite)/);
   });
 
   it.each([Infinity, NaN, -1, 256])('endpoint fields cannot bypass vessel footprint validation for size %s', (size) => {
     const raw = scene({ object: 'sized', params: { w: size, h: size }, toX: 1, toY: 0 });
-    expect(() => parseSceneFile(raw, sizedRegistry)).toThrow(/placement o: footprint/);
+    expect(() => parseSceneFile(raw, sizedRegistry)).toThrow(/placement o: (footprint|params\.w must be finite)/);
     const occ = buildOccupancy(raw, sizedRegistry);
     expect(occ.skipped).toEqual(['o']);
     expect(occ.blocked.size).toBe(0);
@@ -81,7 +83,8 @@ describe('parseSceneFile geometry bounds', () => {
     const registry = createIsoRegistryWithBuiltins();
     const run: IsoPartDefinition = { ...sizedDef, id: 'custom-run', draw: 'run' };
     registry.install({ id: 'run-test', version: '1', contributions: { [HOLODECK_KINDS.isoPart]: [run] } });
-    const parsed = parseSceneFile(scene({ object: run.id, params: { w: Infinity }, toX: 3, toY: 0 }), registry);
+    // 1e6 cells: finite (so param validation accepts it) but far beyond MAX_FOOTPRINT_CELLS.
+    const parsed = parseSceneFile(scene({ object: run.id, params: { w: 1e6 }, toX: 3, toY: 0 }), registry);
     const occ = buildOccupancy(parsed, registry);
     expect(occ.skipped).toEqual([]);
     expect(occ.blocked.size).toBe(4);

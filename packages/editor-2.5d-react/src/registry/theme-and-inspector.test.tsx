@@ -118,7 +118,7 @@ describe('palette grouping', () => {
     expect(groups.map((g) => g.category)).toEqual(['Vessels', 'Piping', 'Annotation']);
     const all = groups.flatMap((g) => g.items.map((i) => i.id));
     expect(all).not.toContain('shaft');
-    expect(all).toEqual(['tank', 'mixer', 'valve', 'pipe', 'elbow', 'end-cap', 'label', 'area']);
+    expect(all).toEqual(['tank', 'mixer', 'valve', 'pipe', 'elbow', 'end-cap', 'label', 'area', 'connector', 'icon', 'image']);
   });
 
   it('filters by label and drops empty groups; uncategorised parts go under Other', () => {

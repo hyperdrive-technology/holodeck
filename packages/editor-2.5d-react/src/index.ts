@@ -56,6 +56,14 @@ export {
   finishForMaterialName,
 } from '../assets/process';
 export { HolodeckStyleProvider, useHolodeckStyle } from '../assets/process/style-context';
+export { annotationStyle, HOLODECK_ANNOTATION_STYLE } from '../assets/process/style';
+export type { AnnotationStyle } from '../assets/process/style';
+export { FaceCamera, FloorText } from '../assets/process/Label';
+export type { FloorTextStyle, LabelAlign, LabelOrient } from '../assets/process/Label';
+export type { AreaOutline } from '../assets/process/Area';
+
+// Arcentry-parity objects (holodeck#36): connectors, icons, images, metadata, opacity / z-order.
+export * from './objects';
 export type {
   ApplyStyleOverrides,
   Finish,
@@ -101,7 +109,7 @@ export type { EditorHostMode, EditorMode, EditorState } from './editor/editor-st
 export { BUILTIN_MODEL_URLS, modelUrl } from '../assets/models';
 
 // Obstacle-avoiding pipe routing (pure; see docs/routing.md).
-export { buildOccupancy, GeometryRangeError, MAX_GRID_COORD, resolveRouteEnd, routePipe } from './routing';
+export { buildOccupancy, GeometryRangeError, isFloorPart, MAX_GRID_COORD, resolveRouteEnd, routePipe } from './routing';
 export type { Occupancy, OccupancyOptions, ResolvedRouteEnd, RouteEnd, RouteOptions, RoutePath } from './routing';
 // Elbow orientation (`params.bend: "auto"`) and vessel-window pipe clipping.
 export {

@@ -45,6 +45,11 @@ export const EDGE_LINES_NAME = 'hd.edges';
 export type ApplyStyleOverrides = {
   /** Colour for every `hd.accent` mesh (e.g. a per-instance handwheel). Beats the source base colour. */
   accent?: ColorRepresentation;
+  /**
+   * Colour for every `hd.white` (unlit body) mesh, beating `style.finishes.white`.
+   * Data-only parts set it from `IsoPartDefinition.colors.body`.
+   */
+  body?: ColorRepresentation;
   /** Outline colour. Defaults to `style.colors.edge`. */
   edgeColor?: ColorRepresentation;
   /** Outline width in CSS px. Defaults to `style.edges.lineWidth`. */
@@ -188,6 +193,7 @@ export function applyHolodeckStyle(
   let edgeMaterial: Line2NodeMaterial | null = null;
   const defaultThreshold = overrides.threshold ?? style.edges.threshold;
   const accentOverride = overrides.accent !== undefined ? new Color(overrides.accent) : undefined;
+  const bodyOverride = overrides.body !== undefined ? new Color(overrides.body) : undefined;
 
   const finishFor = (source: Material): Material => {
     const existing = created.get(source);
@@ -208,7 +214,8 @@ export function applyHolodeckStyle(
       );
       finish = 'white';
     }
-    const color = finish === 'accent' ? (accentOverride ?? sourceColor(source)) : undefined;
+    const color =
+      finish === 'accent' ? (accentOverride ?? sourceColor(source)) : finish === 'white' ? bodyOverride : undefined;
     const material = createFinishMaterial(finish, { style, color, side: source.side });
     created.set(source, material);
     return material;

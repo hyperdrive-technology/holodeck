@@ -190,6 +190,15 @@ function moveBy(obj: IsoPlacement, dx: number, dy: number): IsoPlacement {
   if (typeof obj.toY === 'number') {
     next.toY = obj.toY + dy;
   }
+  // A connector's free anchors and waypoints travel with it; object anchors stay put.
+  if (obj.link) {
+    const shift = (end: NonNullable<IsoPlacement['link']>['from']) =>
+      end && 'x' in end ? { x: end.x + dx, y: end.y + dy } : end;
+    next.link = { ...obj.link };
+    if (obj.link.from) next.link.from = shift(obj.link.from);
+    if (obj.link.to) next.link.to = shift(obj.link.to);
+    if (obj.link.via) next.link.via = obj.link.via.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+  }
   return next;
 }
 

@@ -1,4 +1,4 @@
-import { HOLODECK_STYLE, type HolodeckStyle } from '../../assets/process/style';
+import { HOLODECK_ANNOTATION_STYLE, HOLODECK_STYLE, type HolodeckStyle } from '../../assets/process/style';
 import type { IsoTheme } from './types';
 
 export const HOLODECK_THEME_DEFAULT: IsoTheme = {
@@ -16,6 +16,17 @@ export const HOLODECK_THEME_DEFAULT: IsoTheme = {
 const body = '#d3d9e2';
 export const HOLODECK_STYLE_DARK: HolodeckStyle = {
   ...HOLODECK_STYLE,
+  annotation: {
+    ...HOLODECK_ANNOTATION_STYLE,
+    connector: '#2f3a4a',
+    flow: '#18bae6',
+    text: '#2f3a4a',
+    icon: '#2f3a4a',
+    areaWall: '#dfe4ec',
+    metaFill: '#eef1f6',
+    metaEdge: '#a9b3c2',
+    metaText: '#2f3a4a',
+  },
   colors: {
     ...HOLODECK_STYLE.colors,
     body,
