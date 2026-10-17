@@ -4,7 +4,8 @@ import { PROCESS_SCENE } from '../iso/load-process-scene';
 import type { IsoSceneFile } from '../iso/scene';
 import { emptyScene } from './editor-state';
 import type { EditorCamera } from './camera';
-import { ProcessEditor, type ProcessEditorProps } from './ProcessEditor';
+import { ProcessEditor, type ProcessEditorHandle, type ProcessEditorProps } from './ProcessEditor';
+import { imageAspect, setImageAspect } from '../objects/image-aspect';
 
 const root = document.getElementById('root');
 if (!root) {
@@ -27,7 +28,23 @@ function editingScene(): IsoSceneFile {
   };
 }
 
+/**
+ * `?image=<url>`: add an `image` placement (width 2, `height` from
+ * `?imageHeight=`, default 0 = keep the loaded aspect) at grid (3, -10), for
+ * the late-aspect refit browser test (holodeck#108 / #127).
+ */
+function withImage(scene: IsoSceneFile): IsoSceneFile {
+  const src = params.get('image');
+  if (!src) return scene;
+  const height = Number(params.get('imageHeight') ?? 0);
+  return { ...scene, objects: [...scene.objects, { id: 'image-1', object: 'image', x: 3, y: -10, params: { src, width: 2, height } }] };
+}
+
 function initialScene(): IsoSceneFile {
+  return withImage(baseScene());
+}
+
+function baseScene(): IsoSceneFile {
   if (params.get('scene') === 'editing') return editingScene();
   if (params.get('scene') !== 'routing') {
     return PROCESS_SCENE;
@@ -50,6 +67,13 @@ type HostWindow = {
   __placed: string[];
   /** Host-side tool arm (holodeck#100 `placing`), set from Playwright. */
   __setPlacing?: (partId: string | null) => void;
+  /** The host's current `placing` (what onPlacingChange last reported / __setPlacing set). */
+  __placing?: string | null;
+  /** The editor's imperative handle (dispatch / getState / getCamera). */
+  __editor?: ProcessEditorHandle | null;
+  /** The shared image-aspect store, so a test can record an aspect "loaded elsewhere". */
+  __setImageAspect?: typeof setImageAspect;
+  __imageAspect?: typeof imageAspect;
 };
 
 function Host() {
@@ -61,6 +85,9 @@ function Host() {
   w.__cameras ??= [];
   w.__placed ??= [];
   w.__setPlacing = setPlacing;
+  w.__placing = placing;
+  w.__setImageAspect = setImageAspect;
+  w.__imageAspect = imageAspect;
   // `?mode=run`: the read-only host mode (pan browser test).
   const mode = params.get('mode') === 'run' ? 'run' : 'edit';
   // `?chrome=canvas`: Studio-style canvas only (holodeck#100).
@@ -79,6 +106,9 @@ function Host() {
       placing={placing}
       onPlacingChange={setPlacing}
       onPlaced={(p) => w.__placed.push(p.id)}
+      editorRef={(handle) => {
+        w.__editor = handle;
+      }}
     />
   );
 }

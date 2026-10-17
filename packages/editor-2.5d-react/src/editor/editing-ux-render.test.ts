@@ -299,6 +299,70 @@ describe.skipIf(!CHROMIUM)('editing UX in the editor (E3)', () => {
       // Escape inside the editor disarms; the host hears it through onPlacingChange.
       await page.keyboard.press('Escape');
       expect(await root.getAttribute('data-mode')).toBe('select');
+
+      // holodeck#133: a host-armed run part (pipe) enters draw-pipe, whose
+      // editor state keeps `placing: null`; the host disarming must still
+      // leave it, or later canvas clicks keep drawing pipes.
+      const mode = () => root.getAttribute('data-mode');
+      const setPlacing = (id: string | null) => page.evaluate((v) => (window as unknown as { __setPlacing: (id: string | null) => void }).__setPlacing(v), id);
+      await setPlacing('pipe');
+      await page.waitForFunction(() => document.querySelector('[data-testid="process-editor"]')?.getAttribute('data-mode') === 'draw-pipe');
+      await setPlacing(null);
+      await page.waitForFunction(() => document.querySelector('[data-testid="process-editor"]')?.getAttribute('data-mode') === 'select');
+      expect(await mode()).toBe('select');
+      // Escape out of a host-armed pipe is reported to the host (it showed Pipe as armed forever).
+      await setPlacing('pipe');
+      await page.waitForFunction(() => document.querySelector('[data-testid="process-editor"]')?.getAttribute('data-mode') === 'draw-pipe');
+      await page.keyboard.press('Escape');
+      await page.waitForFunction(() => (window as unknown as { __placing: string | null }).__placing === null);
+      expect(await mode()).toBe('select');
+    } finally {
+      await browser.close();
+    }
+  }, 120_000);
+
+  // holodeck#108 / #127: an image in the scene at the fit refits the view
+  // when its real aspect arrives; anything else (an image loading elsewhere
+  // on the page, a scene edit) never moves a view the user has not touched.
+  it('refits for the scene image aspect only, not for images elsewhere', async () => {
+    // A 1:4 portrait SVG: at width 2 with height 0 it draws 8 cells tall.
+    const portrait = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="400"><rect width="100" height="400" fill="#2a9d8f"/></svg>')}`;
+    const browser = await launchRenderBrowser();
+    const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
+    const view = async () => {
+      const root = page.getByTestId('process-editor');
+      return [await root.getAttribute('data-zoom'), await root.getAttribute('data-target')].join(' ');
+    };
+    try {
+      // Reference: the same image with its height given explicitly (no late aspect).
+      await page.goto(`${harness.origin}/editor.html?scene=editing&image=${encodeURIComponent(portrait)}&imageHeight=8`);
+      await page.getByTestId('process-editor').waitFor();
+      await waitForRendered(page);
+      const explicit = await view();
+
+      await page.goto(`${harness.origin}/editor.html?scene=editing&image=${encodeURIComponent(portrait)}`);
+      await page.getByTestId('process-editor').waitFor();
+      await waitForRendered(page);
+      await page.waitForFunction((src) => (window as unknown as { __imageAspect: (s: string) => number | undefined }).__imageAspect(src) === 0.25, portrait);
+      await settle(page);
+      expect(await view(), 'late aspect of a scene image refits to the real bounds').toBe(explicit);
+
+      // A scene edit far away: never refits.
+      await page.evaluate(() => {
+        const editor = (window as unknown as { __editor: { dispatch: (a: unknown) => void } }).__editor;
+        editor.dispatch({ type: 'place-mode', object: 'tank' });
+        editor.dispatch({ type: 'floor-click', x: 40, y: 40 });
+        editor.dispatch({ type: 'select-mode' });
+      });
+      await page.waitForFunction(() => document.querySelector('[data-testid="process-editor"]')?.getAttribute('data-object-count') === '6');
+      await settle(page);
+      expect(await view()).toBe(explicit);
+
+      // An image loading in another editor (any src not in this scene at the fit): no refit either.
+      await page.evaluate(() => (window as unknown as { __setImageAspect: (s: string, a: number) => void }).__setImageAspect('elsewhere-127.png', 0.2));
+      await animationFrames(page, 10);
+      await settle(page);
+      expect(await view(), 'an unrelated image aspect must not refit').toBe(explicit);
     } finally {
       await browser.close();
     }

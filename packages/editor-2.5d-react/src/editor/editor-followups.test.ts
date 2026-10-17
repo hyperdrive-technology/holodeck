@@ -10,8 +10,18 @@ import { initialIsoPose } from '../iso/pose';
 import { getDefaultIsoRegistry } from '../registry/default';
 import { IMAGE_PART } from '../registry/annotation-parts';
 import { liveConnectorObjects, connectorRouteKey } from '../objects/connector';
-import { imageAspect, imageAspectVersion, setImageAspect } from '../objects/image-aspect';
-import { insertWaypoint, moveWaypoint, removeWaypoint, waypointInsertHandles } from './connect';
+import {
+  imageAspect,
+  imageAspectsKey,
+  imageAspectUsers,
+  MAX_IMAGE_ASPECT_ENTRIES,
+  retainImageAspect,
+  sceneImageSrcs,
+  setImageAspect,
+  subscribeImageAspects,
+} from '../objects/image-aspect';
+import { canInsertWaypoint, insertWaypoint, moveWaypoint, removeWaypoint, waypointInsertHandles } from './connect';
+import { MAX_LINK_VIA } from '../objects/validate';
 import { MAX_NOTICE_LENGTH, createEditorState, editorReducer, emptyScene, type EditorAction, type EditorState } from './editor-state';
 import { MAX_CLIPBOARD_OBJECTS } from './clipboard';
 import { fitView, sceneWorldBox } from './fit';
@@ -143,14 +153,16 @@ describe('#108 image bounds use the loaded aspect', () => {
 
   it('falls back to square until the image has loaded, then uses width / aspect', () => {
     expect(IMAGE_PART.extent!(img)).toEqual({ minX: -1, minY: -1, maxX: 1, maxY: 1 });
-    const v = imageAspectVersion();
+    let notified = 0;
+    const off = subscribeImageAspects(() => (notified += 1));
     setImageAspect('portrait-108.png', 0.5);
-    expect(imageAspectVersion()).toBe(v + 1);
+    expect(notified).toBe(1);
     expect(imageAspect('portrait-108.png')).toBe(0.5);
     expect(IMAGE_PART.extent!(img)).toEqual({ minX: -1, minY: -2, maxX: 1, maxY: 2 });
-    // Re-setting the same aspect does not bump the version (no refit loop).
+    // Re-setting the same aspect does not notify (no refit loop).
     setImageAspect('portrait-108.png', 0.5);
-    expect(imageAspectVersion()).toBe(v + 1);
+    expect(notified).toBe(1);
+    off();
   });
 
   it('letterboxed images (both sides set) keep their explicit box', () => {
@@ -165,6 +177,62 @@ describe('#108 image bounds use the loaded aspect', () => {
     setImageAspect('tall-108.png', 0.25);
     const real = fitView(sceneWorldBox({ objects: [tall] }, get), initialIsoPose(18), 800, 600);
     expect(real.zoom).toBeLessThan(square.zoom);
+  });
+});
+
+// holodeck#127: the refit trigger is per editor, keyed on the images in its own scene.
+describe('#127 per-scene image aspect key', () => {
+  it('lists the scene image srcs, sorted and unique, ignoring other parts and empty srcs', () => {
+    const objects: IsoPlacement[] = [
+      { id: 'a', object: 'image', x: 0, y: 0, params: { src: 'b-127.png' } },
+      { id: 'b', object: 'image', x: 0, y: 0, params: { src: 'a-127.png' } },
+      { id: 'c', object: 'image', x: 0, y: 0, params: { src: 'a-127.png' } },
+      { id: 'd', object: 'image', x: 0, y: 0, params: { src: '' } },
+      { id: 'e', object: 'image', x: 0, y: 0 },
+      { id: 'f', object: 'tank', x: 0, y: 0, params: { src: 'tank.png' } },
+    ];
+    expect(sceneImageSrcs(objects)).toEqual(['a-127.png', 'b-127.png']);
+  });
+
+  it('changes only when an aspect of one of its own srcs changes', () => {
+    const mine = ['mine-127.png'];
+    const before = imageAspectsKey(mine);
+    setImageAspect('another-editor-127.png', 3); // an image in another editor / a just-placed one
+    expect(imageAspectsKey(mine)).toBe(before);
+    setImageAspect('mine-127.png', 0.5);
+    expect(imageAspectsKey(mine)).not.toBe(before);
+    expect(imageAspectsKey([])).toBe('');
+  });
+});
+
+// holodeck#132: the bounded cache must not evict an aspect a mounted image still uses.
+describe('#132 image aspect eviction', () => {
+  it('keeps retained (mounted) entries past the cap; evicts unused ones oldest first', () => {
+    const release = retainImageAspect('mounted-132.png');
+    setImageAspect('mounted-132.png', 0.25);
+    setImageAspect('unused-132.png', 2);
+    for (let i = 0; i < MAX_IMAGE_ASPECT_ENTRIES + 10; i += 1) setImageAspect(`filler-132-${i}.png`, 1 + i / 1000);
+    expect(imageAspect('mounted-132.png')).toBe(0.25);
+    expect(imageAspect('unused-132.png')).toBeUndefined();
+    expect(imageAspect('filler-132-0.png')).toBeUndefined();
+    expect(imageAspect(`filler-132-${MAX_IMAGE_ASPECT_ENTRIES + 9}.png`)).toBeDefined();
+    // Once released it is an ordinary entry again and can be evicted.
+    release();
+    release(); // idempotent
+    expect(imageAspectUsers('mounted-132.png')).toBe(0);
+    for (let i = 0; i < MAX_IMAGE_ASPECT_ENTRIES; i += 1) setImageAspect(`filler2-132-${i}.png`, 1);
+    expect(imageAspect('mounted-132.png')).toBeUndefined();
+  });
+
+  it('ref-counts several users of one src', () => {
+    const a = retainImageAspect('shared-132.png');
+    const b = retainImageAspect('shared-132.png');
+    expect(imageAspectUsers('shared-132.png')).toBe(2);
+    a();
+    expect(imageAspectUsers('shared-132.png')).toBe(1);
+    b();
+    expect(imageAspectUsers('shared-132.png')).toBe(0);
+    expect(retainImageAspect('')).toBeTypeOf('function');
   });
 });
 
@@ -201,6 +269,20 @@ describe('#112 connector waypoints', () => {
     ]);
     const free = sceneOf([conn()]);
     expect(waypointInsertHandles(free, registry, free.objects[0]!)).toEqual([{ index: 0, point: { x: 5, y: 0 } }]);
+  });
+
+  // holodeck#126: at MAX_LINK_VIA the insert is rejected, so no "+" handle may
+  // offer it (its drag would grab the existing via[index] instead).
+  it('offers no insert handles and inserts nothing at MAX_LINK_VIA waypoints', () => {
+    const full = conn(Array.from({ length: MAX_LINK_VIA }, (_, i) => ({ x: i, y: 2 })));
+    const scene = sceneOf([full]);
+    expect(canInsertWaypoint(full)).toBe(false);
+    expect(waypointInsertHandles(scene, registry, full)).toEqual([]);
+    expect(insertWaypoint(full, 3, { x: 1, y: 1 })).toBe(full);
+    const almost = conn(Array.from({ length: MAX_LINK_VIA - 1 }, (_, i) => ({ x: i, y: 2 })));
+    expect(canInsertWaypoint(almost)).toBe(true);
+    expect(waypointInsertHandles(sceneOf([almost]), registry, almost)).toHaveLength(MAX_LINK_VIA);
+    expect(insertWaypoint(almost, 0, { x: 9, y: 9 }).link?.via).toHaveLength(MAX_LINK_VIA);
   });
 
   it('insert / drag / remove through the reducer, one undo step each', () => {
