@@ -35,7 +35,7 @@ describe('planExportTiles', () => {
       expect(t.x + t.width).toBeLessThanOrEqual(3000);
       expect(t.y + t.height).toBeLessThanOrEqual(2100);
     });
-    expect(plan.tiles.at(-1)).toEqual({ x: 2560, y: 2048, width: 440, height: 52 });
+    expect(plan.tiles[plan.tiles.length - 1]).toEqual({ x: 2560, y: 2048, width: 440, height: 52 });
     // No overlap: every pixel belongs to exactly one tile (sampled on a grid).
     for (let y = 0; y < 2100; y += 37) {
       for (let x = 0; x < 3000; x += 41) {

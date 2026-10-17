@@ -72,7 +72,7 @@ describe('isoComponentsCsv', () => {
     expect(csv.startsWith('﻿id,part,label,')).toBe(true);
     const lines = csv.slice(1).split('\r\n');
     expect(lines).toHaveLength(6); // header + 4 rows + trailing empty
-    expect(lines.at(-1)).toBe('');
+    expect(lines[lines.length - 1]).toBe('');
     expect(csv).toContain(`"'=HYPERLINK(""http://evil"")"`);
     expect(csv).toContain(",'+danger,");
     // Negative coordinates are numbers, not defused text.
