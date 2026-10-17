@@ -81,6 +81,12 @@ material outside `hd.*`. Note that GLTFLoader removes `.` from node names
     face. Its X/Z scale is the safe logo-square edge length in three.js units;
     E2 supplies the depth offset. Their `hd.white` and `hd.accent` materials
     support per-part recolouring. See the [E2 contract](../packages/editor-2.5d-react/docs/objects.md).
+    The logo face is always the model's highest surface, so nothing can hang
+    over it (the disk's read arm sweeps below its raised hub, the bucket's
+    bail is lowered). One exception: `cloud/billboard.py` puts the empty on
+    the sign's front (+Z) face via `c.logo(..., rotation=(pi/2, 0, 0))`, so
+    its local +Y is the face normal and local −Z the image top. E2 honours
+    the empty's rotation, so the logo stands on the sign's front face.
 - Geometry is low-poly and flat-shaded, with explicit segment counts. Don't use
   subdivision, textures or UVs. Cameras and lights are rejected on export.
   Modifiers are applied on export.

@@ -143,7 +143,7 @@ jobs:
       # HolodeckHost through the manifest path (SDK packaging contract, holodeck#15).
       # flow-runtime's script also deploys a small flow through holodeck.flow.local;
       # provider-http's reads a value through holodeck.http from a local server.
-      # library-cloud's checks its 13 models, logo assets and two theme installs.
+      # library-cloud's checks its 26 models, logo assets and two theme installs.
       - name: Smoke-test the Holodeck package entry
         if: matrix.package == 'editor-2.5d-react' || matrix.package == 'flow-runtime' || matrix.package == 'provider-http' || matrix.package == 'library-cloud'
         working-directory: holodeck/packages/${{ matrix.package }}

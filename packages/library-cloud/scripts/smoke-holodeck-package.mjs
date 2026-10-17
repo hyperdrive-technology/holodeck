@@ -30,7 +30,8 @@ assert.deepEqual(report.unresolvedEngines, ['holodeck.iso']);
 for (const kind of manifest.contributes) host.registry.registerKind({ kind, validate: (value) => typeof value?.id === 'string' });
 const parts = host.registry.list('holodeck.iso.part');
 const themes = host.registry.list('holodeck.iso.theme');
-assert.equal(parts.length, 13);
+assert.equal(parts.length, 26);
+assert.deepEqual(parts.filter((part) => part.floor).map((part) => part.id), ['cloud:billboard']);
 assert.deepEqual(themes.map((theme) => theme.id), ['arcentry-light', 'arcentry-dark']);
 const required = new Set(['holodeck.package.json', manifest.entry, 'dist/holodeck-package.d.ts', 'README.md', 'LICENSE']);
 for (const part of parts) {

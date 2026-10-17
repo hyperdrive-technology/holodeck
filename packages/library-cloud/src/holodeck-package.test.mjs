@@ -13,7 +13,12 @@ const manifestUrl = 'https://assets.example.test/packs/cloud/holodeck.package.js
 const assetBase = 'https://assets.example.test/packs/cloud/assets/';
 const context = { host: 'test', assetUrl: (path) => new URL(path, assetBase).href };
 const engine = { id: 'holodeck.iso', label: 'Iso contract', apiVersion: '1.0.0', documentFormat: 'holodeck.iso.scene.v1', kinds: ISO_KINDS };
-const expectedIds = ['server', 'database', 'cache', 'queue', 'load-balancer', 'gateway', 'function', 'container', 'bucket', 'user', 'generic-block', 'generic-cube', 'generic-flat'].map((name) => `cloud:${name}`);
+const expectedIds = [
+  'server', 'database', 'cache', 'queue', 'load-balancer', 'gateway', 'function',
+  'container', 'bucket', 'user', 'generic-block', 'generic-cube', 'generic-flat',
+  'broker', 'cdn', 'registry', 'disk', 'warehouse', 'stream', 'firewall', 'vault',
+  'identity', 'monitoring', 'mobile', 'pc', 'billboard',
+].map((name) => `cloud:${name}`);
 
 describe('cloud package contract', () => {
   it('validates with the SDK and matches the published entry and version', () => {
@@ -29,13 +34,24 @@ describe('cloud package contract', () => {
     expect(checkExtensionMatchesManifest(CLOUD_PACKAGE_MANIFEST, createCloudExtension(context))).toEqual([]);
   });
 
-  it('provides all thirteen data-only parts accepted by E2', () => {
+  it('provides all twenty-six data-only parts accepted by E2', () => {
     expect(CLOUD_PART_DEFINITIONS.map((part) => part.id)).toEqual(expectedIds);
+    expect(new Set(expectedIds).size).toBe(26);
+    // Library pickers show label + hint: both must tell the archetypes apart.
+    expect(new Set(CLOUD_PART_DEFINITIONS.map((part) => part.label)).size).toBe(26);
+    expect(new Set(CLOUD_PART_DEFINITIONS.map((part) => part.hint)).size).toBe(26);
+    const categories = ['Compute', 'Data', 'Storage', 'Networking', 'Security', 'Operations', 'Devices', 'People', 'Generic'];
+    for (const part of CLOUD_PART_DEFINITIONS) {
+      expect(categories, part.id).toContain(part.category);
+      expect(part.hint.length, part.id).toBeGreaterThan(8);
+    }
     for (const part of createCloudParts(context.assetUrl)) {
       expect(isIsoPartDefinition(part), part.id).toBe(true);
       expect(part).not.toHaveProperty('component');
       expect(part.instanced).toBe(false);
-      expect(part.floor).toBe(false);
+      // An upright sign is still an annotation: it never blocks routing.
+      expect(part.floor).toBe(part.id === 'cloud:billboard');
+      expect(part.footprint).toEqual({ w: 2, h: 2 });
       expect(part.params).toEqual({});
       expect(part.model).toBe(`${assetBase}models/${part.id.slice(6)}.glb`);
       expect(part.logo.url).toBe(`${assetBase}logos/cloud.svg`);
