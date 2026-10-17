@@ -123,7 +123,7 @@ function DocumentWorkspace({ initial }: { initial: IsoDoc }) {
     [renameDocument],
   );
 
-  // TODO(holodeck#16 follow-up, E2): persist the camera per document. The
+  // TODO(holodeck#100, lane E2): persist the camera per document. The
   // store side is done (DocumentStore.getCamera / saveCamera, `views` object
   // store), but ProcessEditor keeps zoom / target / pose in private state
   // with no props to read or restore them. Needs `camera` + `onCameraChange`

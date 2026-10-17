@@ -55,6 +55,6 @@ rendering is covered by the engine's render tests.
 - The engine's `ProcessEditor` brings its own palette, inspector and toolbar,
   so they show next to the studio's; it also has no camera props, so camera
   persistence is stored (`DocumentStore.saveCamera`) but not wired to the
-  canvas yet. Both need `ProcessEditor` props (lane E2).
+  canvas yet. Both need `ProcessEditor` props (lane E2, holodeck#100).
 - Connections panel and binding editor (provider config, secrets in session
-  storage, source picker via `browse`).
+  storage, source picker via `browse`): holodeck#101.

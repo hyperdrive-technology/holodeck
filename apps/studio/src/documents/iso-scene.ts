@@ -7,7 +7,7 @@
  * `stampPart` mirrors the editor's own palette stamp (editor-state.ts
  * `stamp`: part `defaults`, deep-copied, under the position; run-drawn parts
  * start two cells long). The editor does not export it.
- * TODO(E2 follow-up): export a `stampPlacement` helper from
+ * TODO(holodeck#100): export a `stampPlacement` helper from
  * @holodeck/editor-2.5d-react so hosts cannot drift from the palette.
  */
 
