@@ -11,10 +11,10 @@ import { routeToPlacements, type GridPoint } from './routing';
 import { sameCell } from './snap';
 import { snapParamValue } from '../registry/params';
 import type { IsoLayer, IsoLinkEnd } from '../objects/validate';
-import { MAX_Z } from '../objects/validate';
+import { MAX_LINK_VIA, MAX_Z } from '../objects/validate';
 import { alignObjects, distributeObjects, moveBy, moveObjects, rotateObjectsAbout, type AlignEdge, type DistributeAxis } from './arrange';
 import { copyObjects, pasteObjects, removeObjects } from './clipboard';
-import { anchorAt, buildConnector, insertWaypoint, moveWaypoint, reanchor, removeWaypoint, sameLinkEnd } from './connect';
+import { anchorAt, buildConnector, canInsertWaypoint, insertWaypoint, moveWaypoint, reanchor, removeWaypoint, sameLinkEnd } from './connect';
 import { DEFAULT_LAYER_ID, DEFAULT_LAYER_NAME, expandGroups, isPlacementEditable, isPlacementHidden, nextFreeId, sceneLayers, withLayer } from './layers';
 
 /** Which on-canvas handle a resize drag grabbed. */
@@ -1144,6 +1144,7 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
       let next: IsoPlacement;
       if (action.type === 'waypoint-insert') {
         if (!Number.isFinite(action.x) || !Number.isFinite(action.y)) return state;
+        if (!canInsertWaypoint(connector)) return { ...state, notice: `A connector has at most ${MAX_LINK_VIA} waypoints.` };
         next = insertWaypoint(connector, action.index, { x: action.x, y: action.y });
       } else {
         next = removeWaypoint(connector, action.index);

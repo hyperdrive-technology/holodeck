@@ -10,7 +10,7 @@
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { resolveConnectorPath, resolveLinkEnd, DEFAULT_CONNECTOR_LENGTH } from '../objects/connector';
-import type { IsoLinkEnd } from '../objects/validate';
+import { MAX_LINK_VIA, type IsoLinkEnd } from '../objects/validate';
 import type { IsoPartDefinition } from '../registry/types';
 import { isRunPlacement } from '../registry/geometry';
 import { rotateOffset, type GridPoint } from '../routing/grid';
@@ -178,9 +178,13 @@ function withVia(connector: IsoPlacement, via: Via): IsoPlacement {
   return next;
 }
 
-/** Insert a waypoint before `via[index]` (index = via.length appends). Out-of-range: the same object. */
+/**
+ * Insert a waypoint before `via[index]` (index = via.length appends).
+ * Out-of-range, or already at MAX_LINK_VIA waypoints: the same object.
+ */
 export function insertWaypoint(connector: IsoPlacement, index: number, point: GridPoint): IsoPlacement {
   const via = connector.link?.via ?? [];
+  if (!canInsertWaypoint(connector)) return connector;
   if (!Number.isInteger(index) || index < 0 || index > via.length) return connector;
   return withVia(connector, [...via.slice(0, index), { x: point.x, y: point.y }, ...via.slice(index)]);
 }
@@ -198,6 +202,11 @@ export function removeWaypoint(connector: IsoPlacement, index: number): IsoPlace
   return withVia(connector, via.filter((_, i) => i !== index));
 }
 
+/** Room for one more waypoint: scene validation rejects more than MAX_LINK_VIA (holodeck#126). */
+export function canInsertWaypoint(connector: IsoPlacement): boolean {
+  return (connector.link?.via?.length ?? 0) < MAX_LINK_VIA;
+}
+
 /** Snap a handle position to the half-cell grid the editor uses elsewhere. */
 const half = (v: number) => Math.round(v * 2) / 2;
 
@@ -205,7 +214,9 @@ const half = (v: number) => Math.round(v * 2) / 2;
  * "+" handles for inserting a waypoint: the midpoint of each logical segment
  * (from -> via... -> to) with the `via` index to insert at. A connector with
  * no waypoints gets one handle at the middle of its drawn (routed) path, so
- * the handle sits on the line the user sees.
+ * the handle sits on the line the user sees. None once the connector has
+ * MAX_LINK_VIA waypoints: the insert would be rejected, and the drag that
+ * follows it would grab an existing waypoint instead (holodeck#126).
  */
 export function waypointInsertHandles(
   scene: Pick<IsoSceneFile, 'objects'>,
@@ -213,6 +224,7 @@ export function waypointInsertHandles(
   connector: IsoPlacement,
 ): Array<{ index: number; point: GridPoint }> {
   const via = connector.link?.via ?? [];
+  if (!canInsertWaypoint(connector)) return [];
   if (via.length === 0) {
     const path = resolveConnectorPath(connector, scene.objects, registry);
     if (!path) return [];
