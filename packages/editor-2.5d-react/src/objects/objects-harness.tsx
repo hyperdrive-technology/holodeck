@@ -60,6 +60,18 @@ const branded: IsoPartDefinition = {
   colors: { accent: '#18bae6' },
 };
 
+/**
+ * holodeck#138: @holodeck/library-cloud's billboard, whose `logo` empty sits
+ * on the sign's upright front face. Resolved with a glob so the harness still
+ * builds on a checkout without that GLB (it arrived with lane A1 batch 2).
+ */
+const billboardUrl = Object.values(
+  import.meta.glob<string>('../../../library-cloud/assets/models/billboard.glb', { query: '?url', import: 'default', eager: true }),
+)[0];
+const billboard: IsoPartDefinition | null = billboardUrl
+  ? { id: 'cloud:billboard', label: 'Billboard', category: 'Cloud', footprint: { w: 2, h: 2 }, params: {}, floor: true, model: billboardUrl, logo: { url: LOGO } }
+  : null;
+
 /** Hands the R3F scene to the test. */
 function SceneProbe() {
   const scene = useThree((s) => s.scene);
@@ -68,13 +80,15 @@ function SceneProbe() {
 }
 const probe: IsoPartDefinition = { id: 'test:probe', label: 'Probe', footprint: { w: 1, h: 1 }, params: {}, hideInPalette: true, floor: true, component: SceneProbe };
 
-registry.install({ id: 'objects.test', version: '1', contributions: { [HOLODECK_KINDS.isoPart]: [block, branded, probe] } });
+registry.install({ id: 'objects.test', version: '1', contributions: { [HOLODECK_KINDS.isoPart]: [block, branded, probe, ...(billboard ? [billboard] : [])] } });
 
 interface Harness {
   scene: import('three').Object3D | null;
   warnings: string[];
+  /** The billboard part is in the scene (its GLB exists in this checkout). */
+  billboard: boolean;
 }
-const harness: Harness = { scene: null, warnings: [] };
+const harness: Harness = { scene: null, warnings: [], billboard: billboard !== null };
 (window as unknown as { __objects: Harness }).__objects = harness;
 const warn = console.warn.bind(console);
 console.warn = (...args: unknown[]) => {
@@ -116,6 +130,7 @@ const OBJECTS_SCENE: IsoSceneFile = {
     // holodeck#96: the host sets a disguised javascript: URL through metrics (never parsed): refused, not fetched.
     { id: 'img-host', object: 'image', x: 8, y: 12, params: { width: 2 } },
     { id: 'probe', object: 'test:probe', x: 20, y: 12 },
+    ...(billboard ? [{ id: 'billboard', object: 'cloud:billboard', x: 20, y: 2 }] : []),
   ],
 };
 

@@ -2,14 +2,14 @@
  * Pure helpers behind the E2 object renderers: logo anchors, opacity /
  * z-order, icons, connector look / caption / flow, image fitting, meta rows.
  */
-import { BoxGeometry, Group, Mesh, MeshBasicMaterial, Object3D } from 'three';
+import { BoxGeometry, Group, Mesh, MeshBasicMaterial, Object3D, Vector3 } from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { HOLODECK_ANNOTATION_STYLE, HOLODECK_STYLE, annotationStyle } from '../../assets/process/style';
 import { HOLODECK_STYLE_DARK } from '../registry/themes';
 import { applyAppearance, AppearanceState, needsAppearance, Z_RENDER_STEP } from './appearance';
 import { captionPose, connectorLook, flowOffset, flowSpacing, gridPolylineToWorld, MAX_FLOW_DOTS } from './ConnectorLine';
 import { BUILTIN_ICON_NAMES, BUILTIN_ICONS, drawIcon, MAX_GLYPH_LENGTH } from './icons';
-import { fitAspect, LOGO_LIFT, logoAnchorForBlock, logoAnchorFromModel } from './logo';
+import { fitAspect, LOGO_LIFT, logoAnchorForBlock, logoAnchorFromModel, logoPlaneQuaternion } from './logo';
 import { fitBox, metaLines } from './Marks';
 
 describe('logoAnchorFromModel', () => {
@@ -45,7 +45,46 @@ describe('logoAnchorFromModel', () => {
 
   it('null for an empty model; block anchor sits on the block top', () => {
     expect(logoAnchorFromModel(new Group())).toBeNull();
-    expect(logoAnchorForBlock(2, 1, 0.5)).toEqual({ position: [0, 0.5 + LOGO_LIFT, 0], size: 0.6, source: 'block' });
+    expect(logoAnchorForBlock(2, 1, 0.5)).toEqual({
+      position: [0, 0.5 + LOGO_LIFT, 0],
+      size: 0.6,
+      quaternion: [0, 0, 0, 1],
+      normal: [0, 1, 0],
+      source: 'block',
+    });
+  });
+
+  // holodeck#138: cloud:billboard authors its empty on the sign's front (+Z)
+  // face, rotated (pi/2, 0, 0) so local +Y is the face normal, local -Z the image top.
+  it('honours the empty rotation: an upright front-face slot faces +Z, lifted along its normal', () => {
+    const root = new Group();
+    const logo = new Object3D();
+    logo.userData.name = 'logo';
+    logo.position.set(0, 1.36, 0.08);
+    logo.rotation.set(Math.PI / 2, 0, 0);
+    logo.scale.set(1, 1, 1);
+    root.add(logo);
+    const a = logoAnchorFromModel(root)!;
+    expect(a.normal[0]).toBeCloseTo(0);
+    expect(a.normal[1]).toBeCloseTo(0);
+    expect(a.normal[2]).toBeCloseTo(1);
+    expect(a.position[1]).toBeCloseTo(1.36);
+    expect(a.position[2]).toBeCloseTo(0.08 + LOGO_LIFT);
+    expect(a.size).toBeCloseTo(1);
+    // The plane faces +Z with the image top pointing up (+Y), i.e. upright and readable.
+    const q = logoPlaneQuaternion(a);
+    const facing = new Vector3(0, 0, 1).applyQuaternion(q);
+    const top = new Vector3(0, 1, 0).applyQuaternion(q);
+    expect(facing.z).toBeCloseTo(1);
+    expect(top.y).toBeCloseTo(1);
+  });
+
+  it('a flat slot keeps the old plane: facing +Y, image top toward -Z', () => {
+    for (const a of [logoAnchorForBlock(2, 2, 1), logoAnchorFromModel(new Mesh(new BoxGeometry(1, 1, 1)))!]) {
+      const q = logoPlaneQuaternion(a);
+      expect(new Vector3(0, 0, 1).applyQuaternion(q).y).toBeCloseTo(1);
+      expect(new Vector3(0, 1, 0).applyQuaternion(q).z).toBeCloseTo(-1);
+    }
   });
 
   it('fitAspect letterboxes into the square', () => {

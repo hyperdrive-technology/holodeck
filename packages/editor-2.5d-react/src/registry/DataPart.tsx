@@ -8,7 +8,7 @@ import type { HolodeckStyle } from '../../assets/process/style';
 import { gridToWorld } from '../iso/grid';
 import { PendingAsset } from '../iso/render-signal';
 import { AssetBoundary, useTrackedTexture } from '../objects/assets';
-import { fitAspect, logoAnchorForBlock, logoAnchorFromModel, type LogoAnchor } from '../objects/logo';
+import { fitAspect, logoAnchorForBlock, logoAnchorFromModel, logoPlaneQuaternion, type LogoAnchor } from '../objects/logo';
 import { partScale } from './part-scale';
 import type { IsoPartDefinition, IsoPartLogo, IsoPartProps } from './types';
 
@@ -116,17 +116,19 @@ export function LogoPlane({ logo, anchor, scale }: { logo: IsoPartLogo; anchor: 
 
 function LogoMesh({ logo, anchor, scale }: { logo: IsoPartLogo; anchor: LogoAnchor; scale: number }) {
   const texture = useTrackedTexture(logo.url);
+  const quaternion = useMemo(() => logoPlaneQuaternion(anchor), [anchor]);
   if (!texture) return null;
   const image = texture.image as { width?: number; height?: number } | undefined;
   const aspect = image?.width && image?.height ? image.width / image.height : 1;
   // logo.size is world units (already final); the anchor size is in model units.
   const [pw, pd] = fitAspect(logo.size ?? anchor.size * scale, aspect);
   const [x, y, z] = anchor.position;
-  // Grid-aligned on the top face (image top toward the part's -Z): it reads
-  // like a sticker on the face and turns with the part, as in Arcentry.
+  // On the slot's face, in the slot's orientation (holodeck#138): top-face
+  // slots lie flat with the image top toward the part's -Z, an upright sign's
+  // front-face slot stands up. Reads like a sticker and turns with the part.
   return (
     <group position={[x * scale, y * scale, z * scale]} userData={{ hdLogo: logo.url.slice(0, 120) }}>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={6}>
+      <mesh quaternion={quaternion} renderOrder={6}>
         <planeGeometry args={[pw, pd]} />
         <meshBasicMaterial
           map={texture}
