@@ -24,7 +24,7 @@ export function useStudioActions() {
     const name = nextUntitledName((list.data ?? []).map((d) => d.name));
     try {
       const saved = await createDocument(createIsoDocument(name));
-      await openDocument(saved.id);
+      await openDocument(saved.document.id);
     } catch (error) {
       notify({ tone: 'error', title: 'Could not create a document', details: [messageOf(error)] });
     }
@@ -51,7 +51,7 @@ export function useStudioActions() {
         if (copy) doc = withDocumentId(doc, newDocumentId());
         try {
           const saved = await createDocument(doc);
-          lastId = saved.id;
+          lastId = saved.document.id;
           imported += 1;
           const notes = [result.wrapped ? 'converted from a bare scene file' : '', copy ? 'imported as a copy (that id already exists)' : ''];
           notify({ tone: 'info', title: `Imported ${file.name}`, details: notes.filter(Boolean) });

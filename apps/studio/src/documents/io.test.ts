@@ -36,6 +36,30 @@ describe('import / export', () => {
     expect(result.document).toMatchObject({ format: HOLODECK_DOCUMENT_FORMAT, id: 'legacy', engine: 'holodeck.iso' });
   });
 
+  // GPT review of holodeck#102, finding 5 (holodeck#109): the raw envelope was
+  // stored, not the loader's normalised form, so an envelope-only theme never
+  // reached the body the canvas renders.
+  it('stores the loader-normalised document: envelope theme in the body, body.id = envelope id', () => {
+    const doc = createIsoDocument('Dark', 'env-id');
+    const raw = { ...doc, theme: 'holodeck.dark', body: { ...doc.body, id: 'stale-body-id' } };
+    const result = parseDocumentText(JSON.stringify(raw), host);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.theme).toBe('holodeck.dark');
+    expect(result.document.body).toMatchObject({ theme: 'holodeck.dark', id: 'env-id' });
+  });
+
+  // Finding 4: an unparsable timestamp passed validation and crashed the inspector.
+  it.each([{ created: 'c' }, { updated: '' }, { created: 42 }])('rejects unparsable metadata timestamps %j', (metadata) => {
+    const doc = { ...createIsoDocument('A', 'a'), metadata };
+    expect(problemsOf(JSON.stringify(doc)).join('\n')).toMatch(/metadata\.(created|updated)/);
+  });
+
+  it('accepts valid metadata timestamps', () => {
+    const doc = { ...createIsoDocument('A', 'a'), metadata: { created: '2026-10-17T00:00:00.000Z', updated: '2026-10-17' } };
+    expect(parseDocumentText(JSON.stringify(doc), host).ok).toBe(true);
+  });
+
   it('reports invalid JSON', () => {
     expect(problemsOf('{ nope')[0]).toMatch(/^not valid JSON/);
   });

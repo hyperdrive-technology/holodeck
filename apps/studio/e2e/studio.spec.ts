@@ -108,3 +108,34 @@ test('keyboard shortcuts dialog and panel toggles', async ({ page }) => {
   await page.keyboard.press('ControlOrMeta+k');
   await expect(page.getByLabel('Search the library')).toBeFocused();
 });
+
+test('two tabs: an idle tab picks up the other tab’s save; Mod+S reports the real state', async ({ page, context }) => {
+  await page.goto('/');
+  await page.getByTestId('welcome').getByRole('button', { name: 'New document' }).click();
+  await expect(page).toHaveURL(/\/d\/[0-9a-f-]{36}$/);
+  const url = page.url();
+
+  const other = await context.newPage();
+  other.on('pageerror', (error) => pageErrors.push(error));
+  await other.addInitScript(() => {
+    delete (Navigator.prototype as { gpu?: unknown }).gpu;
+  });
+  await other.goto(url);
+  await expect(editor(other)).toHaveAttribute('data-object-count', '0');
+
+  // Tab 1 places a tank; tab 2 is idle, so it adopts revision 2 (BroadcastChannel).
+  await page.locator('[data-library-item="tank"]').click();
+  await expect(page.getByTestId('canvas')).toHaveAttribute('data-revision', '2');
+  await expect(editor(other)).toHaveAttribute('data-object-count', '1');
+  await expect(other.getByTestId('canvas')).toHaveAttribute('data-revision', '2');
+
+  // Tab 2 continues from it without a conflict.
+  await other.locator('[data-library-item="valve"]').click();
+  await expect(other.getByTestId('canvas')).toHaveAttribute('data-revision', '3');
+  await expect(other.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved');
+  await expect(editor(page)).toHaveAttribute('data-object-count', '2');
+
+  await other.keyboard.press('ControlOrMeta+s');
+  await expect(other.getByTestId('notice').filter({ hasText: 'All changes are saved' })).toBeVisible();
+  await expect(other.getByTestId('conflict-dialog')).toHaveCount(0);
+});

@@ -1,10 +1,13 @@
 import { HOLODECK_KINDS, type HolodeckDocument } from '@holodeck/sdk';
 import { ISO_ENGINE_ID, ProcessEditor, type IsoPlacement, type IsoSceneFile } from '@holodeck/editor-2.5d-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useSelector } from '@tanstack/react-store';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { addPart, removePlacement, updatePlacement, usedIsoContributions } from '../documents/iso-scene';
-import { useDocument, useRenameDocument, useSaveDocument } from '../documents/queries';
+import { documentKeys, useDocument } from '../documents/queries';
 import { withDocumentName } from '../documents/document-ops';
+import type { VersionedDocument } from '../documents/store';
+import { DocumentWriter } from '../documents/writer';
 import { INSPECTOR_BOUNDS, INSPECTOR_WIDTH_KEY } from '../layout/panel-width.logic';
 import { SidePanel } from '../layout/SidePanel';
 import { notify, panelStore } from '../layout/ui-state';
@@ -12,8 +15,10 @@ import { requiresFor } from '../host/studio-host';
 import { useStudio } from '../studio-context';
 import { activeDocumentStore } from './active-document';
 import { CanvasErrorBoundary } from './CanvasErrorBoundary';
+import { ConflictDialog } from './ConflictDialog';
 import { downloadDocument } from './file-io';
 import { Inspector } from './Inspector';
+import { describeSaveStatus } from './save-status';
 import { useStudioActions } from './use-studio-actions';
 
 type IsoDoc = HolodeckDocument<IsoSceneFile>;
@@ -25,9 +30,9 @@ export function DocumentRoute({ docId }: { docId: string }) {
   if (isPending) return <CenteredMessage>Loading document…</CenteredMessage>;
   if (error) return <CenteredMessage tone="error">Could not open the document: {error.message}</CenteredMessage>;
   if (!data) return <CenteredMessage>This document does not exist (it may have been deleted).</CenteredMessage>;
-  if (data.engine !== ISO_ENGINE_ID) return <CenteredMessage>No editor for engine “{data.engine}” yet.</CenteredMessage>;
-  // key: a different document gets fresh editor state (selection, working copy).
-  return <DocumentWorkspace key={data.id} initial={data as IsoDoc} />;
+  if (data.document.engine !== ISO_ENGINE_ID) return <CenteredMessage>No editor for engine “{data.document.engine}” yet.</CenteredMessage>;
+  // key: a different document gets fresh editor state (selection, working copy, writer).
+  return <DocumentWorkspace key={data.document.id} initial={data} />;
 }
 
 function CenteredMessage({ children, tone }: { children: React.ReactNode; tone?: 'error' }) {
@@ -40,23 +45,44 @@ function CenteredMessage({ children, tone }: { children: React.ReactNode; tone?:
 
 /**
  * The open document: canvas + inspector. Owns the working copy; every
- * committed change is written to IndexedDB straight away (writes are
- * serialised by IndexedDB's transaction order, so the last edit wins).
+ * committed change goes through one DocumentWriter (serial, revision-checked
+ * writes; see documents/writer.ts).
  */
-function DocumentWorkspace({ initial }: { initial: IsoDoc }) {
-  const { host } = useStudio();
-  const [doc, setDoc] = useState<IsoDoc>(initial);
+function DocumentWorkspace({ initial }: { initial: VersionedDocument }) {
+  const { host, store, channel } = useStudio();
+  const client = useQueryClient();
+  const [doc, setDoc] = useState<IsoDoc>(initial.document as IsoDoc);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // `mutate` is stable across renders; the mutation result object is not.
-  // Depending on the result object re-created `placeItem` on every render and,
-  // through the activeDocumentStore effect below, re-rendered the shell in an
-  // endless loop (the page froze as soon as a document was open).
-  const { mutate: saveDocument } = useSaveDocument();
-  const { mutate: renameDocument } = useRenameDocument();
-  const { deleteDocument } = useStudioActions();
+  const { deleteDocument, openDocument } = useStudioActions();
   const inspectorOpen = useSelector(panelStore, (s) => s.inspectorOpen);
   const docRef = useRef(doc);
   docRef.current = doc;
+
+  const writer = useMemo(
+    () =>
+      new DocumentWriter(store, initial.document.id, initial.revision, (saved) => {
+        client.setQueryData(documentKeys.detail(saved.document.id), saved);
+        void client.invalidateQueries({ queryKey: documentKeys.list() });
+      }),
+    // One writer per mounted document (the route keys this component by id).
+    [],
+  );
+  const writerState = useSyncExternalStore(writer.subscribe, writer.getState);
+
+  /** Replace the working copy with a stored version (load latest, or another tab's change). */
+  const adopt = useCallback(
+    (version: VersionedDocument) => {
+      const next = version.document as IsoDoc;
+      docRef.current = next;
+      setDoc(next);
+      writer.adopt(version);
+    },
+    [writer],
+  );
+
+  const saveWorkingCopy = useCallback(() => {
+    void writer.save(docRef.current);
+  }, [writer]);
 
   /** Apply a new body: recompute `requires`, update the working copy, persist. */
   const commitScene = useCallback(
@@ -67,11 +93,34 @@ function DocumentWorkspace({ initial }: { initial: IsoDoc }) {
       else delete next.requires;
       docRef.current = next;
       setDoc(next);
-      saveDocument(next, {
-        onError: (error) => notify({ tone: 'error', title: 'Could not save the document', details: [messageOf(error)] }),
-      });
+      saveWorkingCopy();
     },
-    [host, saveDocument],
+    [host, saveWorkingCopy],
+  );
+
+  // Failures surface once per transition into error / conflict.
+  const lastStatus = useRef(writerState.status.kind);
+  useEffect(() => {
+    const kind = writerState.status.kind;
+    if (kind === 'error' && lastStatus.current !== 'error') notify(describeSaveStatus(writerState.status));
+    lastStatus.current = kind;
+  }, [writerState.status]);
+
+  // Another tab saved this document: adopt it when nothing here is pending.
+  // With pending edits the next write conflicts and the user chooses.
+  useEffect(
+    () =>
+      channel.subscribe((change) => {
+        if (change.id !== initial.document.id || change.type !== 'saved') return;
+        const state = writer.getState();
+        if (writer.busy || state.status.kind !== 'saved' || change.revision <= state.revision) return;
+        void store.get(change.id).then((latest) => {
+          if (!latest || writer.busy || writer.getState().status.kind !== 'saved') return;
+          adopt(latest);
+          notify({ tone: 'info', title: 'Updated with changes from another tab' });
+        });
+      }),
+    [adopt, channel, initial.document.id, store, writer],
   );
 
   const placeItem = useCallback(
@@ -91,12 +140,17 @@ function DocumentWorkspace({ initial }: { initial: IsoDoc }) {
   // Publish this document's commands to the shell (library, header, hotkeys).
   useEffect(() => {
     activeDocumentStore.setState(() => ({
-      id: initial.id,
+      id: initial.document.id,
       placeItem,
       exportFile: () => downloadDocument(docRef.current),
+      save: async () => {
+        // Re-save the working copy (a retry after a failure), then report the real outcome.
+        if (writer.getState().status.kind !== 'conflict') void writer.save(docRef.current);
+        return writer.flush();
+      },
     }));
-    return () => activeDocumentStore.setState((current) => (current?.id === initial.id ? null : current));
-  }, [initial.id, placeItem]);
+    return () => activeDocumentStore.setState((current) => (current?.id === initial.document.id ? null : current));
+  }, [initial.document.id, placeItem, writer]);
 
   const onPatch = useCallback(
     (id: string, patch: Partial<Omit<IsoPlacement, 'id' | 'object'>>) => commitScene(updatePlacement(docRef.current.body, id, patch)),
@@ -111,17 +165,17 @@ function DocumentWorkspace({ initial }: { initial: IsoDoc }) {
   );
   const onRename = useCallback(
     (name: string) => {
-      // Optimistic: the canvas body name follows immediately.
+      // Optimistic in the working copy; the store applies it to the stored
+      // document inside its own transaction (store.rename).
       const next = withDocumentName(docRef.current, name);
       docRef.current = next;
       setDoc(next);
-      renameDocument(
-        { id: next.id, name },
-        { onError: (error) => notify({ tone: 'error', title: 'Could not rename the document', details: [messageOf(error)] }) },
-      );
+      void writer.rename(name);
     },
-    [renameDocument],
+    [writer],
   );
+
+  const conflict = writerState.status.kind === 'conflict' ? writerState.status : null;
 
   // TODO(holodeck#100, lane E2): persist the camera per document. The
   // store side is done (DocumentStore.getCamera / saveCamera, `views` object
@@ -130,7 +184,14 @@ function DocumentWorkspace({ initial }: { initial: IsoDoc }) {
   // props on ProcessEditor (packages/editor-2.5d-react, owned by lane E2).
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
-      <main className="relative min-h-0 min-w-0 flex-1" aria-label="Canvas" data-testid="canvas" data-document-id={doc.id}>
+      <main
+        className="relative min-h-0 min-w-0 flex-1"
+        aria-label="Canvas"
+        data-testid="canvas"
+        data-document-id={doc.id}
+        data-save-status={writerState.status.kind}
+        data-revision={writerState.revision}
+      >
         <CanvasErrorBoundary resetKey={doc.id}>
           <ProcessEditor
             scene={doc.body}
@@ -153,6 +214,18 @@ function DocumentWorkspace({ initial }: { initial: IsoDoc }) {
             onDeleteDocument={() => void deleteDocument(doc.id, { navigateAway: true })}
           />
         </SidePanel>
+      ) : null}
+      {conflict ? (
+        <ConflictDialog
+          name={doc.name}
+          latest={conflict.latest}
+          mine={doc}
+          onLoadLatest={(latest) => {
+            adopt(latest);
+            setSelectedId(null);
+          }}
+          onSavedCopy={(copyId) => void openDocument(copyId)}
+        />
       ) : null}
     </div>
   );

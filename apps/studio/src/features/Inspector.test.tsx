@@ -7,6 +7,7 @@ import { createIsoDocument } from '../documents/new-document';
 import { DocumentStore } from '../documents/store';
 import { createStudioHost } from '../host/studio-host';
 import { StudioProvider } from '../studio-context';
+import { NO_CHANNEL } from '../test-support';
 import type { IsoPartDefinition } from '@holodeck/editor-2.5d-react';
 import { Inspector, type InspectorProps } from './Inspector';
 import { visibleParams } from './inspector.logic';
@@ -29,7 +30,7 @@ function setup(over: Partial<InspectorProps> = {}) {
     ...over,
   };
   render(
-    <StudioProvider services={{ host, store: new DocumentStore(openStudioDb('inspector-test')) }}>
+    <StudioProvider services={{ host, store: new DocumentStore(openStudioDb('inspector-test')), channel: NO_CHANNEL }}>
       <Inspector {...props} />
     </StudioProvider>,
   );
@@ -44,6 +45,14 @@ describe('<Inspector />', () => {
     fireEvent.change(name, { target: { value: '  Brewhouse ' } });
     fireEvent.keyDown(name, { key: 'Enter' });
     expect(props.onRename).toHaveBeenCalledWith('Brewhouse');
+  });
+
+  // Finding 4: documents stored before timestamps were validated must still render.
+  it('renders an unparsable stored timestamp as text instead of crashing', () => {
+    const doc = { ...createIsoDocument('Legacy', 'l'), metadata: { created: 'c', updated: 'not a date' } };
+    setup({ doc: doc as InspectorProps['doc'] });
+    expect(screen.getByText('c')).toBeInTheDocument();
+    expect(screen.getByText('not a date')).toBeInTheDocument();
   });
 
   it('refuses an empty name and reverts on Escape', () => {

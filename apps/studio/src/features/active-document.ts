@@ -5,6 +5,7 @@
  */
 
 import { Store } from '@tanstack/react-store';
+import type { SaveStatus } from '../documents/writer';
 
 export interface ActiveDocument {
   id: string;
@@ -12,6 +13,8 @@ export interface ActiveDocument {
   placeItem: (kind: string, itemId: string) => void;
   /** Download the document as a `.holodeck.json` file. */
   exportFile: () => void;
+  /** Save the working copy now (retrying a failed autosave) and resolve with the real outcome. */
+  save: () => Promise<SaveStatus>;
 }
 
 export const activeDocumentStore = new Store<ActiveDocument | null>(null);

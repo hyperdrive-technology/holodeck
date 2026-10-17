@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { createDocumentChannel } from './documents/changes';
 import { openStudioDb } from './documents/db';
 import { DocumentStore } from './documents/store';
 import { createStudioHost, hostDocumentProblems } from './host/studio-host';
@@ -11,8 +12,12 @@ import './styles.css';
 
 async function boot(): Promise<StudioServices> {
   const host = await createStudioHost();
-  const store = new DocumentStore(openStudioDb(), { validate: (doc) => hostDocumentProblems(host, doc) });
-  return { host, store };
+  const channel = createDocumentChannel();
+  const store = new DocumentStore(openStudioDb(), {
+    validate: (doc) => hostDocumentProblems(host, doc),
+    onChange: (change) => channel.post(change),
+  });
+  return { host, store, channel };
 }
 
 const root = createRoot(document.getElementById('root')!);

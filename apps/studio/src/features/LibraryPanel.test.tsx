@@ -5,6 +5,7 @@ import { openStudioDb } from '../documents/db';
 import { DocumentStore } from '../documents/store';
 import { createStudioHost } from '../host/studio-host';
 import { StudioProvider } from '../studio-context';
+import { NO_CHANNEL } from '../test-support';
 import { activeDocumentStore } from './active-document';
 import { LibraryPanel } from './LibraryPanel';
 
@@ -17,7 +18,7 @@ afterEach(() => activeDocumentStore.setState(() => null));
 function renderPanel() {
   const store = new DocumentStore(openStudioDb('library-panel-test'));
   return render(
-    <StudioProvider services={{ host, store }}>
+    <StudioProvider services={{ host, store, channel: NO_CHANNEL }}>
       <LibraryPanel />
     </StudioProvider>,
   );
@@ -37,7 +38,7 @@ describe('<LibraryPanel />', () => {
     expect(tank).toBeDisabled();
     expect(screen.getByText('Open a document to place components.')).toBeInTheDocument();
     const placeItem = vi.fn();
-    act(() => activeDocumentStore.setState(() => ({ id: 'd', placeItem, exportFile: vi.fn() })));
+    act(() => activeDocumentStore.setState(() => ({ id: 'd', placeItem, exportFile: vi.fn(), save: vi.fn() })));
     expect(tank).toBeEnabled();
     fireEvent.click(tank);
     expect(placeItem).toHaveBeenCalledWith('holodeck.iso.part', 'tank');

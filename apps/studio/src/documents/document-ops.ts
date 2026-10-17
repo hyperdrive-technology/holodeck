@@ -35,3 +35,18 @@ export function stampDocument<D extends HolodeckDocument>(doc: D, at: Date): D {
 export function isEnvelope(raw: unknown): raw is HolodeckDocument {
   return isRecord(raw) && raw.format === HOLODECK_DOCUMENT_FORMAT;
 }
+
+/** A metadata timestamp must be a string `Date` can parse; anything else would break date formatting. */
+export function isValidTimestamp(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== '' && Number.isFinite(Date.parse(value));
+}
+
+/** Problems the SDK envelope check does not catch: unparsable `metadata.created` / `updated`. */
+export function metadataProblems(doc: Pick<HolodeckDocument, 'metadata'>): string[] {
+  const problems: string[] = [];
+  for (const key of ['created', 'updated'] as const) {
+    const value = doc.metadata?.[key];
+    if (value !== undefined && !isValidTimestamp(value)) problems.push(`metadata.${key}: must be an ISO date, got ${JSON.stringify(value)}`);
+  }
+  return problems;
+}

@@ -9,8 +9,8 @@
 
 import { validateHolodeckDocument, type HolodeckDocument, type HolodeckHost } from '@holodeck/sdk';
 import { IsoDocumentError, loadIsoDocument } from '@holodeck/editor-2.5d-react';
-import { hostDocumentProblems } from '../host/studio-host';
-import { isEnvelope } from './document-ops';
+import { checkHostDocument } from '../host/studio-host';
+import { isEnvelope, metadataProblems } from './document-ops';
 
 /** Larger files are refused before parsing; a document this size is almost certainly not one. */
 export const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
@@ -44,15 +44,18 @@ export function parseDocumentValue(raw: unknown, host: HolodeckHost): ImportResu
   if (!envelopeLike) return wrapBareScene(raw, host);
   const shape = validateHolodeckDocument(raw);
   if (shape.length) return { ok: false, problems: shape };
-  const document = raw as unknown as HolodeckDocument;
-  const problems = hostDocumentProblems(host, document);
-  return problems.length ? { ok: false, problems } : { ok: true, document, wrapped: false };
+  const checked = checkHostDocument(host, raw as unknown as HolodeckDocument);
+  const problems = [...metadataProblems(raw as unknown as HolodeckDocument), ...checked.problems];
+  if (problems.length || !checked.document) return { ok: false, problems };
+  // The loader's normalised form (envelope theme in the body, body.id = envelope id).
+  return { ok: true, document: checked.document, wrapped: false };
 }
 
 function wrapBareScene(raw: Record<string, unknown>, host: HolodeckHost): ImportResult {
   try {
     const { document } = loadIsoDocument(raw, host.registry);
-    return { ok: true, document: document as HolodeckDocument, wrapped: true };
+    const problems = metadataProblems(document);
+    return problems.length ? { ok: false, problems } : { ok: true, document: document as HolodeckDocument, wrapped: true };
   } catch (error) {
     return { ok: false, problems: error instanceof IsoDocumentError ? [...error.problems] : [messageOf(error)] };
   }

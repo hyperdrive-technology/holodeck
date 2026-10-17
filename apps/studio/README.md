@@ -13,6 +13,15 @@ PLC or Hyperdrive code: the studio is a plain Holodeck host.
 - **Documents** in IndexedDB (`src/documents/db.ts`, `store.ts`): every write
   is validated (envelope via `@holodeck/sdk`, body and installed packages via
   the host). Per-document view state lives in a separate `views` store.
+- **Concurrency**: every stored document has a `revision`. Each write is one
+  IndexedDB readwrite transaction that checks the revision the caller's copy
+  was based on and commits `revision + 1`, or fails with a conflict; renames
+  are applied to the stored document inside that transaction. An open
+  document writes through one `DocumentWriter` (`src/documents/writer.ts`),
+  which serialises this tab's writes. A conflict (another tab saved first)
+  opens a dialog: load the latest, or save yours as a copy. Idle tabs pick up
+  other tabs' saves via a BroadcastChannel. `Mod+S` re-saves and reports the
+  real outcome.
 - **Import / export** of `.holodeck.json` files (`src/documents/io.ts`):
   envelopes for any installed engine, or a bare legacy `IsoSceneFile` (wrapped).
   Every problem is listed at once. Re-importing an existing id makes a copy.

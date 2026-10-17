@@ -11,7 +11,12 @@ import { DraftField, ReadonlyField } from './fields';
 import { coerceCoordinate, coerceParam, paramValue, rotateQuarter, rotationDegrees, visibleParams } from './inspector.logic';
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-const formatTime = (iso: string | undefined) => (iso ? timeFormat.format(new Date(iso)) : '—');
+/** Defensive: stored metadata predating validation may not parse; show it raw instead of throwing. */
+export const formatTime = (iso: string | undefined) => {
+  if (!iso) return '—';
+  const at = new Date(iso);
+  return Number.isFinite(at.getTime()) ? timeFormat.format(at) : iso;
+};
 
 export interface InspectorProps {
   doc: HolodeckDocument<IsoSceneFile>;

@@ -2,7 +2,10 @@ import { formatForDisplay } from '@tanstack/react-hotkeys';
 import { Outlet } from '@tanstack/react-router';
 import { useSelector } from '@tanstack/react-store';
 import { DownloadIcon, KeyboardIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, UploadIcon } from 'lucide-react';
-import { useState, type DragEvent } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState, type DragEvent } from 'react';
+import { documentKeys } from '../documents/queries';
+import { useStudio } from '../studio-context';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
@@ -31,6 +34,18 @@ export function AppShell() {
   const active = useSelector(activeDocumentStore);
   const { newDocument, importFiles } = useStudioActions();
   const [dropping, setDropping] = useState(false);
+  const { channel } = useStudio();
+  const client = useQueryClient();
+  // Another tab created, saved or deleted a document: refresh the list (the
+  // open document handles its own id in DocumentWorkspace).
+  useEffect(
+    () =>
+      channel.subscribe((change) => {
+        void client.invalidateQueries({ queryKey: documentKeys.list() });
+        if (change.type === 'deleted') void client.invalidateQueries({ queryKey: documentKeys.detail(change.id) });
+      }),
+    [channel, client],
+  );
 
   return (
     <div

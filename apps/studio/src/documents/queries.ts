@@ -30,31 +30,7 @@ export function useCreateDocument() {
   return useMutation({
     mutationFn: (doc: HolodeckDocument) => store.create(doc),
     onSuccess: (saved) => {
-      client.setQueryData(documentKeys.detail(saved.id), saved);
-      void client.invalidateQueries({ queryKey: documentKeys.list() });
-    },
-  });
-}
-
-export function useSaveDocument() {
-  const { store } = useStudio();
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (doc: HolodeckDocument) => store.save(doc),
-    onSuccess: (saved) => {
-      client.setQueryData(documentKeys.detail(saved.id), saved);
-      void client.invalidateQueries({ queryKey: documentKeys.list() });
-    },
-  });
-}
-
-export function useRenameDocument() {
-  const { store } = useStudio();
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) => store.rename(id, name),
-    onSuccess: (saved) => {
-      client.setQueryData(documentKeys.detail(saved.id), saved);
+      client.setQueryData(documentKeys.detail(saved.document.id), saved);
       void client.invalidateQueries({ queryKey: documentKeys.list() });
     },
   });

@@ -55,11 +55,17 @@ const messageOf = (error: unknown) => (error instanceof Error ? error.message : 
  * matching version, and the body valid for the engine. Iso bodies are checked
  * against the host registry, so a placement of an uninstalled part is a
  * problem. Never throws.
+ *
+ * `document` is the engine loader's normalised form when there are no
+ * problems: for iso, `loadIsoDocument` copies an envelope-only `theme` into
+ * the body and makes `body.id` the envelope id (holodeck#109). Store that,
+ * not the raw input, or the canvas renders something other than what was
+ * validated.
  */
-export function hostDocumentProblems(host: HolodeckHost, doc: HolodeckDocument): string[] {
+export function checkHostDocument(host: HolodeckHost, doc: HolodeckDocument): { problems: string[]; document?: HolodeckDocument } {
   const problems: string[] = [];
   const engine = host.engine(doc.engine);
-  if (!engine) return [`engine: "${doc.engine}" is not installed in this studio`];
+  if (!engine) return { problems: [`engine: "${doc.engine}" is not installed in this studio`] };
   for (const [id, range] of Object.entries(doc.requires ?? {})) {
     const installed = host.package(id);
     if (!installed) problems.push(`requires: package "${id}" is not installed`);
@@ -67,13 +73,18 @@ export function hostDocumentProblems(host: HolodeckHost, doc: HolodeckDocument):
       problems.push(`requires: "${id}" ${range} is needed, ${installed.manifest.version} is installed`);
     }
   }
+  let document: HolodeckDocument = doc;
   try {
-    if (doc.engine === ISO_ENGINE_ID) loadIsoDocument(doc, host.registry);
+    if (doc.engine === ISO_ENGINE_ID) document = loadIsoDocument(doc, host.registry).document as HolodeckDocument;
     else problems.push(...(engine.validateBody?.(doc.body) ?? []));
   } catch (error) {
     problems.push(...(error instanceof IsoDocumentError ? error.problems : [messageOf(error)]));
   }
-  return problems;
+  return problems.length ? { problems } : { problems, document };
+}
+
+export function hostDocumentProblems(host: HolodeckHost, doc: HolodeckDocument): string[] {
+  return checkHostDocument(host, doc).problems;
 }
 
 /**

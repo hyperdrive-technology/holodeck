@@ -4,6 +4,7 @@ import { notify, panelStore, togglePanel } from '../layout/ui-state';
 import { STUDIO_SHORTCUTS, type StudioCommand } from '../shortcuts/shortcuts';
 import { activeDocumentStore, shellStore } from './active-document';
 import { openImportPicker } from './file-io';
+import { describeSaveStatus } from './save-status';
 import { LIBRARY_SEARCH_ID } from './LibraryPanel';
 import { useStudioActions } from './use-studio-actions';
 
@@ -25,7 +26,9 @@ export function StudioHotkeys() {
     'document.import': openImportPicker,
     'document.export': () => activeDocumentStore.state?.exportFile(),
     'document.save': () => {
-      if (activeDocumentStore.state) notify({ tone: 'info', title: 'All changes are saved in this browser' });
+      const active = activeDocumentStore.state;
+      if (!active) return;
+      void active.save().then((status) => notify(describeSaveStatus(status)));
     },
     'library.search': focusLibrarySearch,
     'panel.sidebar': () => togglePanel('sidebarOpen'),

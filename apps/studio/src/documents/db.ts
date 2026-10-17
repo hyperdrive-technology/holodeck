@@ -22,6 +22,12 @@ export const STUDIO_DB_VERSION = 1;
 export interface StoredDocument {
   id: string;
   document: HolodeckDocument;
+  /**
+   * Optimistic-concurrency counter: 1 on create, +1 on every write. A save
+   * names the revision its copy was based on; a mismatch is a conflict
+   * (DocumentStore.save). Not part of the exported envelope.
+   */
+  revision: number;
   /** ms since epoch. */
   createdAt: number;
   /** ms since epoch; the document list sorts by it, newest first. */
