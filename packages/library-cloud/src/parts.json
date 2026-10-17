@@ -1,0 +1,262 @@
+[
+  {
+    "id": "cloud:server",
+    "label": "Server",
+    "category": "Compute",
+    "hint": "Three-bay rack tower",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/server.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:database",
+    "label": "Database",
+    "category": "Data",
+    "hint": "Stacked cylindrical database",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/database.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:cache",
+    "label": "Cache",
+    "category": "Data",
+    "hint": "Low memory chip with perimeter pins",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/cache.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:queue",
+    "label": "Queue",
+    "category": "Data",
+    "hint": "Messages stacked in an open tray",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/queue.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:load-balancer",
+    "label": "Load balancer",
+    "category": "Networking",
+    "hint": "One input branching into three outputs",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/load-balancer.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:gateway",
+    "label": "Gateway",
+    "category": "Networking",
+    "hint": "Open gateway arch",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/gateway.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:function",
+    "label": "Function",
+    "category": "Compute",
+    "hint": "Hexagonal function module",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/function.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:container",
+    "label": "Container",
+    "category": "Compute",
+    "hint": "Corrugated container with end doors",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/container.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:bucket",
+    "label": "Bucket",
+    "category": "Storage",
+    "hint": "Tapered object-storage bucket",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/bucket.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:user",
+    "label": "User",
+    "category": "People",
+    "hint": "Faceted head and shoulders",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/user.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:generic-block",
+    "label": "Block",
+    "category": "Generic",
+    "hint": "Wide rounded block",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/generic-block.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:generic-cube",
+    "label": "Cube",
+    "category": "Generic",
+    "hint": "Rounded cube",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/generic-cube.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:generic-flat",
+    "label": "Flat",
+    "category": "Generic",
+    "hint": "Thin rounded tile",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/generic-flat.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  }
+]

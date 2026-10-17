@@ -19,7 +19,7 @@ jobs:
         # packages/cli is not built here: it has an empty package-lock.json, no
         # src/index.ts (its build entry), and depends on @holodeck/sdk from the npm
         # registry, which is not published. Add it once it is revived.
-        package: [editor-2.5d-react, editor-2d-react, viewer-3d-react, flow-runtime, provider-http]
+        package: [editor-2.5d-react, editor-2d-react, viewer-3d-react, flow-runtime, provider-http, library-cloud]
     timeout-minutes: 30
     steps:
       # The packages depend on the SDK via `file:../../../holodeck-sdk/ts`, so the
@@ -142,7 +142,7 @@ jobs:
       # flow-runtime's script also deploys a small flow through holodeck.flow.local;
       # provider-http's reads a value through holodeck.http from a local server.
       - name: Smoke-test the Holodeck package entry
-        if: matrix.package == 'editor-2.5d-react' || matrix.package == 'flow-runtime' || matrix.package == 'provider-http'
+        if: matrix.package == 'editor-2.5d-react' || matrix.package == 'flow-runtime' || matrix.package == 'provider-http' || matrix.package == 'library-cloud'
         working-directory: holodeck/packages/${{ matrix.package }}
         run: node --no-deprecation scripts/smoke-holodeck-package.mjs
 
