@@ -258,5 +258,265 @@
     },
     "floor": false,
     "instanced": false
+  },
+  {
+    "id": "cloud:broker",
+    "label": "Broker",
+    "category": "Data",
+    "hint": "Central message hub with four satellite nodes",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/broker.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:cdn",
+    "label": "CDN",
+    "category": "Networking",
+    "hint": "Distributed edge nodes around a delivery hub",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/cdn.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:registry",
+    "label": "Registry",
+    "category": "Compute",
+    "hint": "Open shelves of package crates",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/registry.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:disk",
+    "label": "Disk",
+    "category": "Storage",
+    "hint": "Single low storage platter in a drive enclosure",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/disk.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:warehouse",
+    "label": "Warehouse",
+    "category": "Data",
+    "hint": "Wide storage hall with a raised flat roof",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/warehouse.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:stream",
+    "label": "Stream",
+    "category": "Data",
+    "hint": "Parallel flowing channels with message blocks",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/stream.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:firewall",
+    "label": "Firewall",
+    "category": "Security",
+    "hint": "Staggered brick barrier with a broad cap",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/firewall.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:vault",
+    "label": "Vault",
+    "category": "Security",
+    "hint": "Armoured safe with a circular locking wheel",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/vault.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:identity",
+    "label": "Identity",
+    "category": "Security",
+    "hint": "Upright identity badge with a portrait",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/identity.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:monitoring",
+    "label": "Monitoring",
+    "category": "Operations",
+    "hint": "Console with a bold signal trace",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/monitoring.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:mobile",
+    "label": "Mobile",
+    "category": "Devices",
+    "hint": "Handset on a compact dock",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/mobile.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:pc",
+    "label": "PC",
+    "category": "Devices",
+    "hint": "Desktop monitor with a keyboard base",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/pc.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": false,
+    "instanced": false
+  },
+  {
+    "id": "cloud:billboard",
+    "label": "Billboard",
+    "category": "Generic",
+    "hint": "Upright sign with a vertical logo face",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {},
+    "model": "models/billboard.glb",
+    "logo": {
+      "url": "logos/cloud.svg"
+    },
+    "colors": {
+      "accent": "#6d8fbd"
+    },
+    "floor": true,
+    "instanced": false
   }
 ]
