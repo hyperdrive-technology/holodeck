@@ -260,7 +260,7 @@ describe('copy / cut / paste / duplicate', () => {
     let s = run(three(), { type: 'paste', objects: [valve('x', 20, 20)] });
     expect(byId(s, 'valve-1')).toMatchObject({ x: 20, y: 20 });
     s = run(s, { type: 'paste', objects: [{ id: 'bad', object: 'valve', x: Number.POSITIVE_INFINITY, y: 0 }] });
-    expect(s.notice).toMatch(/Edit rejected/);
+    expect(s.notice).toMatch(/Paste rejected/);
     s = run(s, { type: 'paste', objects: [{ id: 'q', object: 'not-a-part', x: 0, y: 0 }] });
     expect(s.notice).toMatch(/unknown library object/);
   });
@@ -567,5 +567,136 @@ describe('host helpers (holodeck#100)', () => {
     expect(s.placed).toBe('valve-1');
     s = run(s, { type: 'cursor', x: 4, y: 4 });
     expect(s.placed).toBeNull();
+  });
+});
+
+describe('review fixes (PR #114)', () => {
+  describe('untrusted clipboard payloads never throw out of the reducer', () => {
+    const malformed: Array<[string, unknown]> = [
+      ['string link end', { id: 'c', object: 'connector', x: 0, y: 0, link: { from: 'oops' } }],
+      ['non-array via', { id: 'c', object: 'connector', x: 0, y: 0, link: { via: 5 } }],
+      ['via of strings', { id: 'c', object: 'connector', x: 0, y: 0, link: { via: ['a'] } }],
+      ['null link', { id: 'c', object: 'connector', x: 0, y: 0, link: null }],
+      ['string x', { id: 'v', object: 'valve', x: '5', y: 0 }],
+      ['missing y', { id: 'v', object: 'valve', x: 5 }],
+      ['infinite x', { id: 'v', object: 'valve', x: Number.POSITIVE_INFINITY, y: 0 }],
+      ['javascript: url param', { id: 'i', object: 'image', x: 0, y: 0, params: { src: 'javascript:alert(1)' } }],
+      ['unknown part', { id: 'q', object: 'not-a-part', x: 0, y: 0 }],
+      ['params not an object', { id: 'v', object: 'valve', x: 0, y: 0, params: 7 }],
+      ['onPipe number', { id: 'v', object: 'valve', x: 0, y: 0, onPipe: 3 }],
+      ['group number', { id: 'v', object: 'valve', x: 0, y: 0, group: 3 }],
+      ['null record', null],
+      ['array record', [1, 2]],
+      ['string record', 'tank'],
+    ];
+
+    it.each(malformed)('rejects %s without throwing or changing the scene', (_name, bad) => {
+      const s0 = three();
+      let s!: EditorState;
+      expect(() => {
+        s = editorReducer(s0, { type: 'paste', objects: [bad as IsoPlacement] });
+      }).not.toThrow();
+      expect(s.scene).toBe(s0.scene);
+      expect(s.past).toHaveLength(0);
+      expect(s.notice).toMatch(/Paste rejected|Edit rejected/);
+    });
+
+    it('pastes the valid records of a mixed payload and reports the rest', () => {
+      const s = run(three(), { type: 'paste', objects: [valve('ok', 30, 30), { id: 'c', object: 'connector', x: 0, y: 0, link: { via: 5 } } as unknown as IsoPlacement] });
+      expect(byId(s, 'valve-1')).toMatchObject({ x: 30, y: 30 });
+      expect(s.notice).toMatch(/1 of 2/);
+      expect(s.past).toHaveLength(1);
+    });
+
+    it('fuzz: random payloads never throw and always leave a valid scene', async () => {
+      const { validateSceneFile } = await import('../iso/scene');
+      // Deterministic PRNG (mulberry32) so a failure is reproducible.
+      let seed = 0x5eed;
+      const rnd = () => {
+        seed = (seed + 0x6d2b79f5) | 0;
+        let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+      const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)]!;
+      const junk = (): unknown => pick<() => unknown>([
+        () => null, () => undefined, () => 'oops', () => 5, () => Number.NaN, () => 1e400, () => -3, () => true,
+        () => [], () => [1, 'a'], () => ({}), () => ({ x: 1 }), () => ({ object: 'tank-a' }), () => ({ x: 'a', y: 2 }),
+        () => ({ from: 'oops' }), () => ({ via: 5 }), () => ({ via: [{ x: 1, y: 1 }] }), () => ({ __proto__: { x: 1 } }),
+      ])();
+      const fields = ['id', 'object', 'x', 'y', 'toX', 'toY', 'rotation', 'link', 'params', 'onPipe', 'at', 'group', 'layer', 'meta', 'opacity', 'z', 'width', 'height'];
+      const record = (): unknown => {
+        if (rnd() < 0.1) return junk();
+        const o: Record<string, unknown> = {
+          id: rnd() < 0.9 ? `r${Math.floor(rnd() * 5)}` : junk(),
+          object: rnd() < 0.85 ? pick(['tank', 'valve', 'pipe', 'connector', 'label', 'area', 'image', 'nope']) : junk(),
+          x: rnd() < 0.8 ? Math.floor(rnd() * 20) : junk(),
+          y: rnd() < 0.8 ? Math.floor(rnd() * 20) : junk(),
+        };
+        for (const f of fields) if (rnd() < 0.15) o[f] = junk();
+        return o;
+      };
+      let state = three();
+      for (let i = 0; i < 400; i += 1) {
+        const payload = Array.from({ length: 1 + Math.floor(rnd() * 4) }, record) as IsoPlacement[];
+        expect(() => {
+          state = editorReducer(state, { type: 'paste', objects: payload });
+        }).not.toThrow();
+        expect(() => validateSceneFile(state.scene, registry)).not.toThrow();
+      }
+    });
+
+    it('no action can throw out of editorReducer', () => {
+      const s0 = three();
+      expect(() => editorReducer(s0, { type: 'nudge', dx: 1, dy: 1, extra: 1 } as unknown as EditorAction)).not.toThrow();
+      // A host feeding a hand-built bad state: reduce throws inside, the reducer reports instead.
+      const broken = { ...s0, selectedIds: ['a'], selectedId: 'a', scene: { ...s0.scene, objects: [{ ...s0.scene.objects[0]!, link: { via: 5 } } as unknown as IsoPlacement] } };
+      let out!: EditorState;
+      expect(() => {
+        out = editorReducer(broken, { type: 'nudge', dx: 1, dy: 0 });
+      }).not.toThrow();
+      expect(out.notice).toMatch(/rejected/);
+    });
+  });
+
+  describe('reroute keeps placement fields it does not own', () => {
+    it('keeps layer, group, opacity, z and meta on the replacement pipes and elbows', () => {
+      const scene = sceneOf(
+        [
+          { id: 'pipe-1', object: 'pipe', x: 0, y: 0, toX: 10, toY: 0, layer: 'l', group: 'g', opacity: 0.5, z: 2, meta: { line: 'A1' }, band: '#ff0000' },
+          tank('blk', 5, 0),
+        ],
+        { layers: [{ id: 'l', name: 'L' }] },
+      );
+      let s = run(createEditorState(scene), { type: 'select', id: 'pipe-1' });
+      s = run(s, { type: 'reroute-selected' });
+      const replaced = s.scene.objects.filter((o) => o.object === 'pipe' || o.object === 'elbow');
+      expect(replaced.length).toBeGreaterThanOrEqual(3);
+      for (const o of replaced) {
+        expect(o).toMatchObject({ layer: 'l', group: 'g', opacity: 0.5, z: 2 });
+      }
+      const pipes = replaced.filter((p) => p.object === 'pipe');
+      for (const o of pipes) expect(o.band).toBe('#ff0000');
+      // Identity data (metadata plane) moves to the first new pipe only: no duplicated planes.
+      expect(pipes[0]!.meta).toEqual({ line: 'A1' });
+      expect(pipes.slice(1).every((p) => p.meta === undefined)).toBe(true);
+      expect(replaced.filter((p) => p.object === 'elbow').every((p) => p.meta === undefined)).toBe(true);
+      // Undo restores the original run exactly.
+      expect(run(s, { type: 'undo' }).scene.objects[0]).toEqual(scene.objects[0]);
+    });
+
+    it('elbows inherit from an original elbow when the run had one', () => {
+      const scene = sceneOf([
+        { id: 'pipe-1', object: 'pipe', x: 0, y: 0, toX: 4, toY: 0, layer: 'l' },
+        { id: 'elbow-1', object: 'elbow', x: 4, y: 0, rotation: 0, group: 'eg', layer: 'l' },
+        { id: 'pipe-2', object: 'pipe', x: 4, y: 0, toX: 4, toY: 3, layer: 'l' },
+        tank('blk', 4, 0),
+      ], { layers: [{ id: 'l', name: 'L' }] });
+      const s = run(createEditorState(scene), { type: 'select', id: 'pipe-1' }, { type: 'reroute-selected' });
+      const elbows = s.scene.objects.filter((o) => o.object === 'elbow');
+      expect(elbows.length).toBeGreaterThan(0);
+      for (const e of elbows) expect(e).toMatchObject({ group: 'eg', layer: 'l' });
+      for (const p of s.scene.objects.filter((o) => o.object === 'pipe')) expect(p.layer).toBe('l');
+    });
   });
 });

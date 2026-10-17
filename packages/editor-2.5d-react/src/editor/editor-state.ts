@@ -127,7 +127,7 @@ export type EditorAction =
   /** Copy, then delete the selection. One undo step. */
   | { type: 'cut' }
   /** Paste `objects` (e.g. from the system clipboard) or the editor clipboard. One undo step. */
-  | { type: 'paste'; objects?: readonly IsoPlacement[] }
+  | { type: 'paste'; objects?: readonly unknown[] }
   /** Copy + paste the selection without touching the clipboard. One undo step. */
   | { type: 'duplicate' }
   /** Move the selection by whole cells (arrow keys). */
@@ -436,11 +436,75 @@ function rerouteSelected(state: EditorState): EditorState {
     carried.push(...parts);
   }
   if (carried.length !== movable.length) return { ...state, notice: INLINE_PARTS_NO_ROUTE_NOTICE };
+  const originals = state.scene.objects.filter((o) => ids.has(o.id));
   return commit(
     state,
-    { ...state.scene, objects: [...rest, ...placements, ...carried] },
+    { ...state.scene, objects: [...rest, ...inheritRunFields(placements, originals), ...carried] },
     { selectedId: placements[0]?.id ?? null, notice: null },
   );
+}
+
+/** Fields a reroute recomputes; everything else on the old run belongs to the user and must survive. */
+const ROUTE_OWNED_FIELDS = new Set(['id', 'object', 'x', 'y', 'toX', 'toY', 'rotation', 'onPipe', 'at', 'link']);
+/**
+ * Per-object data bags. Copying them onto every new segment would duplicate
+ * metadata planes and live bindings, so they are merged (in run order) onto
+ * the FIRST replacement of that kind instead.
+ */
+const ROUTE_IDENTITY_FIELDS = ['meta', 'metaHidden', 'bindings', 'extensions', 'animation'] as const;
+/** Assignment fields an elbow takes from the run's pipes when the old run had no elbow. */
+const ROUTE_SHARED_FIELDS = ['layer', 'group', 'opacity', 'z'] as const;
+
+/**
+ * Carry the old run's user fields onto its replacement (PR #114 review: a
+ * reroute used to drop `layer` / `group`, silently moving pipes back to the
+ * default layer and out of their groups). Each new pipe / elbow takes every
+ * non-route field of the first old placement of the same part (`band`,
+ * `params`, `layer`, `group`, `opacity`, `z`...); identity bags go to the
+ * first replacement only; elbows with no old elbow take the pipes' layer,
+ * group, opacity and z.
+ */
+export function inheritRunFields(replacements: readonly IsoPlacement[], originals: readonly IsoPlacement[]): IsoPlacement[] {
+  const template = (kind: string): Record<string, unknown> | null => {
+    const first = originals.find((o) => o.object === kind);
+    if (!first) return null;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(first)) {
+      if (!ROUTE_OWNED_FIELDS.has(k) && !(ROUTE_IDENTITY_FIELDS as readonly string[]).includes(k)) out[k] = structuredClone(v);
+    }
+    return out;
+  };
+  const pipeTemplate = template('pipe');
+  const templates = new Map<string, Record<string, unknown> | null>();
+  const templateFor = (kind: string) => {
+    if (!templates.has(kind)) {
+      let t = template(kind);
+      if (!t && pipeTemplate) {
+        t = {};
+        for (const k of ROUTE_SHARED_FIELDS) if (pipeTemplate[k] !== undefined) t[k] = pipeTemplate[k];
+      }
+      templates.set(kind, t);
+    }
+    return templates.get(kind) ?? null;
+  };
+  const seenKind = new Set<string>();
+  return replacements.map((r) => {
+    const t = templateFor(r.object);
+    const next: Record<string, unknown> = t ? { ...t, ...r } : { ...r };
+    // Values the router set (band from the run) win over the template except where it left them undefined.
+    for (const [k, v] of Object.entries(t ?? {})) if (next[k] === undefined) next[k] = v;
+    if (!seenKind.has(r.object)) {
+      seenKind.add(r.object);
+      for (const field of ROUTE_IDENTITY_FIELDS) {
+        const merged = originals.filter((o) => o.object === r.object && o[field] !== undefined).map((o) => o[field]);
+        if (merged.length === 0) continue;
+        next[field] = merged.every((m) => typeof m === 'object' && m !== null)
+          ? structuredClone(Object.assign({}, ...(merged as object[])))
+          : merged[merged.length - 1];
+      }
+    }
+    return next as unknown as IsoPlacement;
+  });
 }
 
 function updateSelected(state: EditorState, fn: (o: IsoPlacement) => IsoPlacement): EditorState {
@@ -538,11 +602,20 @@ function deleteSelection(state: EditorState): EditorState {
   return commit(state, { ...state.scene, objects }, selection([]));
 }
 
-function pasteInto(state: EditorState, clip: readonly IsoPlacement[]): EditorState {
-  if (clip.length === 0) return state;
+/** Shown when a paste skipped invalid clipboard records; the first reason is included. */
+export const PASTE_REJECTED_PREFIX = 'Paste rejected';
+
+function pasteInto(state: EditorState, clip: readonly unknown[]): EditorState {
+  if (!Array.isArray(clip) || clip.length === 0) return state;
   const layer = activeLayerOf(state);
-  const { objects, ids } = pasteObjects(state.scene, clip, state.registry, layer === DEFAULT_LAYER_ID ? {} : { layer });
-  return commit(state, { ...state.scene, objects }, { ...selection(ids), mode: 'select', placing: null, pipeStart: null, linkStart: null });
+  const { objects, ids, rejected } = pasteObjects(state.scene, clip, state.registry, layer === DEFAULT_LAYER_ID ? {} : { layer });
+  if (ids.length === 0) {
+    return { ...state, notice: `${PASTE_REJECTED_PREFIX}: ${rejected[0] ?? 'nothing to paste'}` };
+  }
+  const notice = rejected.length
+    ? `Pasted ${ids.length} of ${ids.length + rejected.length} parts; skipped: ${rejected[0]}`
+    : null;
+  return commit(state, { ...state.scene, objects }, { ...selection(ids), mode: 'select', placing: null, pipeStart: null, linkStart: null, notice });
 }
 
 /** Connector tool click: first click picks the start, the second draws the line and starts over. */
@@ -645,7 +718,15 @@ function numberParam(obj: IsoPlacement, param: string, fallback: unknown): numbe
 }
 
 export function editorReducer(state: EditorState, action: EditorAction): EditorState {
-  let next = reduce(state, action);
+  // Nothing may throw out of here: in ProcessEditor a throw inside useReducer
+  // unmounts the editor and loses unsaved history (PR #114 review). Any
+  // failure while reducing is reported like a rejected edit instead.
+  let next: EditorState;
+  try {
+    next = reduce(state, action);
+  } catch (error) {
+    return { ...state, notice: `Edit rejected: ${error instanceof Error ? error.message : String(error)}` };
+  }
   // Reject the whole edit, preserving scene, selection, history and revision.
   // Pointer previews only change one placement's geometry, never its id/type.
   // Validate that placement each frame; commits still validate the whole scene.

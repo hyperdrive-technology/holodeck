@@ -529,8 +529,12 @@ export function ProcessEditor({
           clipboardText.current = null;
         }, 0);
       }
-      // Copy / cut keep the browser default so the native clipboard event fires (onCopy writes the parts).
-      if (runShortcut(shortcut.id) && shortcut.id !== 'copy' && shortcut.id !== 'cut') event.preventDefault();
+      // Copy / cut / paste keep the browser default so the native clipboard
+      // event fires: onCopy writes the parts, onPaste reads parts copied in
+      // another tab. preventDefault on Mod+V suppressed the paste event, so a
+      // cross-tab paste did nothing or pasted stale editor contents (PR #114 review).
+      const native = shortcut.id === 'copy' || shortcut.id === 'cut' || shortcut.id === 'paste';
+      if (runShortcut(shortcut.id) && !native) event.preventDefault();
     };
     const onUp = (event: KeyboardEvent) => {
       if (event.code === 'Space') {

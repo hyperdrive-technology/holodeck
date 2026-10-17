@@ -287,6 +287,17 @@ describe('inspector (holodeck#92) and layers panel markup', () => {
     expect(mixed).not.toContain('params (all');
   });
 
+  it('multi view edits the primary (last clicked) part, not the last in scene order (PR #114 review)', () => {
+    const a = tank('a', 0, 0, { params: { level: 0.11 } });
+    const b = tank('b', 4, 0, { params: { level: 0.99 } });
+    // Scene order [a, b]; the user clicked b then shift-clicked a, so a is primary.
+    const html = render(
+      <InspectorPanel registry={registry} def={undefined} selected={a} selection={[a, b]} layers={sceneLayers({})} onParam={noop} onPatch={noop} onRotate={noop} onDelete={noop} onAction={noop} />,
+    );
+    expect(html).toContain('value="0.11"');
+    expect(html).not.toContain('value="0.99"');
+  });
+
   it('layers panel lists the default layer first with toggles and counts', () => {
     const scene = sceneOf([tank('a', 0, 0), tank('b', 4, 0, { layer: 'l' })], { layers: [{ id: 'l', name: 'Pipes', hidden: true }] });
     const html = renderToStaticMarkup(<LayersPanel scene={scene} activeLayer="l" hasSelection={false} onAction={noop} />);

@@ -290,17 +290,21 @@ const ALIGN_BUTTONS: ReadonlyArray<[AlignEdge, string, string]> = [
 function MultiInspector({
   registry,
   selection,
+  primary: primaryProp,
   layers,
   onAction,
 }: {
   registry: ContributionRegistry;
   selection: readonly IsoPlacement[];
+  /** The primary selection (last clicked): its values are shown, and `set-param` edits parts of its type. */
+  primary: IsoPlacement | undefined;
   layers: readonly IsoLayer[];
   onAction: (a: EditorAction) => void;
 }) {
   const kinds = new Set(selection.map((o) => o.object));
   const sameKind = kinds.size === 1 ? registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, selection[0]!.object) : undefined;
-  const primary = selection[selection.length - 1]!;
+  // `selection` is in scene order; the primary follows click order (PR #114 review).
+  const primary = primaryProp && selection.some((o) => o.id === primaryProp.id) ? primaryProp : selection[selection.length - 1]!;
   const layerIds = new Set(selection.map((o) => (o.layer && layers.some((l) => l.id === o.layer) ? o.layer : DEFAULT_LAYER_ID)));
   const opacities = new Set(selection.map((o) => o.opacity ?? 1));
   const grouped = selection.some((o) => o.group !== undefined);
@@ -405,7 +409,7 @@ export function InspectorPanel({
 }) {
   const panels = useIsoInspectorPanels(registry);
   if (selection && selection.length > 1 && onAction) {
-    return <MultiInspector registry={registry} selection={selection} layers={layers ?? []} onAction={onAction} />;
+    return <MultiInspector registry={registry} selection={selection} primary={selected} layers={layers ?? []} onAction={onAction} />;
   }
   if (!selected) {
     return (

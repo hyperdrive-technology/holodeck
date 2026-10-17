@@ -8,7 +8,7 @@
  * tying itself to the original's neighbours (or to ids that do not exist in
  * another document).
  *
- * PASTE (`pasteObjects`): fresh ids (`<part>-N`, like the palette), fresh
+ * PASTE (`pasteObjects`): every record validated first (`sanitizeClip`), then fresh ids (`<part>-N`, like the palette), fresh
  * group ids, internal references remapped (connector anchors, `onPipe`),
  * layers kept only when the target scene declares them, then the whole set is
  * offset by (k, k) for the smallest k >= 0 where no pasted placement lands on
@@ -20,7 +20,7 @@
  * holodeck#91 asked for "delete-cascade or detach", detach loses nothing).
  */
 import type { ContributionRegistry } from '@holodeck/sdk';
-import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
+import { validatePlacementGeometry, validatePlacementPart, type IsoPlacement, type IsoSceneFile } from '../iso/scene';
 import { resolveLinkEnd } from '../objects/connector';
 import type { IsoLink, IsoLinkEnd } from '../objects/validate';
 import { detachFrom, withAttachment } from '../routing/inline';
@@ -91,6 +91,40 @@ export interface PasteResult {
   objects: IsoPlacement[];
   /** Ids of the pasted placements, in clipboard order. */
   ids: string[];
+  /** One message per clipboard record that failed validation and was left out. */
+  rejected: string[];
+}
+
+/**
+ * Clipboard records are untrusted input (any page can put text with our
+ * format marker on the system clipboard), so they get the same checks as an
+ * import BEFORE any shaping: `validatePlacementGeometry` (structure, finite
+ * grid numbers, link / meta / layer / group shapes, params against the
+ * installed spec) and `validatePlacementPart` (the part is installed).
+ * Returns deep copies of the records that pass and a message for each that
+ * does not. Without this, `moveBy` / anchor remapping ran on raw records and a
+ * `link: { via: 5 }` threw a TypeError out of the reducer (PR #114 review).
+ */
+export function sanitizeClip(
+  clip: readonly unknown[],
+  registry: ContributionRegistry,
+): { valid: IsoPlacement[]; rejected: string[] } {
+  const valid: IsoPlacement[] = [];
+  const rejected: string[] = [];
+  clip.forEach((raw, i) => {
+    if (i >= MAX_CLIPBOARD_OBJECTS) {
+      if (i === MAX_CLIPBOARD_OBJECTS) rejected.push(`more than ${MAX_CLIPBOARD_OBJECTS} parts`);
+      return;
+    }
+    try {
+      const placement = validatePlacementGeometry(raw, registry);
+      validatePlacementPart(placement, registry);
+      valid.push(structuredClone(placement));
+    } catch (error) {
+      rejected.push(error instanceof Error ? error.message : String(error));
+    }
+  });
+  return { valid, rejected };
 }
 
 /**
@@ -100,11 +134,12 @@ export interface PasteResult {
  */
 export function pasteObjects(
   scene: Pick<IsoSceneFile, 'objects' | 'layers'>,
-  clip: readonly IsoPlacement[],
+  untrusted: readonly unknown[],
   registry: ContributionRegistry,
   opts: { layer?: string } = {},
 ): PasteResult {
-  if (clip.length === 0) return { objects: scene.objects, ids: [] };
+  const { valid: clip, rejected } = sanitizeClip(untrusted, registry);
+  if (clip.length === 0) return { objects: scene.objects, ids: [], rejected };
   const taken = new Set(scene.objects.map((o) => o.id));
   const idMap = new Map<string, string>();
   for (const o of clip) {
@@ -154,7 +189,7 @@ export function pasteObjects(
   const settled = fresh.map((o) =>
     o.onPipe === undefined && isInlinePart(o, registry) ? withAttachment(o, objects) : o,
   );
-  return { objects: [...scene.objects, ...settled], ids: settled.map((o) => o.id) };
+  return { objects: [...scene.objects, ...settled], ids: settled.map((o) => o.id), rejected };
 }
 
 function cascadeOffset(existing: readonly IsoPlacement[], clip: readonly IsoPlacement[]): number {
@@ -178,8 +213,8 @@ export function serializeClipboard(objects: readonly IsoPlacement[]): string {
 
 /**
  * Placements from system-clipboard text, or null when the text is not ours.
- * Only the envelope is checked here (records with string id / object); the
- * reducer validates geometry, params and installed parts on paste like any edit.
+ * Only the envelope is checked here (records with string id / object);
+ * `pasteObjects` validates every record like an import before touching it.
  */
 export function parseClipboard(text: string): IsoPlacement[] | null {
   if (!text || text.length > 50_000_000 || !text.includes(CLIPBOARD_FORMAT)) return null;

@@ -64,7 +64,8 @@ describe.skipIf(!CHROMIUM)('editing UX in the editor (E3)', () => {
       // Copy + paste: two new tanks, selected, one cell down-right.
       await page.keyboard.press('ControlOrMeta+c');
       await page.keyboard.press('ControlOrMeta+v');
-      await page.waitForFunction(() => document.querySelector('[data-testid="process-editor"]')?.getAttribute('data-object-count') === '6');
+      // window.__scene (host state) lands a render after the editor's own count: wait on it before reading it.
+      await page.waitForFunction(() => (window as unknown as { __scene: IsoSceneFile }).__scene.objects.length === 6);
       expect(await selected(page)).toBe('tank-1,tank-2');
       const pasted = (await sceneOf(page)).objects.filter((o) => o.id === 'tank-1' || o.id === 'tank-2');
       expect(pasted.map((o) => [o.x, o.y])).toEqual([[1, 1], [7, 1]]);
@@ -94,8 +95,39 @@ describe.skipIf(!CHROMIUM)('editing UX in the editor (E3)', () => {
       expect((await selected(page)).split(',').sort()).toEqual(['tank-a', 'tank-b', 'tank-c']);
       await settle(page);
       await page.screenshot({ path: path.join(shots, 'editing-multi-select.png'), type: 'png' });
-      expect((await sceneOf(page)).objects.filter((o) => o.group === 'group-1')).toHaveLength(3);
+      await page.waitForFunction(() => (window as unknown as { __scene: IsoSceneFile }).__scene.objects.filter((o) => o.group === 'group-1').length === 3);
       expect(log.filter((l) => l.startsWith('pageerror'))).toEqual([]);
+    } finally {
+      await browser.close();
+    }
+  }, 120_000);
+
+  it('Mod+V pastes parts copied in another tab from the system clipboard, not the stale editor clipboard (PR #114 review)', async () => {
+    const browser = await launchRenderBrowser();
+    const context = await browser.newContext({ viewport: { width: 1280, height: 760 } });
+    try {
+      // "Another tab": a second page in the same browser copies parts with the real keyboard.
+      const other = await context.newPage();
+      const otherToScreen = await openTopDown(other, 'scene=editing');
+      await clickCell(other, otherToScreen, 6, 6);
+      expect(await selected(other)).toBe('valve-a');
+      await other.keyboard.press('ControlOrMeta+c');
+
+      const page = await context.newPage();
+      const toScreen = await openTopDown(page, 'scene=editing');
+      // Fill this editor's own clipboard with a tank first: a stale internal paste would add a tank.
+      await clickCell(page, toScreen, 0, 0);
+      await page.keyboard.press('ControlOrMeta+c');
+      // Re-copy in the other tab so the system clipboard holds the valve.
+      await other.bringToFront();
+      await other.keyboard.press('ControlOrMeta+c');
+      await page.bringToFront();
+      await page.keyboard.press('Escape');
+      await page.keyboard.press('ControlOrMeta+v');
+      await page.waitForFunction(() => (window as unknown as { __scene: IsoSceneFile }).__scene.objects.length === 5);
+      const added = (await sceneOf(page)).objects.slice(4);
+      expect(added.map((o) => o.object)).toEqual(['valve']);
+      expect(await selected(page)).toBe(added[0]!.id);
     } finally {
       await browser.close();
     }
@@ -121,7 +153,8 @@ describe.skipIf(!CHROMIUM)('editing UX in the editor (E3)', () => {
       expect(await root.getAttribute('data-mode')).toBe('draw-connector');
       await clickCell(page, toScreen, 1, 0);
       await clickCell(page, toScreen, 12, 0);
-      await page.waitForFunction(() => document.querySelector('[data-testid="process-editor"]')?.getAttribute('data-object-count') === '5');
+      // window.__scene (host state) lands a render after the editor's own count: wait on it before reading it.
+      await page.waitForFunction(() => (window as unknown as { __scene: IsoSceneFile }).__scene.objects.length === 5);
       const connector = (await sceneOf(page)).objects.find((o) => o.object === 'connector')!;
       expect(connector.link?.from).toEqual({ object: 'tank-a', port: 'east' });
       expect(connector.link?.to && 'object' in connector.link.to ? connector.link.to.object : null).toBe('tank-c');
