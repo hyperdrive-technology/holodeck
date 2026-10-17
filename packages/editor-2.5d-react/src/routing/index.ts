@@ -9,6 +9,7 @@ export {
   GeometryRangeError,
   MAX_FOOTPRINT_CELLS,
   NON_OBSTACLE_PARTS,
+  isFloorPart,
 } from './occupancy';
 export { MAX_GRID_COORD } from './grid';
 export type { Occupancy, OccupancyOptions, Bounds } from './occupancy';

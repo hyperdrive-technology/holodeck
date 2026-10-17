@@ -28,6 +28,8 @@ cache, queue and load balancer), each with brand logos and colours.
 
 ## Parity matrix
 
+Scene object reference: [`packages/editor-2.5d-react/docs/objects.md`](../packages/editor-2.5d-react/docs/objects.md).
+
 Status: ✓ done · ◐ partial · ✗ missing · — out of scope (SaaS account features). Lane codes match the issues in the
 [M2](https://github.com/hyperdrive-technology/holodeck/milestone/2) and [M3](https://github.com/hyperdrive-technology/holodeck/milestones) milestones.
 
@@ -45,16 +47,16 @@ Status: ✓ done · ◐ partial · ✗ missing · — out of scope (SaaS account
 
 | Arcentry | Holodeck today | Status | Lane |
 |---|---|---|---|
-| Component: archetype model + brand logo + colours | GLB parts (`GlbPart`), no logo plane, needs code per part | ◐ | E2, A1 |
+| Component: archetype model + brand logo + colours | data-only parts (`model` + `logo` + `colors`, no code; `DataPart`), logo plane on the top face (`logo` empty contract) | ◐ | A1 (archetypes) |
 | Generic customisable components (block, cube, flat, billboard) | — | ✗ | A1 |
-| Line groups: polyline between objects or free anchors, colour, width, dash, arrow tips | pipes with A* manhattan routing (process-specific) | ◐ | E2 |
-| Line labels, animated flow along lines | flow animators exist for pipes | ◐ | E2 |
-| Areas: fill, outline, dash, shadow level, walled "VPN" area, label | `area` part (fill only) | ◐ | E2 |
-| Labels: font size, bold/italic, align, outline, rotation, flat or upright | `label` part (text only) | ◐ | E2 |
-| Icons (font icons on the floor, colour, size) | — | ✗ | E2 |
-| Images on the floor or a billboard | — | ✗ | E2 |
-| Metadata key/value shown under a component | `params` in inspector only | ✗ | E2 |
-| Opacity, z-index | — | ✗ | E2 |
+| Line groups: polyline between objects or free anchors, colour, width, dash, arrow tips | `connector` part: object / port / free anchors, waypoints, A* routing, colour, width, dash, tips | ✓ | — |
+| Line labels, animated flow along lines | connector `label` caption and `flow` dots | ✓ | — |
+| Areas: fill, outline, dash, shadow level, walled "VPN" area, label | `area` params: fill, outline, outline style, shadow 0..3, walled (label: a `label` part) | ✓ | — |
+| Labels: font size, bold/italic, align, outline, rotation, flat or upright | `label` params: bold, italic, align, outline, orient (+ `size`, `rotation`) | ✓ | — |
+| Icons (font icons on the floor, colour, size) | `icon` part: built-in set or any glyph, colour, size, flat / upright | ✓ | — |
+| Images on the floor or a billboard | `image` part: floor / billboard | ✓ | — |
+| Metadata key/value shown under a component | `meta` metadata plane on any placement (editing UI: S1) | ✓ | — |
+| Opacity, z-index | `opacity`, `z` on any placement | ✓ | — |
 
 ### Editing
 
@@ -77,7 +79,7 @@ Status: ✓ done · ◐ partial · ✗ missing · — out of scope (SaaS account
 | CloudWatch plugin: connect with a read-only IAM role, per-component metrics | — | ✗ | P1 |
 | Map component type → CloudWatch namespace | — | ✗ | A2, P1 |
 | Metrics plane on a component (current value) | — | ✗ | E2 (bindings → `format` label) |
-| Chart widget (time series) | — | ✗ | E2 (chart part) + P1 (`history`) |
+| Chart widget (time series) | — | ✗ | E2 follow-up (chart part) + P1 (`history`) |
 | Scale group: scale components by a metric | animators drive params; no generic scale | ◐ | E1 (`scale` transform) |
 | Alarm colouring | animators + `threshold`/`map` transforms (SDK) | ◐ | E1 |
 | API: external systems set object state | `holodeck.http` provider (`@holodeck/provider-http`): poll / SSE / WebSocket JSON, pointer or JSONPath-lite sources, HTTP writes | ◐ | S2 (embed API) |

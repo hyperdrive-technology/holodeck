@@ -2,12 +2,18 @@ import { useLoader } from '@react-three/fiber';
 import { useContext, useEffect, useLayoutEffect, useMemo } from 'react';
 import type { ColorRepresentation, Object3D, Vector3Tuple } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { applyHolodeckStyle } from './apply-style';
+import { applyHolodeckStyle, type ApplyStyleOverrides } from './apply-style';
 import { useHolodeckStyle } from './style-context';
 import type { HolodeckStyle } from './style';
 import { confirmAssetMounted, holdPendingAsset, RenderTrackerContext } from '../../src/iso/render-signal';
 
-function useTrackedGLTF(url: string) {
+/**
+ * `useLoader(GLTFLoader, url)` that holds IsoCanvas's rendered signal while
+ * the request is pending. Exported for parts that read the parsed scene
+ * themselves (DataPart's logo anchor); the loader cache is shared, so a
+ * second call for the same URL is a cache hit.
+ */
+export function useTrackedGLTF(url: string) {
   const tracker = useContext(RenderTrackerContext);
   try {
     return useLoader(GLTFLoader, url);
@@ -39,6 +45,8 @@ export function HolodeckModel({
   rotationY = 0,
   scale = 1,
   accent,
+  body,
+  edgeColor,
   style: styleProp,
   onReady,
 }: {
@@ -48,6 +56,10 @@ export function HolodeckModel({
   /** Uniform scale about the model origin (the base, for Blender parts). */
   scale?: number;
   accent?: ColorRepresentation;
+  /** `hd.white` body colour for this instance (data-only part colours). */
+  body?: ColorRepresentation;
+  /** Outline colour for this instance; default `style.colors.edge`. */
+  edgeColor?: ColorRepresentation;
   style?: HolodeckStyle;
   /** Called once the styled clone is mounted (e.g. to fit a camera to its bounds). */
   onReady?: (root: Object3D) => void;
@@ -62,8 +74,12 @@ export function HolodeckModel({
   // change would hit the idempotency flag before the old dispose ran.
   const { scene, dispose } = useMemo(() => {
     const clone = gltf.scene.clone(true);
-    return { scene: clone, dispose: applyHolodeckStyle(clone, style, accent === undefined ? {} : { accent }) };
-  }, [gltf, style, accent]);
+    const overrides: ApplyStyleOverrides = {};
+    if (accent !== undefined) overrides.accent = accent;
+    if (body !== undefined) overrides.body = body;
+    if (edgeColor !== undefined) overrides.edgeColor = edgeColor;
+    return { scene: clone, dispose: applyHolodeckStyle(clone, style, overrides) };
+  }, [gltf, style, accent, body, edgeColor]);
   useEffect(() => dispose, [dispose]);
   useEffect(() => onReady?.(scene), [scene, onReady]);
   return <primitive object={scene} position={position} rotation={[0, rotationY, 0]} scale={scale} />;

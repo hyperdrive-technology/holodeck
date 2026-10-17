@@ -17,7 +17,8 @@
  * ROTATION: `placement.rotation` is yaw radians; odd quarter turns (90/270)
  * swap w and h. Other angles round to the nearest quarter turn.
  *
- * NOT OBSTACLES: `area` and `label` are floor annotations.
+ * NOT OBSTACLES: floor annotations (`area`, `label`, `connector`, `icon`,
+ * `image`, and pack parts with `floor: true`; see `isFloorPart`).
  *
  * PIPES: every node on an existing run (x,y -> toX,toY) is blocked, ends
  * included, so a new pipe cannot overlap or cross one. The router lets a route
@@ -31,7 +32,15 @@ import { isRunPlacement } from '../registry/geometry';
 import { cellKey, MAX_CELL_COORD, MAX_GRID_COORD, quarterTurns, type GridPoint } from './grid';
 
 /** Floor annotations: drawn on the ground, pipes may run across them. */
-export const NON_OBSTACLE_PARTS: ReadonlySet<string> = new Set(['area', 'label']);
+export const NON_OBSTACLE_PARTS: ReadonlySet<string> = new Set(['area', 'label', 'connector', 'icon', 'image']);
+
+/**
+ * Floor annotations never block routing and have no footprint check: the
+ * built-ins above, plus any pack part that sets `floor: true`.
+ */
+export function isFloorPart(object: string, def: Pick<IsoPartDefinition, 'floor'> | undefined): boolean {
+  return NON_OBSTACLE_PARTS.has(object) || def?.floor === true;
+}
 
 export interface Bounds {
   minX: number;
@@ -201,10 +210,9 @@ export function buildOccupancy(
   };
 
   for (const obj of scene.objects) {
-    if (exclude?.has(obj.id) || NON_OBSTACLE_PARTS.has(obj.object)) {
-      continue;
-    }
+    if (exclude?.has(obj.id)) continue;
     const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, obj.object);
+    if (isFloorPart(obj.object, def)) continue;
     const isRun = isRunPlacement(obj, def);
     let cells: GridPoint[];
     try {

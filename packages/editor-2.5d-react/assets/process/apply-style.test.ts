@@ -118,6 +118,16 @@ describe('applyHolodeckStyle', () => {
     expect((overridden.material as MeshBasicNodeMaterial).color.getHexString()).toBe('00ff00');
   });
 
+  it('body override recolours hd.white only (data-only part colours)', () => {
+    const white = part('hd.white');
+    const vessel = part('hd.vessel');
+    const accent = part('hd.accent', '#c0392b');
+    applyHolodeckStyle(new Group().add(white, vessel, accent), HOLODECK_STYLE, { body: '#ff9900' });
+    expect((white.material as MeshBasicNodeMaterial).color.getHexString()).toBe('ff9900');
+    expect((accent.material as MeshBasicNodeMaterial).color.getHexString()).toBe('c0392b');
+    expect((vessel.material as MeshBasicNodeMaterial).userData.iso).toBeDefined();
+  });
+
   it('falls back to the accent token when the source has no colour', () => {
     const material = new MeshStandardMaterial();
     // Some exporters hand back materials without a Color (e.g. a custom shader).

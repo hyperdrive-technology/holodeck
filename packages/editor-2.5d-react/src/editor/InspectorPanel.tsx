@@ -73,6 +73,30 @@ export function ParamControl({
         </select>
       );
       break;
+    case 'color': {
+      // '' = the theme's colour. <input type=color> cannot show "unset", so a
+      // "theme" button clears it and the swatch shows the last explicit colour.
+      const hex = typeof value === 'string' ? value : '';
+      control = (
+        <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input
+            id={id}
+            type="color"
+            aria-label={`${spec.label} colour`}
+            // The colour input only takes #rrggbb.
+            value={/^#[0-9a-fA-F]{6}$/.test(hex) ? hex : '#000000'}
+            onChange={(event) => onChange(event.target.value)}
+          />
+          <span style={{ color: MUTED }}>{hex || 'theme'}</span>
+          {hex ? (
+            <button type="button" onClick={() => onChange('')} style={linkBtn}>
+              theme
+            </button>
+          ) : null}
+        </span>
+      );
+      break;
+    }
     case 'string':
       control = (
         <input id={id} value={String(value ?? '')} onChange={(event) => onChange(event.target.value)} style={fieldStyle} />

@@ -18,7 +18,17 @@ import { placementBindingProblems } from '../engine/bindings';
 import type { IsoPartDefinition } from '../registry/types';
 import { isRunPlacement } from '../registry/geometry';
 import { MAX_GRID_COORD } from '../routing/grid';
-import { footprintBounds, GeometryRangeError, NON_OBSTACLE_PARTS, rotatedFootprint } from '../routing/occupancy';
+import { footprintBounds, GeometryRangeError, isFloorPart, rotatedFootprint } from '../routing/occupancy';
+import {
+  appearanceProblems,
+  isGridNumber,
+  isRecord,
+  linkProblems,
+  metaProblems,
+  paramsProblems,
+  type IsoLink,
+  type IsoMetaValue,
+} from '../objects/validate';
 
 export { GRID_CELL_SIZE, gridToWorld, worldToGrid };
 
@@ -62,6 +72,26 @@ export interface IsoPlacement {
   bindings?: Record<string, SignalBinding>;
   /** Host bags keyed by extension id (e.g. tag bindings); opaque to the editor. */
   extensions?: Record<string, unknown>;
+  /**
+   * 0..1, default 1. Placements below 1 render as unique meshes with their own
+   * (cloned) materials, never through a shared instanced pool.
+   */
+  opacity?: number;
+  /**
+   * Draw order among overlapping objects: integer within +-1000, default 0.
+   * Higher draws later (on top) when depth ties, e.g. labels over areas, an
+   * area over another area. Applied as a three.js `renderOrder` offset.
+   */
+  z?: number;
+  /**
+   * Metadata plane: short key/value rows shown on the floor under the object
+   * (Arcentry's "metadata"). Max 32 rows; values are scalars.
+   */
+  meta?: Record<string, IsoMetaValue>;
+  /** Hide the metadata plane while keeping `meta` (default: shown when `meta` has rows). */
+  metaHidden?: boolean;
+  /** Connector anchors (`connector` part); see `IsoLink`. */
+  link?: IsoLink;
   /** Screen-space px on the frozen 760×540 snapshot (CSS translate). */
   nudgeX?: number;
   nudgeY?: number;
@@ -123,6 +153,13 @@ export function sceneBounds(
       minY = Math.min(minY, obj.y - obj.height / 2);
       maxY = Math.max(maxY, obj.y + obj.height / 2);
     }
+    const extent = def?.extent?.(obj);
+    if (extent) {
+      minX = Math.min(minX, extent.minX);
+      minY = Math.min(minY, extent.minY);
+      maxX = Math.max(maxX, extent.maxX);
+      maxY = Math.max(maxY, extent.maxY);
+    }
   }
   return { minX, minY, maxX, maxY };
 }
@@ -158,13 +195,6 @@ const OPTIONAL_GRID_FIELDS = ['toX', 'toY', 'width', 'height', 'size'] as const;
 /** Other numeric placement fields: only need to be finite when present. */
 const OPTIONAL_FINITE_FIELDS = ['rotation', 'nudgeX', 'nudgeY', 'screenX', 'screenY'] as const;
 
-function isGridNumber(v: unknown): v is number {
-  return typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= MAX_GRID_COORD;
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === 'object' && !Array.isArray(v);
-}
 
 /**
  * Validate a scene file. Every `object` must name a part installed in
@@ -225,13 +255,28 @@ export function validatePlacementGeometry(raw: unknown, registry: ContributionRe
       throw new Error(`placement ${raw.id}: ${bag} must be an object`);
     }
   }
+  if (raw.metaHidden !== undefined && typeof raw.metaHidden !== 'boolean') {
+    throw new Error(`placement ${raw.id}: metaHidden must be a boolean`);
+  }
   // A parsed scene can go straight to ProviderHub.setBindings, which throws on malformed bindings.
   const bindingProblems = placementBindingProblems(raw.id, raw.bindings);
   if (bindingProblems.length) throw new Error(bindingProblems.join('; '));
+  const objectProblems = [
+    ...appearanceProblems(raw.id, raw),
+    ...metaProblems(raw.id, raw.meta),
+    ...linkProblems(raw.id, raw.link),
+  ];
+  if (objectProblems.length) throw new Error(objectProblems.join('; '));
   const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, raw.object);
   const placement = def ? migrateLegacyPlacement(def, raw) : raw as unknown as IsoPlacement;
+  // Param values against the installed part's specs (finite, in range, enum
+  // member, hex colour...). Missing parts skip this: nothing to check against.
+  if (def && placement.params) {
+    const problems = paramsProblems(placement.id, def.params, placement.params);
+    if (problems.length) throw new Error(problems.join('; '));
+  }
   const isRun = isRunPlacement(placement, def);
-  if (!NON_OBSTACLE_PARTS.has(placement.object) && !isRun) {
+  if (!isFloorPart(placement.object, def) && !isRun) {
     try {
       const { w, h } = rotatedFootprint(def, placement.rotation, placement);
       footprintBounds(placement.x, placement.y, w, h);

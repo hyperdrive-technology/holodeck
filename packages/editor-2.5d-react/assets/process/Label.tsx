@@ -1,6 +1,6 @@
 import { Html } from '@react-three/drei';
 import { useFrame, useThree } from '@react-three/fiber';
-import { createContext, useContext, useEffect, useMemo, useRef } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import {
   CanvasTexture,
   LinearMipmapLinearFilter,
@@ -120,31 +120,69 @@ const FLOOR_TEXT_MAX_PX = 2048;
  * texture is rebuilt only when text or colour changes (a live value label
  * changes at the metrics tick, ~2 Hz).
  */
-function FloorText({
+/** Text styling shared by labels, connector captions and the metadata plane. Defaults = the original floor label. */
+export interface FloorTextStyle {
+  /** CSS font weight; default 600 (thin strokes vanish at 8 px). */
+  weight?: number;
+  italic?: boolean;
+  /** Halo drawn behind the glyphs (Arcentry "outline"); absent = none. */
+  outlineColor?: string;
+  /** Halo width as a fraction of the font size (default 0.12). */
+  outlineWidth?: number;
+  /** Panel behind the text (metadata plane). */
+  background?: { fill: string; stroke?: string };
+}
+
+/**
+ * Text lying flat on the floor, drawn into a canvas texture on a plane.
+ *
+ * Why not drei `<Text>` (troika)? Troika renders glyphs through an
+ * `onBeforeCompile` GLSL patch, which three's WebGPURenderer (what IsoCanvas
+ * uses) ignores: every label showed up as a solid square of the text colour.
+ * A canvas texture on a MeshBasicMaterial works on both renderers. The
+ * texture is rebuilt only when text or style changes (a live value label
+ * changes at the metrics tick, ~2 Hz).
+ *
+ * The plane lies in its local XY plane; callers rotate it onto the floor
+ * (-90 degrees about X) or stand it up. `anchorX` picks which edge of the
+ * text sits on the local origin.
+ */
+export function FloorText({
   children,
   fill,
   fontSize,
   anchorX = 'center',
   lineHeight,
   renderOrder = 8,
+  textStyle,
+  opacity = 1,
 }: {
   children: string;
   fill: string;
   /** World units (cap height ~ fontSize). */
   fontSize: number;
-  anchorX?: 'center' | 'right';
+  anchorX?: 'left' | 'center' | 'right';
   lineHeight: number;
   renderOrder?: number;
+  textStyle?: FloorTextStyle;
+  opacity?: number;
 }) {
+  const weight = textStyle?.weight ?? LABEL_FLOOR_FONT_WEIGHT;
+  const italic = textStyle?.italic ?? false;
+  const outlineColor = textStyle?.outlineColor;
+  const outlineWidth = textStyle?.outlineWidth ?? 0.12;
+  const bgFill = textStyle?.background?.fill;
+  const bgStroke = textStyle?.background?.stroke;
   const baked = useMemo(() => {
     if (typeof document === 'undefined') return null;
     const lines = children.split('\n');
     const fontPx = Math.max(8, Math.round(fontSize * FLOOR_TEXT_PX_PER_UNIT));
-    const font = `${LABEL_FLOOR_FONT_WEIGHT} ${fontPx}px ${LABEL_FONT_FAMILY}`;
+    const font = `${italic ? 'italic ' : ''}${weight} ${fontPx}px ${LABEL_FONT_FAMILY}`;
     const probe = document.createElement('canvas').getContext('2d');
     if (!probe) return null;
     probe.font = font;
-    const pad = Math.ceil(fontPx * 0.2);
+    const halo = outlineColor ? Math.max(1, outlineWidth * fontPx) : 0;
+    const pad = Math.ceil(fontPx * 0.2 + halo + (bgFill ? fontPx * 0.3 : 0));
     const textW = Math.max(1, ...lines.map((l) => probe.measureText(l).width));
     const lineH = fontPx * lineHeight;
     const w = Math.min(FLOOR_TEXT_MAX_PX, Math.ceil(textW + pad * 2));
@@ -153,24 +191,41 @@ function FloorText({
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext('2d')!;
+    if (bgFill) {
+      const inset = Math.ceil(fontPx * 0.06);
+      ctx.fillStyle = bgFill;
+      ctx.fillRect(inset, inset, w - inset * 2, h - inset * 2);
+      if (bgStroke) {
+        ctx.strokeStyle = bgStroke;
+        ctx.lineWidth = Math.max(1, fontPx * 0.06);
+        ctx.strokeRect(inset, inset, w - inset * 2, h - inset * 2);
+      }
+    }
     ctx.font = font;
-    ctx.fillStyle = fill;
     ctx.textBaseline = 'middle';
-    ctx.textAlign = anchorX === 'right' ? 'right' : 'center';
-    const x = anchorX === 'right' ? w - pad : w / 2;
+    ctx.textAlign = anchorX;
+    const x = anchorX === 'right' ? w - pad : anchorX === 'left' ? pad : w / 2;
+    if (outlineColor) {
+      ctx.strokeStyle = outlineColor;
+      ctx.lineWidth = halo * 2;
+      ctx.lineJoin = 'round';
+      lines.forEach((line, i) => ctx.strokeText(line, x, pad + lineH * (i + 0.5)));
+    }
+    ctx.fillStyle = fill;
     lines.forEach((line, i) => ctx.fillText(line, x, pad + lineH * (i + 0.5)));
     const texture = new CanvasTexture(canvas);
     texture.colorSpace = SRGBColorSpace;
     texture.minFilter = LinearMipmapLinearFilter;
     texture.anisotropy = 8;
     return { texture, width: w / FLOOR_TEXT_PX_PER_UNIT, height: h / FLOOR_TEXT_PX_PER_UNIT };
-  }, [children, fill, fontSize, anchorX, lineHeight]);
+  }, [children, fill, fontSize, anchorX, lineHeight, weight, italic, outlineColor, outlineWidth, bgFill, bgStroke]);
   useEffect(() => () => baked?.texture.dispose(), [baked]);
   if (!baked) return null;
+  const offsetX = anchorX === 'right' ? -baked.width / 2 : anchorX === 'left' ? baked.width / 2 : 0;
   return (
-    <mesh position={[anchorX === 'right' ? -baked.width / 2 : 0, 0, 0]} renderOrder={renderOrder}>
+    <mesh position={[offsetX, 0, 0]} renderOrder={renderOrder}>
       <planeGeometry args={[baked.width, baked.height]} />
-      <meshBasicMaterial map={baked.texture} transparent depthWrite={false} toneMapped={false} />
+      <meshBasicMaterial map={baked.texture} transparent opacity={opacity} depthWrite={false} toneMapped={false} />
     </mesh>
   );
 }
@@ -266,6 +321,31 @@ function SnapshotSlabText({
   );
 }
 
+/**
+ * Group whose yaw follows the camera so its local +Z faces the viewer (a
+ * Y-axis billboard). With the orthographic iso camera every object faces the
+ * same way, so the yaw is just the camera's viewing direction; Q/E view
+ * rotation keeps upright labels and billboard images readable.
+ */
+export function FaceCamera({ children, position }: { children: ReactNode; position?: Vector3Tuple }) {
+  const group = useRef<Group>(null);
+  const dir = useMemo(() => new Vector3(), []);
+  useFrame(({ camera }) => {
+    if (!group.current) return;
+    camera.getWorldDirection(dir);
+    const yaw = Math.atan2(-dir.x, -dir.z);
+    if (group.current.rotation.y !== yaw) group.current.rotation.y = yaw;
+  });
+  return (
+    <group ref={group} position={position}>
+      {children}
+    </group>
+  );
+}
+
+export type LabelAlign = 'auto' | 'left' | 'center' | 'right';
+export type LabelOrient = 'flat' | 'upright';
+
 export function Label({
   position,
   children,
@@ -278,6 +358,9 @@ export function Label({
   screenX,
   screenY,
   labelId,
+  textStyle,
+  align = 'auto',
+  orient = 'flat',
 }: {
   position: Vector3Tuple;
   rotationY?: number;
@@ -291,6 +374,12 @@ export function Label({
   screenX?: number;
   screenY?: number;
   labelId?: string;
+  /** Bold / italic / outline (label part params). Ignored by the pinned snapshot path. */
+  textStyle?: FloorTextStyle;
+  /** Which text edge sits on the label point; `auto` = centred (the original look). */
+  align?: LabelAlign;
+  /** `flat` on the floor (default) or `upright`, standing and facing the camera. */
+  orient?: LabelOrient;
 }) {
   const pin = useContext(SnapshotLabelLock);
   const fill = color === '#666666' ? '#4a4a4a' : color;
@@ -311,18 +400,26 @@ export function Label({
       </SnapshotSlabText>
     );
   }
+  const lineHeight = children.includes('\n') ? LABEL_TWO_LINE_HEIGHT : 1.15;
+  const anchorX = align === 'auto' ? 'center' : align;
+  const text = (
+    <FloorText fill={fill} fontSize={size * 0.9} lineHeight={lineHeight} anchorX={anchorX} textStyle={textStyle}>
+      {children}
+    </FloorText>
+  );
+  if (orient === 'upright') {
+    // Stand on the floor: lift by half the text block so the bottom line sits at the label point.
+    const lift = (children.split('\n').length * lineHeight * size * 0.9) / 2 + size * 0.2;
+    return (
+      <FaceCamera position={[position[0], lift, position[2]]}>
+        <group userData={{ labelId }}>{text}</group>
+      </FaceCamera>
+    );
+  }
   const yaw = labelYaw(rotationY, angleDeg);
   return (
     <group position={position} rotation={[0, yaw, 0]} userData={{ labelId }}>
-      <group rotation={[-Math.PI / 2, 0, 0]}>
-        <FloorText
-          fill={fill}
-          fontSize={size * 0.9}
-          lineHeight={children.includes('\n') ? LABEL_TWO_LINE_HEIGHT : 1.15}
-        >
-          {children}
-        </FloorText>
-      </group>
+      <group rotation={[-Math.PI / 2, 0, 0]}>{text}</group>
     </group>
   );
 }
