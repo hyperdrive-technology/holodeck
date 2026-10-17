@@ -21,7 +21,7 @@ cache, queue and load balancer), each with brand logos and colours.
 | `@holodeck/library-cloud` (`holodeck.cloud`) | 3D archetypes (Blender → GLB) + `arcentry-light` / `arcentry-dark` themes | M2 (new) |
 | `@holodeck/assets-aws` (`holodeck.aws`) | AWS services as data-only parts: archetype + AWS icon + colours | M2 (new) |
 | `@holodeck/provider-aws` (`holodeck.provider-aws`) | `aws.cloudwatch`: metrics, alarm states, history, resource discovery | M2 (new) |
-| `@holodeck/provider-http` (`holodeck.http`) | Generic JSON over HTTP polling / SSE / WebSocket; the "Arcentry API" equivalent | M2 (new) |
+| `@holodeck/provider-http` (`holodeck.http`) | Generic JSON over HTTP polling / SSE / WebSocket; the "Arcentry API" equivalent | M2 (P2) |
 | `apps/studio` | Holodeck Studio: documents, library, inspector, connections, export | M2 (new) |
 | `@holodeck/editor-2d-react` (`holodeck.flow`) | Flow engine on xyflow | M3 |
 | `@holodeck/library-logic` (`holodeck.logic`) | Generic blocks + `holodeck.flow.local` runtime provider | M3 (new) |
@@ -80,7 +80,7 @@ Status: ✓ done · ◐ partial · ✗ missing · — out of scope (SaaS account
 | Chart widget (time series) | — | ✗ | E2 (chart part) + P1 (`history`) |
 | Scale group: scale components by a metric | animators drive params; no generic scale | ◐ | E1 (`scale` transform) |
 | Alarm colouring | animators + `threshold`/`map` transforms (SDK) | ◐ | E1 |
-| API: external systems set object state | — | ✗ | P2 (`holodeck.http`) + S2 (embed API) |
+| API: external systems set object state | `holodeck.http` provider (`@holodeck/provider-http`): poll / SSE / WebSocket JSON, pointer or JSONPath-lite sources, HTTP writes | ◐ | S2 (embed API) |
 | Demo data without credentials | `holodeck.sim` provider (SDK) | ✓ | — |
 
 ### Documents, export, sharing

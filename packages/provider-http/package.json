@@ -1,0 +1,72 @@
+{
+  "name": "@holodeck/provider-http",
+  "version": "0.1.0",
+  "description": "holodeck.http: generic JSON-over-HTTP provider for Holodeck documents (polling, Server-Sent Events, WebSocket; JSON-pointer / JSONPath-lite sources; optional writes)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./holodeck-package": {
+      "types": "./dist/holodeck-package.d.ts",
+      "import": "./dist/holodeck-package.js"
+    },
+    "./holodeck.package.json": "./holodeck.package.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**/*",
+    "src/**/*",
+    "!src/**/*.test.ts",
+    "!src/test-support/**",
+    "holodeck.package.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "type-check": "tsc --noEmit",
+    "test": "vitest",
+    "prepublishOnly": "npm run build",
+    "smoke": "node ../../scripts/smoke-dist.mjs . && node --no-deprecation scripts/smoke-holodeck-package.mjs"
+  },
+  "keywords": [
+    "holodeck",
+    "provider",
+    "http",
+    "json",
+    "sse",
+    "websocket",
+    "polling"
+  ],
+  "author": "Hyperdrive Technology",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hyperdrive-technology/holodeck.git",
+    "directory": "packages/provider-http"
+  },
+  "homepage": "https://github.com/hyperdrive-technology/holodeck/tree/main/packages/provider-http#readme",
+  "dependencies": {
+    "@holodeck/sdk": "file:../../../holodeck-sdk/ts",
+    "eventsource-parser": "^3.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/ws": "^8.18.2",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0",
+    "ws": "^8.22.0"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

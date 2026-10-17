@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "holodeck.package.v1",
+  "id": "holodeck.http",
+  "name": "HTTP / JSON provider",
+  "description": "The holodeck.http provider: live object state from JSON over HTTP polling, Server-Sent Events or WebSocket, bound with JSON pointer or JSONPath-lite sources, with optional writes over HTTP. Contacts only the origin each connection names; build a restricted copy with createHttpProviderPackage({ origins }) to declare and enforce permissions.network.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "contributes": ["holodeck.provider"],
+  "providers": ["holodeck.http"],
+  "entry": "dist/holodeck-package.js",
+  "homepage": "https://github.com/hyperdrive-technology/holodeck/tree/main/packages/provider-http#readme",
+  "repository": "github:hyperdrive-technology/holodeck",
+  "keywords": ["provider", "http", "json", "sse", "websocket", "polling", "api"]
+}
