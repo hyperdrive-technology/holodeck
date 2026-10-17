@@ -1,3 +1,4 @@
+import { matchShortcut } from '@holodeck/editor-2.5d-react';
 import { parseHotkey } from '@tanstack/react-hotkeys';
 import { describe, expect, it } from 'vitest';
 import { CANVAS_SHORTCUTS, STUDIO_SHORTCUTS } from './shortcuts';
@@ -18,9 +19,27 @@ describe('shortcuts', () => {
     }
   });
 
-  it('never takes a chord the canvas uses', () => {
-    const canvas = new Set(CANVAS_SHORTCUTS.flatMap((c) => c.keys.split(' / ')).map((k) => k.toLowerCase()));
-    for (const { hotkey } of STUDIO_SHORTCUTS) expect(canvas.has(hotkey.toLowerCase())).toBe(false);
+  it('never takes a chord the canvas binds (checked with the engine matcher, Ctrl and Cmd)', () => {
+    expect(CANVAS_SHORTCUTS.length).toBeGreaterThan(5);
+    for (const { hotkey } of STUDIO_SHORTCUTS) {
+      const parsed = parseHotkey(hotkey);
+      const key = String(parsed.key ?? '');
+      for (const platformMod of ['ctrlKey', 'metaKey'] as const) {
+        const event = {
+          key: key.length === 1 ? key.toLowerCase() : key,
+          code: key.length === 1 && /[a-z]/i.test(key) ? `Key${key.toUpperCase()}` : key,
+          ctrlKey: platformMod === 'ctrlKey' && (parsed.ctrl || parsed.meta),
+          metaKey: platformMod === 'metaKey' && (parsed.ctrl || parsed.meta),
+          shiftKey: parsed.shift,
+          altKey: parsed.alt,
+        };
+        expect(matchShortcut(event), `${hotkey} (${platformMod})`).toBeNull();
+      }
+    }
+  });
+
+  it('the conflict check would catch a clash (sanity)', () => {
+    expect(matchShortcut({ key: 'z', code: 'KeyZ', ctrlKey: true, metaKey: false, shiftKey: false, altKey: false })?.id).toBe('undo');
   });
 
   it.each(['Mod+N', 'Mod+Shift+N', 'Mod+T', 'Mod+W', 'Mod+Alt+I'])('avoids browser-reserved %s', (reserved) => {

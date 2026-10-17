@@ -12,11 +12,11 @@ export function ShortcutsDialog() {
       <DialogContent aria-describedby="shortcuts-description">
         <DialogHeader>
           <DialogTitle>Keyboard shortcuts</DialogTitle>
-          <DialogDescription id="shortcuts-description">Studio commands, then the canvas tools.</DialogDescription>
+          <DialogDescription id="shortcuts-description">Studio commands, then the canvas (press ? on the canvas for its own help).</DialogDescription>
         </DialogHeader>
         <ShortcutTable rows={STUDIO_SHORTCUTS.map((s) => ({ keys: formatForDisplay(s.hotkey), label: s.label }))} />
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Canvas</h3>
-        <ShortcutTable rows={CANVAS_SHORTCUTS.map((s) => ({ keys: s.keys.includes('Mod') ? formatForDisplay(s.keys) : s.keys, label: s.label }))} />
+        <ShortcutTable rows={CANVAS_SHORTCUTS.map((s) => ({ keys: s.keys.join(' / '), label: s.label }))} />
       </DialogContent>
     </Dialog>
   );
