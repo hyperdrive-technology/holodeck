@@ -13,13 +13,20 @@ const assets = fileURLToPath(new URL('../assets/', import.meta.url));
 const EPS = 1e-4;
 const authoredName = (node: Object3D) => node.userData.name ?? node.name;
 
-it('keeps the catalogue, Blender scripts and shipped GLBs in sync', () => {
+it('keeps the catalogue and Blender scripts in sync', () => {
   const names = listParts().sort();
+  expect(names).toHaveLength(26);
+  expect(new Set(names).size).toBe(names.length);
   expect(readdirSync(PARTS_DIR).filter((name) => name.endsWith('.py') && !name.startsWith('_')).map((name) => name.slice(0, -3)).sort()).toEqual(names);
-  expect(readdirSync(join(assets, 'models')).filter((name) => name.endsWith('.glb')).map((name) => name.slice(0, -4)).sort()).toEqual(names);
+});
+
+it('ships a GLB for every catalogue entry', () => {
+  expect(readdirSync(join(assets, 'models')).filter((name) => name.endsWith('.glb')).map((name) => name.slice(0, -4)).sort()).toEqual(listParts().sort());
 });
 
 describe.each(CLOUD_PART_DEFINITIONS)('$id GLB', (part) => {
+  const billboard = part.id === 'cloud:billboard';
+  const faceNormal = new Vector3(0, billboard ? 0 : 1, billboard ? 1 : 0);
   let gltf: GLTF;
   let meshes: Mesh[];
   let bounds: Box3;
@@ -90,7 +97,7 @@ describe.each(CLOUD_PART_DEFINITIONS)('$id GLB', (part) => {
     expect(triangles).toBeLessThan(6000);
   });
 
-  it('has exactly one centered logo empty with a square X/Z scale', () => {
+  it('has exactly one centered logo empty with a square local X/Z scale and the authored face orientation', () => {
     const nodes: Object3D[] = [];
     gltf.scene.traverse((node) => { if (authoredName(node) === 'logo') nodes.push(node); });
     expect(nodes).toHaveLength(1);
@@ -100,26 +107,47 @@ describe.each(CLOUD_PART_DEFINITIONS)('$id GLB', (part) => {
     const position = logo.getWorldPosition(new Vector3());
     const scale = logo.getWorldScale(new Vector3());
     expect(position.x).toBeCloseTo(0, 4);
-    expect(position.z).toBeCloseTo(0, 4);
-    expect(position.y).toBeCloseTo(bounds.max.y, 4);
     expect(scale.x).toBeGreaterThan(0.2);
     expect(scale.z).toBeCloseTo(scale.x, 4);
     expect(scale.y).toBeCloseTo(1, 4);
+    const normal = new Vector3(0, 1, 0).transformDirection(logo.matrixWorld);
+    expect(normal.distanceTo(faceNormal)).toBeLessThan(EPS);
+    expect(new Vector3(1, 0, 0).transformDirection(logo.matrixWorld).distanceTo(new Vector3(1, 0, 0))).toBeLessThan(EPS);
+    if (billboard) {
+      // A fixed upright sign uses local +Y as its +Z-facing normal, keeping
+      // the same local X/Z size convention as the horizontal logo slots.
+      expect(position.y - scale.x / 2).toBeGreaterThan(bounds.min.y);
+      expect(position.y + scale.x / 2).toBeLessThan(bounds.max.y);
+      expect(position.z).toBeGreaterThan(0);
+      expect(position.z).toBeLessThanOrEqual(bounds.max.z + EPS);
+      // Image top is the empty's local -Z for every slot; upright it must point at the sky.
+      expect(new Vector3(0, 0, -1).transformDirection(logo.matrixWorld).distanceTo(new Vector3(0, 1, 0))).toBeLessThan(EPS);
+    } else {
+      expect(new Vector3(0, 0, -1).transformDirection(logo.matrixWorld).distanceTo(new Vector3(0, 0, -1))).toBeLessThan(EPS);
+      expect(position.z).toBeCloseTo(0, 4);
+      expect(position.y).toBeCloseTo(bounds.max.y, 4);
+    }
   });
 
-  it('supports the whole logo square on an unobstructed horizontal top face', () => {
+  it(`supports the whole logo square on an unobstructed ${billboard ? 'vertical front' : 'horizontal top'} face`, () => {
     expect(logo).toBeDefined();
     const center = logo.getWorldPosition(new Vector3());
-    const half = logo.getWorldScale(new Vector3()).x / 2;
     const ray = new Raycaster();
-    for (const dx of [-half, 0, half]) {
-      for (const dz of [-half, 0, half]) {
-        ray.set(new Vector3(center.x + dx, bounds.max.y + 1, center.z + dz), new Vector3(0, -1, 0));
+    const distance = bounds.getSize(new Vector3()).length() + 1;
+    for (const dx of [-0.5, 0, 0.5]) {
+      for (const dz of [-0.5, 0, 0.5]) {
+        const target = logo.localToWorld(new Vector3(dx, 0, dz));
+        ray.set(target.clone().addScaledVector(faceNormal, distance), faceNormal.clone().negate());
         const [hit] = ray.intersectObjects(meshes, false);
-        expect(hit, `top face under logo at ${dx}, ${dz}`).toBeDefined();
-        expect(hit.point.y).toBeCloseTo(center.y, 4);
+        expect(hit, `face beneath logo at local ${dx}, ${dz}`).toBeDefined();
+        expect(hit.point.distanceTo(target)).toBeLessThan(EPS);
         const normal = hit.face!.normal.clone().transformDirection(hit.object.matrixWorld);
-        expect(normal.y).toBeCloseTo(1, 4);
+        expect(normal.distanceTo(faceNormal)).toBeLessThan(EPS);
+        if (billboard && dx === 0 && dz === 0) {
+          const faceCenter = new Box3().setFromObject(hit.object, true).getCenter(new Vector3());
+          expect(center.x).toBeCloseTo(faceCenter.x, 4);
+          expect(center.y).toBeCloseTo(faceCenter.y, 4);
+        }
       }
     }
   });

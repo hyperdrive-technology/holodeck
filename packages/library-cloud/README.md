@@ -1,6 +1,6 @@
 # @holodeck/library-cloud
 
-`holodeck.cloud` provides thirteen vendor-neutral cloud archetypes and two
+`holodeck.cloud` provides twenty-six vendor-neutral cloud archetypes and two
 `holodeck.iso.theme` contributions, `arcentry-light` and `arcentry-dark`.
 ESM only, Node 26+, with the SDK as its only runtime dependency. Part definitions
 are data-only: the E2 editor supplies the model, logo and colour renderer.
@@ -20,6 +20,19 @@ are data-only: the E2 editor supplies the model, logo and colour renderer.
 | `cloud:generic-block` | Wide rounded block |
 | `cloud:generic-cube` | Rounded cube |
 | `cloud:generic-flat` | Thin rounded tile |
+| `cloud:broker` | Octagonal hub with four satellite nodes |
+| `cloud:cdn` | Faceted globe with edge nodes on a ring |
+| `cloud:registry` | Open shelves of banded package crates |
+| `cloud:disk` | Single platter with a read arm |
+| `cloud:warehouse` | Low hall with a clerestory roof and roller door |
+| `cloud:stream` | Chevron channels around a raised island |
+| `cloud:firewall` | Staggered brick wall with a broad cap |
+| `cloud:vault` | Safe with a spoked locking wheel |
+| `cloud:identity` | Upright badge with a portrait |
+| `cloud:monitoring` | Console with a bold signal trace |
+| `cloud:mobile` | Upright handset on a dock |
+| `cloud:pc` | Monitor on a stand with a keyboard |
+| `cloud:billboard` | Upright sign with a front-facing logo (see below) |
 
 ## Install into a host
 
@@ -54,10 +67,12 @@ Other packs can clone one, assign their own ID, replace `logo.url`, and set
 `colors.body`, `colors.accent` and `colors.edge`. The built-in cloud symbol is an
 original, vendor-neutral SVG covered by this package's MIT licence.
 
-All parts have a 2×2 routing footprint, `floor: false`, `instanced: false`, and
-empty `params`. No React `component` or instanced renderer is needed. The muted
-blue accent is the default; body and edge colours inherit the selected theme.
-A placement's `color` overrides the part accent, as specified by E2.
+All parts have a 2×2 routing footprint, `instanced: false`, and empty `params`.
+Every part is a routing obstacle (`floor: false`) except `cloud:billboard`, which
+is `floor: true` like E2's own billboard-mode `image`: a sign annotates a diagram
+and never blocks a route. No React `component` or instanced renderer is needed.
+The muted blue accent is the default; body and edge colours inherit the selected
+theme. A placement's `color` overrides the part accent, as specified by E2.
 
 Every model uses Y-up coordinates, rests at Y=0, and is centered in X/Z.
 Only `hd.white` and `hd.accent` materials are used. One empty named `logo` marks
@@ -66,13 +81,21 @@ square logo size. Omit `logo.size` to use it. The renderer applies the small dep
 offset and letterboxes the image. See the [E2 object contract](../editor-2.5d-react/docs/objects.md)
 and [Blender contract](../../blender/README.md).
 
+**Billboard contract difference.** `cloud:billboard` is the one archetype whose
+`logo` empty is not on the top face: it is centered on the sign's front (+Z) face,
+rotated so the empty's local +Y is the face normal (local −Z is the image top).
+Its local X/Z scale is still the square edge. E2's `logoAnchorFromModel` reads
+only the empty's position and scale and lays every logo flat, so until E2 honours
+the empty's orientation (holodeck#138) the billboard logo renders horizontally inside the panel.
+The GLB tests pin the authored orientation so the E2 change has a fixed target.
+
 ## Build and verify
 
 Run from `packages/library-cloud` with Node 26 and pnpm 10.33.2. Build the sibling
 `holodeck-sdk/ts` first, then install with `pnpm install --frozen-lockfile`.
 
 ```sh
-pnpm parts:build                     # all 13 scripts -> assets/models/*.glb
+pnpm parts:build                     # all 26 scripts -> assets/models/*.glb
 pnpm parts:build server database     # selected archetypes
 pnpm parts:preview                   # also render /tmp/a1-previews/<name>.png
 node scripts/build-parts.mjs --out-dir /tmp/cloud-models --preview-dir /tmp/cloud-previews
@@ -89,7 +112,8 @@ The shared `run_part` exports before adding the preview camera. Previews use
 Workbench lighting; runtime materials and the logo overlay are applied by E2.
 
 Tests load every GLB with Three.js, check materials, finite geometry, triangle
-budgets, ground/footprint bounds, and raycast the logo square onto the top face.
+budgets, ground/footprint bounds, and raycast the logo square onto its face (the
+top face, or the billboard's front face).
 They validate manifest installation and themes against SDK and E2 contracts.
 If Blender is installed, all scripts are rebuilt to temporary files and compared
 byte-for-byte with the assets. CI tests the checked-in GLBs without requiring
