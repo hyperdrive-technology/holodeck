@@ -162,3 +162,6 @@ export type { GridPoint, Heading } from './routing';
 // Engine contract (@holodeck/sdk docs/PACKAGING.md): descriptor, document envelope, live values, package entry.
 export * from './engine';
 export { ISO_PACKAGE_MANIFEST, createIsoPackageExtension, isoPackage } from './holodeck-package';
+
+// Export: tiled hi-res PNG (ProcessEditorHandle.exportImage), components CSV (holodeck#42).
+export * from './export';
