@@ -12,6 +12,7 @@ import { clampZoom, WHEEL_ZOOM_STEP } from '../iso/pan';
 import { renderState, useRevision } from '../iso/render-signal';
 import { useWebGPUSupport } from '../iso/use-webgpu';
 import { fitView, sceneWorldBox } from './fit';
+import { armedPart, hostPlacingAction } from './placing-sync';
 import {
   committedScene,
   createEditorState,
@@ -427,44 +428,34 @@ export function ProcessEditor({
   }, [state.selectedIds]);
 
   // placing prop -> place tool; editor -> onPlacingChange / onPlaced (holodeck#100).
+  // The rules (run parts arm draw-pipe with `placing: null`, echoes are not
+  // disarms) live in placing-sync.ts (holodeck#133, review of #140).
+  const isRun = useCallback(
+    (id: string) => registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, id)?.draw === 'run',
+    [registry],
+  );
   const placingPropRef = useRef(placing);
   placingPropRef.current = placing;
-  // The last non-null `placing` the host armed: a run part (pipe) arms
-  // draw-pipe, whose editor state keeps `placing: null`, so `null` from the
-  // host must still leave that mode (holodeck#133).
-  const hostArmed = useRef<string | null>(null);
+  /** The host value the last effect run saw; undefined at mount so an initial `placing` arms. */
+  const prevHostPlacing = useRef<string | null | undefined>(undefined);
   useEffect(() => {
-    if (placing === undefined) return;
-    const armedBefore = hostArmed.current;
-    hostArmed.current = placing;
-    const s = stateRef.current;
-    if (placing === null) {
-      const armedRun = armedBefore !== null && s.mode === 'draw-pipe';
-      if (s.placing !== null || armedRun) dispatch({ type: 'select-mode' });
-      return;
-    }
-    if (placing === s.placing) return;
-    dispatch({ type: 'place-mode', object: placing });
+    const prev = prevHostPlacing.current;
+    prevHostPlacing.current = placing;
+    const action = hostPlacingAction(prev, placing, stateRef.current, isRun);
+    if (action) dispatch(action);
+    // isRun is read at the moment of the change; a registry swap alone arms nothing.
   }, [placing]);
   const onPlacingChangeRef = useRef(onPlacingChange);
   onPlacingChangeRef.current = onPlacingChange;
-  const prevPlacing = useRef(state.placing);
+  const reportedArmed = useRef<string | null>(armedPart(state, placing, isRun));
   useEffect(() => {
-    if (state.placing === prevPlacing.current) return;
-    prevPlacing.current = state.placing;
-    if (state.placing !== placingPropRef.current) onPlacingChangeRef.current?.(state.placing);
-  }, [state.placing]);
-  // A host-armed run part (draw-pipe, `placing` stays null) left inside the
-  // editor (Escape, another tool): tell the host it is disarmed (holodeck#133).
-  const prevMode = useRef(state.mode);
-  useEffect(() => {
-    const was = prevMode.current;
-    prevMode.current = state.mode;
-    if (was !== 'draw-pipe' || state.mode === 'draw-pipe' || state.placing !== null) return;
-    if (hostArmed.current === null || !placingPropRef.current) return;
-    hostArmed.current = null;
-    onPlacingChangeRef.current?.(null);
-  }, [state.mode, state.placing]);
+    const host = placingPropRef.current;
+    const armed = armedPart(state, host, isRun);
+    if (armed === reportedArmed.current) return;
+    reportedArmed.current = armed;
+    // Report only what the host does not already hold (no echo of its own value).
+    if (armed !== (host ?? null)) onPlacingChangeRef.current?.(armed);
+  }, [state.placing, state.mode, isRun]);
   const onPlacedRef = useRef(onPlaced);
   onPlacedRef.current = onPlaced;
   useEffect(() => {

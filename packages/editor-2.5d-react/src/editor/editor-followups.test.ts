@@ -22,6 +22,7 @@ import {
 } from '../objects/image-aspect';
 import { canInsertWaypoint, insertWaypoint, moveWaypoint, removeWaypoint, waypointInsertHandles } from './connect';
 import { MAX_LINK_VIA } from '../objects/validate';
+import { armedPart, hostPlacingAction, type PlacingToolState } from './placing-sync';
 import { MAX_NOTICE_LENGTH, createEditorState, editorReducer, emptyScene, type EditorAction, type EditorState } from './editor-state';
 import { MAX_CLIPBOARD_OBJECTS } from './clipboard';
 import { fitView, sceneWorldBox } from './fit';
@@ -233,6 +234,47 @@ describe('#132 image aspect eviction', () => {
     b();
     expect(imageAspectUsers('shared-132.png')).toBe(0);
     expect(retainImageAspect('')).toBeTypeOf('function');
+  });
+});
+
+// holodeck#133 + review of #140: host `placing` <-> editor tool, with run
+// parts (pipe) that arm draw-pipe and keep `state.placing: null`.
+describe('#133 placing sync', () => {
+  const isRun = (id: string) => id === 'pipe';
+  const select: PlacingToolState = { mode: 'select', placing: null };
+  const placingTank: PlacingToolState = { mode: 'place', placing: 'tank' };
+  const drawPipe: PlacingToolState = { mode: 'draw-pipe', placing: null };
+
+  it('reports a host-armed pipe as still armed in draw-pipe (no null echo)', () => {
+    // Tank -> Pipe: the editor leaves place('tank') for draw-pipe; the host holds 'pipe'.
+    expect(armedPart(drawPipe, 'pipe', isRun)).toBe('pipe');
+    expect(armedPart(placingTank, 'pipe', isRun)).toBe('tank');
+    // A draw-pipe the user picked inside the editor is not a host arm.
+    expect(armedPart(drawPipe, null, isRun)).toBeNull();
+    expect(armedPart(drawPipe, 'tank', isRun)).toBeNull();
+    expect(armedPart(select, 'pipe', isRun)).toBeNull();
+  });
+
+  it('Tank -> Pipe enters draw-pipe; Pipe -> null (clicked again) leaves it', () => {
+    expect(hostPlacingAction(undefined, 'tank', select, isRun)).toEqual({ type: 'place-mode', object: 'tank' });
+    expect(hostPlacingAction('tank', 'pipe', placingTank, isRun)).toEqual({ type: 'place-mode', object: 'pipe' });
+    // Repeating the host value while the pipe tool is up is a no-op (does not reset a pipe in progress).
+    expect(hostPlacingAction('pipe', 'pipe', drawPipe, isRun)).toBeNull();
+    expect(hostPlacingAction('pipe', null, drawPipe, isRun)).toEqual({ type: 'select-mode' });
+  });
+
+  it('a host null after an editor-picked pipe tool or a non-run arm does not cancel draw-pipe', () => {
+    // Host had Tank armed, the user chose the pipe tool in the editor, the host hears null.
+    expect(hostPlacingAction('tank', null, drawPipe, isRun)).toBeNull();
+    expect(hostPlacingAction(null, null, drawPipe, isRun)).toBeNull();
+    expect(hostPlacingAction(undefined, null, drawPipe, isRun)).toBeNull();
+  });
+
+  it('null leaves the place tool; undefined (uncontrolled) never acts; same part is a no-op', () => {
+    expect(hostPlacingAction('tank', null, placingTank, isRun)).toEqual({ type: 'select-mode' });
+    expect(hostPlacingAction('tank', 'tank', placingTank, isRun)).toBeNull();
+    expect(hostPlacingAction('tank', undefined, placingTank, isRun)).toBeNull();
+    expect(hostPlacingAction(null, null, select, isRun)).toBeNull();
   });
 });
 

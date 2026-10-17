@@ -305,8 +305,15 @@ describe.skipIf(!CHROMIUM)('editing UX in the editor (E3)', () => {
       // leave it, or later canvas clicks keep drawing pipes.
       const mode = () => root.getAttribute('data-mode');
       const setPlacing = (id: string | null) => page.evaluate((v) => (window as unknown as { __setPlacing: (id: string | null) => void }).__setPlacing(v), id);
+      // Review of #140: Tank armed, then Pipe without placing the tank. Entering
+      // draw-pipe must not echo null to the host (whose echo then cancelled the pipe tool).
+      await setPlacing('tank');
+      await page.waitForFunction(() => document.querySelector('[data-testid="process-editor"]')?.getAttribute('data-mode') === 'place');
       await setPlacing('pipe');
       await page.waitForFunction(() => document.querySelector('[data-testid="process-editor"]')?.getAttribute('data-mode') === 'draw-pipe');
+      await animationFrames(page, 10);
+      expect(await mode(), 'Tank -> Pipe stays in the pipe tool').toBe('draw-pipe');
+      expect(await page.evaluate(() => (window as unknown as { __placing: string | null }).__placing)).toBe('pipe');
       await setPlacing(null);
       await page.waitForFunction(() => document.querySelector('[data-testid="process-editor"]')?.getAttribute('data-mode') === 'select');
       expect(await mode()).toBe('select');
