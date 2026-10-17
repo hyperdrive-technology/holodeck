@@ -77,7 +77,7 @@ describe.skipIf(!CHROMIUM)('Arcentry-parity objects in a real canvas', () => {
       expect(await countUserData(page, 'hdAreaWalls')).toBe(1);
       expect(await countUserData(page, 'hdAreaShadow')).toBe(1);
       expect(await countUserData(page, 'hdIcon')).toBe(2);
-      expect(await countUserData(page, 'hdMeta')).toBe(1);
+      expect(await countUserData(page, 'hdMeta')).toBe(2); // web block + the pooled-part valve (holodeck#95)
       await page.waitForFunction(() => {
         let n = 0;
         (window as any).__objects.scene.traverse((o: any) => {
@@ -109,6 +109,9 @@ describe.skipIf(!CHROMIUM)('Arcentry-parity objects in a real canvas', () => {
 
       // The broken image warns once and draws nothing; nothing else errors.
       await page.waitForFunction(() => (window as any).__objects.warnings.some((w: string) => w.includes('does-not-exist.png')));
+      // holodeck#96: a host-set URL with a disguised scheme is refused at the texture choke point, never requested.
+      await page.waitForFunction(() => (window as any).__objects.warnings.some((w: string) => w.includes('refusing image URL')));
+      expect(logs.filter((l) => l.startsWith('failed:') && l.includes('javascript')), logs.join('\n')).toEqual([]);
       expect(logs.filter((l) => l.startsWith('pageerror'))).toEqual([]);
 
       await animationFrames(page, 4);

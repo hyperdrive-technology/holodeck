@@ -1,6 +1,7 @@
 import { Component, useContext, useLayoutEffect, type ReactNode } from 'react';
 import { SRGBColorSpace, TextureLoader, type Texture } from 'three';
 import { confirmAssetMounted, holdPendingAsset, RenderTrackerContext } from '../iso/render-signal';
+import { assetUrlProblem } from './validate';
 
 type TextureEntry =
   | { status: 'pending'; promise: Promise<void> }
@@ -67,6 +68,17 @@ export function useTrackedTexture(url: string): Texture | null {
   useLayoutEffect(() => {
     if (tracker) confirmAssetMounted(tracker, `texture:${url}`);
   }, [tracker, url]);
+  // One choke point for every image URL, including ones that never went
+  // through parseSceneFile (inspector edits, host metrics, pack definitions
+  // built in code): a disallowed URL is never fetched (holodeck#96).
+  const problem = assetUrlProblem(url);
+  if (problem) {
+    if (!warnedUrls.has(url)) {
+      warnedUrls.add(url);
+      console.warn(`holodeck: refusing image URL ${JSON.stringify(url.slice(0, 200))}: ${problem}`);
+    }
+    return null;
+  }
   const entry = textureEntry(url);
   if (entry.status === 'pending') {
     if (tracker) holdPendingAsset(tracker, entry.promise, `texture:${url}`);

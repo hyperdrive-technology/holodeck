@@ -6,7 +6,7 @@ import { useIsoRegistry } from '../registry/react';
 import type { IsoPlacement } from './scene';
 import { DataPart } from '../registry/DataPart';
 import { Appearance } from '../objects/AppearanceGroup';
-import { needsAppearance } from '../objects/appearance';
+import { hasVisibleMeta, needsAppearance } from '../objects/appearance';
 import { MetaPlane } from '../objects/Marks';
 import { rotatedFootprint } from '../routing/occupancy';
 import { gridToWorld } from './grid';
@@ -64,7 +64,7 @@ export function SceneObjectView({
       tuning={{ tankParams, fittings, bendKeys, pipeRuns, connectorPaths }}
     />
   );
-  const meta = object.meta && !object.metaHidden && Object.keys(object.meta).length > 0 ? object.meta : null;
+  const meta = hasVisibleMeta(object) ? object.meta! : null;
   let metaPlane = null;
   if (meta) {
     const [wx, , wz] = gridToWorld(object.x, object.y);

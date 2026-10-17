@@ -6,6 +6,7 @@
 export {
   appearanceProblems,
   assetUrlProblem,
+  normalizeUrlForScheme,
   isHexColor,
   linkProblems,
   metaProblems,
@@ -35,7 +36,7 @@ export { BUILTIN_ICONS, BUILTIN_ICON_NAMES, drawIcon, MAX_GLYPH_LENGTH } from '.
 export type { BuiltinIconName, IconShape } from './icons';
 export { logoAnchorFromModel, logoAnchorForBlock, LOGO_NODE_NAME } from './logo';
 export type { LogoAnchor } from './logo';
-export { applyAppearance, AppearanceState, needsAppearance, Z_RENDER_STEP } from './appearance';
+export { applyAppearance, AppearanceState, hasVisibleMeta, needsAppearance, needsUniqueRender, Z_RENDER_STEP } from './appearance';
 export { Appearance } from './AppearanceGroup';
 export { Connector, connectorLook } from './ConnectorLine';
 export type { ConnectorLook } from './ConnectorLine';

@@ -21,10 +21,13 @@ limits. `src/objects/scene-schema.test.ts` keeps the two in step.
 | `meta` | Metadata plane: `key: value` rows on the floor in front of the object. | ≤ 32 rows, key 1..64 chars, value string ≤ 256 / finite number / boolean |
 | `metaHidden` | Keep `meta` but hide the plane. | boolean |
 | `link` | Connector anchors (see below). | `via` ≤ 64 points |
-| `params` | Checked against the part's param specs: numbers finite and within `min`/`max`, enums one of `options`, `color` params hex or `''`, strings ≤ 4096 chars (`maxLength`), `format: 'url'` params an allowed URL. Undeclared params must be finite JSON. | |
+| `params` | Checked against the part's param specs: numbers finite and within `min`/`max` (reading params such as label `value` also take a boolean or a string state), enums one of `options`, `color` params hex or `''`, strings ≤ 4096 chars (`maxLength`), `format: 'url'` params an allowed URL. Undeclared params must be finite JSON. | |
 
 Asset URLs (logos, images) may be relative paths, `http(s):`, `blob:` or `data:image/…`; any other
-scheme (`javascript:`, `file:` …) is rejected. A URL that fails to load draws nothing and warns once.
+scheme (`javascript:`, `file:` …) is rejected, after stripping what browsers strip before the scheme
+(leading / trailing control characters and spaces, tab / LF / CR anywhere). The same check runs again
+when an image loads, so URLs set by the inspector or a host's live values are covered too.
+Placements with a visible `meta` plane render as unique meshes even for pooled parts (valve, pipe …). A URL that fails to load draws nothing and warns once.
 
 ## Data-only parts
 

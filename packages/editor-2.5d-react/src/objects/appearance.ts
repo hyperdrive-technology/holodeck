@@ -117,6 +117,20 @@ export function applyAppearance(root: Object3D, opacity: number, z: number, stat
   return cloned;
 }
 
+/** True when a placement shows a metadata plane (`meta` rows and not `metaHidden`). */
+export function hasVisibleMeta(placement: { meta?: Record<string, unknown>; metaHidden?: boolean }): boolean {
+  return !!placement.meta && !placement.metaHidden && Object.keys(placement.meta).length > 0;
+}
+
+/**
+ * True when a placement must render as a unique mesh rather than through an
+ * instanced pool: per-placement materials / renderOrder (opacity, z) or a
+ * metadata plane, which only SceneObjectView draws (holodeck#95).
+ */
+export function needsUniqueRender(placement: { opacity?: number; z?: number; meta?: Record<string, unknown>; metaHidden?: boolean }): boolean {
+  return needsAppearance(placement) || hasVisibleMeta(placement);
+}
+
 /** True when a placement needs the Appearance wrapper (and so cannot be pooled). */
 export function needsAppearance(placement: { opacity?: number; z?: number }): boolean {
   return (placement.opacity !== undefined && placement.opacity < 1) || (placement.z !== undefined && placement.z !== 0);

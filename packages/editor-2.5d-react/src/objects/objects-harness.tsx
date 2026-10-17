@@ -111,8 +111,18 @@ const OBJECTS_SCENE: IsoSceneFile = {
     { id: 'img-floor', object: 'image', x: -2, y: -3, params: { src: IMAGE, width: 3 } },
     { id: 'img-board', object: 'image', x: 2, y: 9, params: { src: IMAGE, mode: 'billboard', width: 2 } },
     { id: 'img-broken', object: 'image', x: 4, y: 12, params: { src: '/does-not-exist.png', width: 2 } },
+    // holodeck#95: a pooled (instanced) part with metadata still shows its plane.
+    { id: 'valve-meta', object: 'valve', x: 16, y: 6, meta: { tag: 'XV-101' } },
+    // holodeck#96: the host sets a disguised javascript: URL through metrics (never parsed): refused, not fetched.
+    { id: 'img-host', object: 'image', x: 8, y: 12, params: { width: 2 } },
     { id: 'probe', object: 'test:probe', x: 20, y: 12 },
   ],
 };
 
-createRoot(document.getElementById('root')!).render(<ProcessEditor scene={OBJECTS_SCENE} mode="run" registry={registry} onChange={() => {}} />);
+createRoot(document.getElementById('root')!).render(<ProcessEditor
+    scene={OBJECTS_SCENE}
+    mode="run"
+    registry={registry}
+    onChange={() => {}}
+    metrics={{ 'img-host': { src: ' javascript:alert(1)' } }}
+  />);
