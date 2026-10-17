@@ -28,6 +28,7 @@ import {
   type RequestDeps,
 } from './http';
 import { errorMessage, safeUrl } from './redact';
+import { SseIdTracker } from './sse-id';
 
 export type ChannelState = 'connecting' | 'live' | 'stale' | 'error';
 
@@ -184,7 +185,7 @@ export class PollChannel extends RetryingChannel {
 }
 
 export class SseChannel extends RetryingChannel {
-  private lastEventId: string | undefined;
+  private readonly ids = new SseIdTracker();
   private serverRetryMs: number | undefined;
 
   protected async attempt(): Promise<void> {
@@ -193,7 +194,7 @@ export class SseChannel extends RetryingChannel {
     let error: unknown = new HttpProviderError('event stream ended', 'closed');
     try {
       const headers: Record<string, string> = { accept: 'text/event-stream', 'cache-control': 'no-cache' };
-      if (this.lastEventId !== undefined) headers['last-event-id'] = this.lastEventId;
+      if (this.ids.lastEventId !== '') headers['last-event-id'] = this.ids.lastEventId;
       const { response, signal, done } = await request(deps, this.url, { headers, headersOnlyTimeout: true });
       try {
         assertOk(response, this.url);
@@ -220,7 +221,7 @@ export class SseChannel extends RetryingChannel {
     const parser = createParser({
       maxBufferSize: this.deps.config.maxBytes,
       onEvent: (event: EventSourceMessage) => {
-        if (event.id !== undefined) this.lastEventId = event.id;
+        // Event ids are tracked by SseIdTracker (it also sees id-only frames).
         if (this.stopped) return;
         const name = event.event ?? 'message';
         if (events && !events.includes(name)) return;
@@ -238,12 +239,15 @@ export class SseChannel extends RetryingChannel {
     });
     const reader = body.getReader();
     const decoder = new TextDecoder();
+    this.ids.resetStream();
     try {
       for (;;) {
         const { done, value } = await reader.read();
         if (done || this.stopped || signal.aborted) return;
         // `stream: true` keeps a multi-byte character split across chunks intact.
-        parser.feed(decoder.decode(value, { stream: true }));
+        const text = decoder.decode(value, { stream: true });
+        this.ids.feed(text);
+        parser.feed(text);
       }
     } finally {
       await reader.cancel().catch(() => {});

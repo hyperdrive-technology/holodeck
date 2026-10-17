@@ -97,13 +97,21 @@ export async function startTestServer(): Promise<TestServer> {
   const blackholes = new Map<string, number>();
   const sseResponses = new Set<ServerResponse>();
 
+  /** Routes registered as `/prefix/*` match any deeper path. */
+  const prefixRoute = (method: string, path: string): Handler | undefined => {
+    for (const [key, handler] of routes) {
+      const [m, p] = key.split(' ') as [string, string];
+      if ((m === method || m === '*') && p.endsWith('/*') && path.startsWith(p.slice(0, -1))) return handler;
+    }
+    return undefined;
+  };
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk as Buffer);
     const body = Buffer.concat(chunks).toString('utf8');
     const path = (req.url ?? '/').split('?')[0] as string;
     requests.push({ method: req.method ?? 'GET', path: req.url ?? '/', headers: req.headers, body, at: Date.now() });
-    const handler = routes.get(`${req.method} ${path}`) ?? routes.get(`* ${path}`);
+    const handler = routes.get(`${req.method} ${path}`) ?? routes.get(`* ${path}`) ?? prefixRoute(req.method ?? 'GET', path);
     if (!handler) {
       res.writeHead(404, { 'content-type': 'application/json' }).end('{"error":"not found"}');
       return;

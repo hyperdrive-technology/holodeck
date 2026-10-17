@@ -1,6 +1,7 @@
 /**
  * Secret hygiene: every string this provider logs, reports in a status or
- * throws passes through a `Redactor`, which replaces each secret value (and
+ * throws passes through a `Redactor` (thrown errors at one exit point:
+ * `redactError` in `connect` and every session method, provider.ts), which replaces each secret value (and
  * the encoded forms it appears in on the wire) with `***`. URLs are logged as
  * origin + path only, because query strings may carry `auth.scheme: "query"`
  * tokens or other sensitive parameters.

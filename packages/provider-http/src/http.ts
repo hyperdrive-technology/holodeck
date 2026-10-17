@@ -3,7 +3,8 @@
  * resolution with the same-origin rule, auth, timeouts, size-limited bodies.
  */
 
-import type { HttpConnectionConfig } from './config';
+import { HttpConfigError, type HttpConnectionConfig } from './config';
+import { SourceSyntaxError } from './selector';
 import { errorMessage, safeUrl, type Redactor } from './redact';
 
 /** Why a request or message failed; `kind` drives status messages and tests. */
@@ -126,7 +127,7 @@ export async function request(
     return { response, signal: controller.signal, done };
   } catch (error) {
     done();
-    if (error instanceof HttpProviderError) throw error;
+    if (error instanceof HttpProviderError) throw redactError(error, redact);
     if (timedOut) throw new HttpProviderError(`${safeUrl(url)}: timed out after ${config.timeoutMs} ms`, 'timeout');
     if (deps.signal.aborted) throw new HttpProviderError('request cancelled', 'closed');
     throw new HttpProviderError(redact(`${safeUrl(url)}: ${errorMessage(error)}`), 'network');
@@ -215,6 +216,21 @@ async function fetchFollowingRedirects(
     }
     current = next;
   }
+}
+
+/**
+ * The same error with every secret form replaced in its message (and, for
+ * source errors, the source). Class, `kind` and `status` are kept so callers
+ * can still switch on them. No `cause` or stack from the original is carried
+ * over: either could quote a URL or a server message.
+ */
+export function redactError(error: unknown, redact: Redactor): Error {
+  if (error instanceof HttpProviderError) return new HttpProviderError(redact(error.message), error.kind, error.status);
+  if (error instanceof SourceSyntaxError) return new SourceSyntaxError(redact(error.message), redact(error.source));
+  if (error instanceof HttpConfigError) return new HttpConfigError(error.details.map(redact));
+  if (error instanceof TypeError) return new TypeError(redact(error.message));
+  if (error instanceof RangeError) return new RangeError(redact(error.message));
+  return new Error(redact(errorMessage(error)));
 }
 
 /** Throw for non-2xx with a redacted, bounded message (no response body: it may echo secrets). */

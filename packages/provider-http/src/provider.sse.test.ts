@@ -127,6 +127,40 @@ describe('holodeck.http sse', () => {
     expect(h.statuses.some((s) => s.state === 'stale' && /event stream ended/.test(s.message ?? ''))).toBe(true);
   });
 
+  describe('Last-Event-ID (WHATWG event-stream rules, holodeck#99)', () => {
+    async function reconnectHeader(frames: string): Promise<string | undefined> {
+      const feed = server.sse('/events');
+      const h = await open({ url: `${server.url}/events` });
+      const c = collector();
+      h.session.subscribe(['/n'], c.onSamples);
+      await feed.waitForClients(1);
+      feed.clients[0]!.raw(frames);
+      feed.broadcast('{"n":"sync"}'); // no id: must not reset the id
+      await waitFor(() => c.latest('/n')?.value === 'sync');
+      feed.dropAll();
+      await waitFor(() => feed.connections === 2, 3000, 'reconnect');
+      return feed.connectHeaders[1]?.['last-event-id'] as string | undefined;
+    }
+
+    it('an id-only frame (no data) updates the id', async () => {
+      expect(await reconnectHeader('id: 41\ndata: {"n":1}\n\nid: 42\n\n')).toBe('42');
+    });
+
+    it('an empty id resets it: no header on reconnect', async () => {
+      expect(await reconnectHeader('id: 41\ndata: {"n":1}\n\nid\n\n')).toBeUndefined();
+      expect(await reconnectHeader('id: 41\ndata: {"n":1}\n\nid:\ndata: {"n":2}\n\n')).toBeUndefined();
+    });
+
+    it('an id persists across later events without one, and ids with NUL are ignored', async () => {
+      expect(await reconnectHeader('id: 7\ndata: {"n":1}\n\ndata: {"n":2}\n\n')).toBe('7');
+      expect(await reconnectHeader('id: 7\ndata: {"n":1}\n\nid: bad\u0000id\n\n')).toBe('7');
+    });
+
+    it('handles CRLF and CR line endings split across chunks', async () => {
+      expect(await reconnectHeader('id: 9\r\ndata: {"n":1}\r\n\r\nid: 10\r\r')).toBe('10');
+    });
+  });
+
   it('backs off while the server keeps failing and recovers', async () => {
     server.route('GET', '/events', (_req, res) => res.writeHead(503).end());
     const h = await open({ url: `${server.url}/events`, backoff: { initialMs: 40, maxMs: 160, factor: 2, jitter: 0 } });

@@ -89,8 +89,10 @@ reject with `HTTP <status>`; the response body is never read into errors or logs
 
 Declared secrets: `token` (schemes `bearer`, `header`, `query`) and `password` (scheme `basic`). They come from
 `ProviderContext.secret(key)`, are read once per session, and never appear in documents, logs, status messages or
-thrown errors: every string the provider emits is passed through a redactor (raw and URL-encoded forms), and URLs
-are logged as origin + path only. WebSocket connections support only the `query` scheme, because browsers cannot set
+thrown errors: every string the provider emits is passed through a redactor (raw, URL-encoded, form-encoded and
+Basic-auth forms), thrown errors are rebuilt at one exit point (`connect` and every session method), and URLs are
+logged as origin + path only. `src/secrets.property.test.ts` checks this with a server that injects the secret into
+every field it controls (redirect paths and queries, status text, bodies, SSE/WebSocket messages, content types). WebSocket connections support only the `query` scheme, because browsers cannot set
 headers on a WebSocket handshake.
 
 ## Status

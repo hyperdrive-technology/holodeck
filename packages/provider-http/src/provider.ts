@@ -37,6 +37,7 @@ import {
   HttpProviderError,
   request,
   resolveEndpoint,
+  redactError,
   resolveWriteUrl,
   type AuthMaterial,
   type RequestDeps,
@@ -165,15 +166,56 @@ async function resolveAuth(config: HttpConnectionConfig, ctx: ProviderContext, r
   }
 }
 
+/**
+ * Single exit point for errors (holodeck#89 review): every error `connect`
+ * or a session method throws to a caller is rebuilt by `redactError`, so a
+ * secret that reached a message by any path (a server-controlled redirect
+ * path, a fetch error quoting a header, a caller's own source string) never
+ * leaves the provider. Logs and status messages are redacted where they are
+ * emitted (`log`, `recomputeStatus`, `RetryingChannel.failed`).
+ */
 async function connectHttp(
   rawConfig: Record<string, unknown>,
   ctx: ProviderContext,
   options: HttpProviderOptions,
   origins: string[] | undefined,
 ): Promise<ProviderSession> {
+  const redact = createRedactor();
+  try {
+    return guardSession(await openSession(rawConfig, ctx, options, origins, redact), redact);
+  } catch (error) {
+    throw redactError(error, redact);
+  }
+}
+
+/** Wrap every promise-returning session method so its rejections are redacted. */
+function guardSession(session: ProviderSession, redact: Redactor): ProviderSession {
+  const guard =
+    <A extends unknown[], R>(fn: (...args: A) => Promise<R>) =>
+    async (...args: A): Promise<R> => {
+      try {
+        return await fn(...args);
+      } catch (error) {
+        throw redactError(error, redact);
+      }
+    };
+  const guarded: ProviderSession = { ...session };
+  if (session.read) guarded.read = guard(session.read);
+  if (session.write) guarded.write = guard(session.write);
+  if (session.browse) guarded.browse = guard(session.browse);
+  guarded.close = guard(session.close);
+  return guarded;
+}
+
+async function openSession(
+  rawConfig: Record<string, unknown>,
+  ctx: ProviderContext,
+  options: HttpProviderOptions,
+  origins: string[] | undefined,
+  redact: Redactor,
+): Promise<ProviderSession> {
   const config = parseHttpConfig(rawConfig);
   checkOrigins(config, origins);
-  const redact = createRedactor();
   const auth = await resolveAuth(config, ctx, redact);
   const tsTokens = timestampTokens(config);
   const streaming = config.mode !== 'poll';
