@@ -21,7 +21,9 @@ jobs:
         # registry, which is not published. Add it once it is revived.
         # library-cloud follows provider-http's type/test/build/package smoke
         # path; its shipped GLBs are checked without requiring Blender in CI.
-        package: [editor-2.5d-react, editor-2d-react, viewer-3d-react, flow-runtime, provider-http, library-cloud]
+        # provider-aws runs the real AWS SDK against an in-process fake backend
+        # (ProviderContext.fetch); no AWS credentials and no network.
+        package: [editor-2.5d-react, editor-2d-react, viewer-3d-react, flow-runtime, provider-http, library-cloud, provider-aws]
     timeout-minutes: 30
     steps:
       # The packages depend on the SDK via `file:../../../holodeck-sdk/ts`, so the
@@ -144,10 +146,20 @@ jobs:
       # flow-runtime's script also deploys a small flow through holodeck.flow.local;
       # provider-http's reads a value through holodeck.http from a local server.
       # library-cloud's checks its 26 models, logo assets and two theme installs.
+      # provider-aws's reads a metric and an alarm through aws.cloudwatch from an
+      # in-process fake CloudWatch endpoint.
       - name: Smoke-test the Holodeck package entry
-        if: matrix.package == 'editor-2.5d-react' || matrix.package == 'flow-runtime' || matrix.package == 'provider-http' || matrix.package == 'library-cloud'
+        if: matrix.package == 'editor-2.5d-react' || matrix.package == 'flow-runtime' || matrix.package == 'provider-http' || matrix.package == 'library-cloud' || matrix.package == 'provider-aws'
         working-directory: holodeck/packages/${{ matrix.package }}
         run: node --no-deprecation scripts/smoke-holodeck-package.mjs
+
+      # provider-aws must stay browser-compatible: bundle dist/ for the browser
+      # with esbuild and fail on any Node built-in (the AWS SDK swaps in its
+      # browser runtime config through package.json `browser` fields).
+      - name: Browser bundle check
+        if: matrix.package == 'provider-aws'
+        working-directory: holodeck/packages/${{ matrix.package }}
+        run: node scripts/browser-bundle-check.mjs
 
       # editor-2.5d-react only: consume the built package from a throwaway Vite app
       # in real Chromium and fetch every GLB URL (holodeck#28: Vite dev pre-bundling

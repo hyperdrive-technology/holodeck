@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "holodeck.package.v1",
+  "id": "holodeck.provider-aws",
+  "name": "AWS CloudWatch provider",
+  "description": "The aws.cloudwatch provider: live CloudWatch metrics and alarm states, metric and alarm history for chart widgets, a namespace / metric / dimension browser, and resource discovery through the Resource Groups Tagging API. Credentials come from connection secrets (a read-only access key or temporary credentials, an assumed read-only role, a Cognito identity pool) or a host callback; they are never stored in documents or logged.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "contributes": ["holodeck.provider"],
+  "providers": ["aws.cloudwatch"],
+  "entry": "dist/holodeck-package.js",
+  "permissions": {
+    "network": [
+      "https://monitoring.*.amazonaws.com",
+      "https://tagging.*.amazonaws.com",
+      "https://sts.*.amazonaws.com",
+      "https://sts.amazonaws.com",
+      "https://cognito-identity.*.amazonaws.com",
+      "https://monitoring.*.amazonaws.com.cn",
+      "https://tagging.*.amazonaws.com.cn",
+      "https://sts.*.amazonaws.com.cn",
+      "https://cognito-identity.*.amazonaws.com.cn"
+    ]
+  },
+  "homepage": "https://github.com/hyperdrive-technology/holodeck/tree/main/packages/provider-aws#readme",
+  "repository": "github:hyperdrive-technology/holodeck",
+  "keywords": ["provider", "aws", "cloudwatch", "metrics", "alarms", "monitoring", "discovery"]
+}
