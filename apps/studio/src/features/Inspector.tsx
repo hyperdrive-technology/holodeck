@@ -111,7 +111,9 @@ function DocumentInspector({ doc, onRename, onDeleteDocument }: InspectorProps) 
   );
 }
 
-function ObjectInspector({ placement, onEdit, onDeleteObject }: InspectorProps & { placement: IsoPlacement }) {
+function ObjectInspector({ doc, placement, onEdit, onDeleteObject }: InspectorProps & { placement: IsoPlacement }) {
+  // Grouped objects select, rotate and delete as a unit (as on the canvas); say so.
+  const groupSize = placement.group ? doc.body.objects.filter((o) => o.group === placement.group).length : 1;
   const { host } = useStudio();
   const def = host.registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, placement.object);
   const owner = host.registry.ownerOf(HOLODECK_KINDS.isoPart, placement.object);
@@ -140,6 +142,11 @@ function ObjectInspector({ placement, onEdit, onDeleteObject }: InspectorProps &
           </div>
         </div>
       </div>
+      {groupSize > 1 ? (
+        <p className="px-4 pt-3 text-xs text-muted-foreground" data-testid="inspector-group-note">
+          In a group of {groupSize}: rotate, delete and part settings apply to the whole group.
+        </p>
+      ) : null}
       {def && visibleParams(def.params).length ? (
         <>
           <Separator className="my-4" />

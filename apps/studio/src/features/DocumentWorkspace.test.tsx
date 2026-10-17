@@ -27,6 +27,8 @@ const editor = vi.hoisted(() => ({
   props: null as ProcessEditorProps | null,
   actions: [] as EditorAction[],
   selectedId: null as string | null,
+  /** What the stub's `getCamera` returns (the live view, ahead of the debounced onCameraChange). */
+  liveCamera: { zoom: 1, target: [0, 0, 0] } as { zoom: number; target: [number, number, number] },
 }));
 
 vi.mock('@holodeck/editor-2.5d-react', async (importOriginal) => {
@@ -42,8 +44,8 @@ vi.mock('@holodeck/editor-2.5d-react', async (importOriginal) => {
         editor.actions.push(action);
         if (action.type === 'select') editor.selectedId = action.id;
       },
-      getState: () => ({ selectedId: editor.selectedId }) as never,
-      getCamera: () => ({ zoom: 1, target: [0, 0, 0] }),
+      getState: () => ({ selectedId: editor.selectedId, selectedIds: editor.selectedId ? [editor.selectedId] : [] }) as never,
+      getCamera: () => editor.liveCamera,
     }));
     return <div data-testid="process-editor" data-object-count={props.scene.objects.length} />;
   }
@@ -71,7 +73,7 @@ beforeEach(() => {
   globalThis.indexedDB = new IDBFactory();
   store = new DocumentStore(openStudioDb('workspace-test'), { validate: (doc) => hostDocumentProblems(host, doc) });
   listeners = [];
-  Object.assign(editor, { mounts: 0, props: null, actions: [], selectedId: null });
+  Object.assign(editor, { mounts: 0, props: null, actions: [], selectedId: null, liveCamera: { zoom: 1, target: [0, 0, 0] } });
 });
 
 async function openWorkspace(doc: HolodeckDocument) {
@@ -160,6 +162,8 @@ describe('DocumentWorkspace <-> ProcessEditor', () => {
     await openWorkspace(tankDoc());
     act(() => editor.props?.onSelect?.('tank-1'));
     act(() => editor.props?.onCameraChange?.({ zoom: 61, target: [2, 0, 2] }));
+    // A pan after that, still inside the editor's debounce: only getCamera() knows it (#130).
+    editor.liveCamera = { zoom: 64, target: [5, 0, 5] };
     const mountsBefore = editor.mounts;
 
     // "Another tab" saves; the channel tells this one.
@@ -169,7 +173,40 @@ describe('DocumentWorkspace <-> ProcessEditor', () => {
 
     await waitFor(() => expect(editor.props?.scene.objects).toHaveLength(2));
     expect(editor.mounts).toBe(mountsBefore + 1);
-    expect(editor.props?.camera).toEqual({ zoom: 61, target: [2, 0, 2] });
+    expect(editor.props?.camera).toEqual({ zoom: 64, target: [5, 0, 5] });
     expect(editor.props?.selectedId).toBe('tank-1');
+  });
+
+  // Review of holodeck#128: the document read finishing before the camera read
+  // mounted the editor without a camera, and the stored one was then ignored.
+  it('opens on the stored camera even when the camera read finishes last', async () => {
+    await store.create(tankDoc());
+    await store.saveCamera('p', { zoom: 27, target: [4, 0, 4] });
+    const getCamera = store.getCamera.bind(store);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(store, 'getCamera').mockImplementation(async (id) => {
+      await gate;
+      return getCamera(id);
+    });
+    const router = createStudioRouter(createMemoryHistory({ initialEntries: ['/d/p'] }));
+    const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+    render(
+      <StudioProvider services={{ host, store, channel }}>
+        <QueryClientProvider client={client}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </StudioProvider>,
+    );
+    // The document is read; the camera is not yet.
+    await waitFor(async () => expect(await store.get('p')).toBeDefined());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByTestId('process-editor')).toBeNull();
+    release();
+    await screen.findByTestId('process-editor');
+    expect(editor.props?.camera).toEqual({ zoom: 27, target: [4, 0, 4] });
+    expect(editor.mounts).toBe(1);
   });
 });

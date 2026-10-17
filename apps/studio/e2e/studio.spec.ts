@@ -311,3 +311,26 @@ test('reopening a document after another tab saved it shows the latest and edits
   await expect(page.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved');
   await expect(page.getByTestId('conflict-dialog')).toHaveCount(0);
 });
+
+// Review of holodeck#128: "+" on a pipe added nothing; inspector delete with a
+// canvas multi-selection removed every selected object (#129).
+test('library "+" adds a pipe; inspector delete with a multi-selection removes only the shown object', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('welcome').getByRole('button', { name: 'New document' }).click();
+  await expect(page).toHaveURL(/\/d\/[0-9a-f-]{36}$/);
+
+  await page.locator('[data-library-add="pipe"]').click();
+  await expect(editor(page)).not.toHaveAttribute('data-object-count', '0');
+  const pipes = Number(await editor(page).getAttribute('data-object-count'));
+  await page.locator('[data-library-add="tank"]').click();
+  await page.locator('[data-library-add="valve"]').click();
+  await expect(editor(page)).toHaveAttribute('data-object-count', String(pipes + 2));
+
+  // Select everything on the canvas (Mod+A); the inspector shows the primary (last) object.
+  await page.keyboard.press('ControlOrMeta+a');
+  await expect(page.getByTestId('inspector-selected-id')).toBeVisible();
+  await page.getByRole('button', { name: /Delete object/ }).click();
+  await expect(editor(page)).toHaveAttribute('data-object-count', String(pipes + 1));
+  await page.reload();
+  await expect(editor(page)).toHaveAttribute('data-object-count', String(pipes + 1));
+});

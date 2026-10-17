@@ -1,5 +1,5 @@
 import { HOLODECK_KINDS, type HolodeckDocument } from '@holodeck/sdk';
-import { ISO_ENGINE_ID, ProcessEditor, type EditorAction, type IsoSceneFile, type ProcessEditorHandle } from '@holodeck/editor-2.5d-react';
+import { ISO_ENGINE_ID, ProcessEditor, type IsoSceneFile, type ProcessEditorHandle } from '@holodeck/editor-2.5d-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useBlocker, useNavigate } from '@tanstack/react-router';
 import { useSelector } from '@tanstack/react-store';
@@ -18,6 +18,7 @@ import { useStudio } from '../studio-context';
 import { activeDocumentStore } from './active-document';
 import { CanvasErrorBoundary } from './CanvasErrorBoundary';
 import { ConflictDialog } from './ConflictDialog';
+import { inspectorActions, libraryAddActions } from './editor-commands';
 import { downloadDocument } from './file-io';
 import { Inspector, type InspectorEdit } from './Inspector';
 import { describeSaveStatus } from './save-status';
@@ -35,7 +36,10 @@ export function DocumentRoute({ docId }: { docId: string }) {
   // unmounting it here would drop unsaved edits without any prompt.
   const [opened, setOpened] = useState<VersionedDocument | null>(null);
   // Open only on a read made after mount: a cached copy can be stale (holodeck#117).
-  if (data && isFetchedAfterMount && data !== opened) setOpened(data);
+  // ... and only once the stored camera is known too: opening first would mount
+  // the editor without it and the camera arriving later would be ignored
+  // (review of holodeck#128).
+  if (data && isFetchedAfterMount && !camera.isPending && data !== opened) setOpened(data);
   const kept = opened?.document.id === docId ? opened : null;
   const release = useCallback(() => setOpened(null), []);
   if (error && !kept) return <CenteredMessage tone="error">Could not open the document: {error.message}</CenteredMessage>;
@@ -129,6 +133,10 @@ function DocumentWorkspace({
   const adopt = useCallback(
     (version: VersionedDocument) => {
       const next = version.document as IsoDoc;
+      // The live view: `cameraRef` only updates after the editor's gesture
+      // debounce, so a pan just before an adopt would otherwise be undone (#130).
+      const live = editorRef.current?.getCamera();
+      if (live) cameraRef.current = live;
       docRef.current = next;
       setDoc(next);
       setEditorEpoch((n) => n + 1);
@@ -209,9 +217,7 @@ function DocumentWorkspace({
       const editor = editorRef.current;
       if (kind !== HOLODECK_KINDS.isoPart || !editor) return;
       const at = libraryDropPoint(docRef.current.body, host.registry);
-      editor.dispatch({ type: 'place-mode', object: itemId });
-      editor.dispatch({ type: 'floor-click', x: at.x, y: at.y });
-      editor.dispatch({ type: 'select-mode' });
+      for (const action of libraryAddActions(host.registry, itemId, at)) editor.dispatch(action);
     },
     [host],
   );
@@ -236,26 +242,13 @@ function DocumentWorkspace({
    * `delete`, which detaches connector anchors and hosted inline parts
    * (`removeObjects`, holodeck#124).
    */
-  const runOnObject = useCallback((id: string, actions: EditorAction[]) => {
+  const runOnObject = useCallback((id: string, edit: InspectorEdit | { kind: 'delete' }) => {
     const editor = editorRef.current;
     if (!editor) return;
-    if (editor.getState().selectedId !== id) editor.dispatch({ type: 'select', id });
-    for (const action of actions) editor.dispatch(action);
+    for (const action of inspectorActions(editor.getState().selectedIds, id, edit)) editor.dispatch(action);
   }, []);
-  const onEdit = useCallback(
-    (id: string, edit: InspectorEdit) => {
-      switch (edit.kind) {
-        case 'move':
-          return runOnObject(id, [{ type: 'patch-selected', patch: edit.patch }]);
-        case 'rotate':
-          return runOnObject(id, [{ type: 'rotate-selected', direction: edit.direction }]);
-        case 'param':
-          return runOnObject(id, [{ type: 'set-param', param: edit.name, value: edit.value }]);
-      }
-    },
-    [runOnObject],
-  );
-  const onDeleteObject = useCallback((id: string) => runOnObject(id, [{ type: 'delete' }]), [runOnObject]);
+  const onEdit = useCallback((id: string, edit: InspectorEdit) => runOnObject(id, edit), [runOnObject]);
+  const onDeleteObject = useCallback((id: string) => runOnObject(id, { kind: 'delete' }), [runOnObject]);
   const onRename = useCallback(
     (name: string) => {
       // Optimistic in the working copy; the store applies it to the stored
