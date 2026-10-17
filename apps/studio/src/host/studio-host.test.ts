@@ -1,8 +1,9 @@
 import { HOLODECK_KINDS } from '@holodeck/sdk';
 import { ISO_ENGINE_ID } from '@holodeck/editor-2.5d-react';
+import { withPart } from '../test-support';
 import { describe, expect, it } from 'vitest';
+import { usedIsoContributions } from '../documents/iso-scene';
 import { createIsoDocument } from '../documents/new-document';
-import { addPart, usedIsoContributions } from '../documents/iso-scene';
 import { createStudioHost, hostDocumentProblems, requiresFor } from './studio-host';
 
 describe('studio host', () => {
@@ -25,7 +26,7 @@ describe('studio host', () => {
       const host = await createStudioHost();
       const doc = createIsoDocument('A', 'a');
       expect(hostDocumentProblems(host, doc)).toEqual([]);
-      const { scene } = addPart(doc.body, host.registry, 'tank');
+      const { scene } = withPart(doc.body, host.registry, 'tank');
       expect(hostDocumentProblems(host, { ...doc, body: scene })).toEqual([]);
     });
 
@@ -58,8 +59,8 @@ describe('studio host', () => {
     const host = await createStudioHost();
     let scene = createIsoDocument().body;
     expect(requiresFor(host, usedIsoContributions(scene))).toEqual({});
-    scene = addPart(scene, host.registry, 'tank').scene;
-    scene = addPart(scene, host.registry, 'valve').scene;
+    scene = withPart(scene, host.registry, 'tank').scene;
+    scene = withPart(scene, host.registry, 'valve').scene;
     expect(requiresFor(host, usedIsoContributions(scene))).toEqual({ 'holodeck.iso': '^1.0' });
     expect(requiresFor(host, [[HOLODECK_KINDS.isoPart, 'not-installed']])).toEqual({});
   });

@@ -1,0 +1,175 @@
+/**
+ * Wiring between the studio workspace and the engine's ProcessEditor
+ * (holodeck#100 / #111 / #118 / #124). ProcessEditor is replaced by a stub
+ * that records its props and exposes a fake `editorRef` handle, so these
+ * tests check what the studio asks the editor to do; the editor's own
+ * behaviour (undo, removeObjects) is covered by its package and by the e2e.
+ */
+import type { HolodeckDocument, HolodeckHost } from '@holodeck/sdk';
+import type { EditorAction, IsoSceneFile, ProcessEditorProps } from '@holodeck/editor-2.5d-react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { createMemoryHistory, RouterProvider } from '@tanstack/react-router';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { IDBFactory } from 'fake-indexeddb';
+import { useImperativeHandle } from 'react';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DocumentChange } from '../documents/store';
+import { openStudioDb } from '../documents/db';
+import { createIsoDocument } from '../documents/new-document';
+import { DocumentStore } from '../documents/store';
+import { createStudioHost, hostDocumentProblems } from '../host/studio-host';
+import { createStudioRouter } from '../router';
+import { StudioProvider } from '../studio-context';
+import { withPart } from '../test-support';
+
+const editor = vi.hoisted(() => ({
+  mounts: 0,
+  props: null as ProcessEditorProps | null,
+  actions: [] as EditorAction[],
+  selectedId: null as string | null,
+}));
+
+vi.mock('@holodeck/editor-2.5d-react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@holodeck/editor-2.5d-react')>();
+  const { useEffect } = await import('react');
+  function StubEditor(props: ProcessEditorProps) {
+    editor.props = props;
+    useEffect(() => {
+      editor.mounts += 1;
+    }, []);
+    useImperativeHandle(props.editorRef, () => ({
+      dispatch: (action: EditorAction) => {
+        editor.actions.push(action);
+        if (action.type === 'select') editor.selectedId = action.id;
+      },
+      getState: () => ({ selectedId: editor.selectedId }) as never,
+      getCamera: () => ({ zoom: 1, target: [0, 0, 0] }),
+    }));
+    return <div data-testid="process-editor" data-object-count={props.scene.objects.length} />;
+  }
+  return { ...actual, ProcessEditor: StubEditor };
+});
+
+let host: HolodeckHost;
+let store: DocumentStore;
+let listeners: Array<(c: DocumentChange) => void>;
+const channel = {
+  post: () => undefined,
+  subscribe: (l: (c: DocumentChange) => void) => {
+    listeners.push(l);
+    return () => {
+      listeners = listeners.filter((x) => x !== l);
+    };
+  },
+};
+
+beforeAll(async () => {
+  host = await createStudioHost();
+});
+
+beforeEach(() => {
+  globalThis.indexedDB = new IDBFactory();
+  store = new DocumentStore(openStudioDb('workspace-test'), { validate: (doc) => hostDocumentProblems(host, doc) });
+  listeners = [];
+  Object.assign(editor, { mounts: 0, props: null, actions: [], selectedId: null });
+});
+
+async function openWorkspace(doc: HolodeckDocument) {
+  const router = createStudioRouter(createMemoryHistory({ initialEntries: [`/d/${doc.id}`] }));
+  const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+  render(
+    <StudioProvider services={{ host, store, channel }}>
+      <QueryClientProvider client={client}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    </StudioProvider>,
+  );
+  await screen.findByTestId('process-editor');
+  return { router };
+}
+
+function tankDoc() {
+  const doc = createIsoDocument('Plant', 'p');
+  doc.body = withPart(doc.body, host.registry, 'tank').scene;
+  return doc;
+}
+
+describe('DocumentWorkspace <-> ProcessEditor', () => {
+  it('hides the engine chrome and opens on the stored camera (holodeck#100)', async () => {
+    await store.create(tankDoc());
+    await store.saveCamera('p', { zoom: 33, target: [1, 0, 2], yaw: 0.5, topDown: false });
+    await openWorkspace(tankDoc());
+    expect(editor.props?.chrome).toBe('canvas');
+    expect(editor.props?.camera).toEqual({ zoom: 33, target: [1, 0, 2], yaw: 0.5, topDown: false });
+  });
+
+  it('persists camera changes per document', async () => {
+    await store.create(tankDoc());
+    await openWorkspace(tankDoc());
+    expect(editor.props?.camera).toBeUndefined();
+    act(() => editor.props?.onCameraChange?.({ zoom: 50, target: [3, 0, -1], yaw: 1 }));
+    await waitFor(async () => expect(await store.getCamera('p')).toEqual({ zoom: 50, target: [3, 0, -1], yaw: 1 }));
+  });
+
+  it('library "+" adds through the editor place tool, one undoable step (holodeck#111)', async () => {
+    await store.create(createIsoDocument('Empty', 'p'));
+    await openWorkspace(createIsoDocument('Empty', 'p'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add Valve to the document' }));
+    expect(editor.actions).toEqual([
+      { type: 'place-mode', object: 'valve' },
+      { type: 'floor-click', x: 0, y: 0 },
+      { type: 'select-mode' },
+    ]);
+  });
+
+  it('library click arms the place tool (controlled `placing`); clicking again disarms', async () => {
+    await store.create(createIsoDocument('Empty', 'p'));
+    await openWorkspace(createIsoDocument('Empty', 'p'));
+    const tank = screen.getByRole('button', { name: /^Tank/ });
+    fireEvent.click(tank);
+    expect(editor.props?.placing).toBe('tank');
+    expect(tank).toHaveAttribute('aria-pressed', 'true');
+    // The editor reports the tool changing (e.g. Escape on the canvas).
+    act(() => editor.props?.onPlacingChange?.(null));
+    expect(tank).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(tank);
+    fireEvent.click(tank);
+    expect(editor.props?.placing).toBeNull();
+    expect(editor.actions).toEqual([]);
+  });
+
+  it('inspector edits and delete run as editor actions on the selected object (holodeck#111, #124)', async () => {
+    await store.create(tankDoc());
+    await openWorkspace(tankDoc());
+    act(() => editor.props?.onSelect?.('tank-1'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Rotate right' }));
+    const x = screen.getByLabelText('X');
+    fireEvent.change(x, { target: { value: '4' } });
+    fireEvent.blur(x);
+    fireEvent.click(screen.getByRole('button', { name: /Delete object/ }));
+    expect(editor.actions).toEqual([
+      { type: 'select', id: 'tank-1' },
+      { type: 'rotate-selected', direction: 1 },
+      { type: 'patch-selected', patch: { x: 4 } },
+      { type: 'delete' },
+    ]);
+  });
+
+  it('adopting another tab’s save remounts the editor (fresh undo history) but keeps camera and selection (holodeck#118)', async () => {
+    const created = await store.create(tankDoc());
+    await openWorkspace(tankDoc());
+    act(() => editor.props?.onSelect?.('tank-1'));
+    act(() => editor.props?.onCameraChange?.({ zoom: 61, target: [2, 0, 2] }));
+    const mountsBefore = editor.mounts;
+
+    // "Another tab" saves; the channel tells this one.
+    const other = withPart(created.document.body as IsoSceneFile, host.registry, 'valve', 9, 9).scene;
+    const saved = await store.save({ ...created.document, body: other }, created.revision);
+    act(() => listeners.forEach((l) => l({ type: 'saved', id: 'p', revision: saved.revision })));
+
+    await waitFor(() => expect(editor.props?.scene.objects).toHaveLength(2));
+    expect(editor.mounts).toBe(mountsBefore + 1);
+    expect(editor.props?.camera).toEqual({ zoom: 61, target: [2, 0, 2] });
+    expect(editor.props?.selectedId).toBe('tank-1');
+  });
+});

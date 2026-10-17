@@ -82,6 +82,19 @@ export class DocumentWriter {
     return this.enqueue((expected) => this.store.save(doc, expected), seq);
   }
 
+  /**
+   * Mod+S: make sure the working copy is stored and report the real outcome.
+   * A clean writer (nothing unsaved, queued, failed or in conflict) writes
+   * nothing: a new revision for an unchanged document would make every other
+   * open tab adopt a no-op (holodeck#118). Otherwise the working copy is
+   * saved (a retry after a failure) and every queued write is awaited.
+   */
+  async persist(doc: HolodeckDocument): Promise<SaveStatus> {
+    if (this.isClean()) return this.state.status;
+    if (this.state.status.kind !== 'conflict') void this.save(doc);
+    return this.flush();
+  }
+
   /** Rename, applied by the store to the stored document inside its transaction. Leaves `dirty` alone. */
   rename(name: string): Promise<VersionedDocument | undefined> {
     return this.enqueue((expected) => this.store.rename(this.id, name, expected));

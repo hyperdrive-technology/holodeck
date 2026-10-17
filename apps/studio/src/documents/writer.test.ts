@@ -178,4 +178,34 @@ describe('DocumentWriter', () => {
       expect(listener).toHaveBeenCalledTimes(1);
     });
   });
+
+  // holodeck#118: Mod+S on a clean document wrote a new revision, so every
+  // other open tab adopted (and remounted for) a no-op save.
+  describe('persist (Mod+S)', () => {
+    it('writes nothing when clean', async () => {
+      const writer = new DocumentWriter(store, 'p', base.revision);
+      const save = vi.spyOn(store, 'save');
+      expect(await writer.persist(base.document)).toEqual({ kind: 'saved' });
+      expect(save).not.toHaveBeenCalled();
+      expect((await store.get('p'))?.revision).toBe(base.revision);
+    });
+
+    it('re-saves a working copy whose last save failed, and reports the outcome', async () => {
+      const writer = new DocumentWriter(store, 'p', base.revision);
+      vi.spyOn(store, 'save').mockRejectedValueOnce(new Error('disk full'));
+      const working = withObject(base.document, 'tank-1');
+      await writer.save(working);
+      expect(await writer.persist(working)).toEqual({ kind: 'saved' });
+      expect(ids((await store.get('p'))?.document)).toEqual(['tank-1']);
+    });
+
+    it('does not write while in conflict', async () => {
+      const writer = new DocumentWriter(store, 'p', base.revision);
+      await store.save(withObject(base.document, 'other'), base.revision);
+      await writer.save(withObject(base.document, 'mine'));
+      const save = vi.spyOn(store, 'save');
+      expect((await writer.persist(withObject(base.document, 'mine'))).kind).toBe('conflict');
+      expect(save).not.toHaveBeenCalled();
+    });
+  });
 });

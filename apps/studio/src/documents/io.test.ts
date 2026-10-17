@@ -1,7 +1,7 @@
+import { withPart } from '../test-support';
 import { HOLODECK_DOCUMENT_FORMAT, type HolodeckHost } from '@holodeck/sdk';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createStudioHost } from '../host/studio-host';
-import { addPart } from './iso-scene';
 import { exportFileName, MAX_IMPORT_BYTES, parseDocumentText, serializeDocument } from './io';
 import { createIsoDocument } from './new-document';
 
@@ -19,7 +19,7 @@ function problemsOf(text: string): string[] {
 describe('import / export', () => {
   it('round-trips an exported document', () => {
     const doc = createIsoDocument('Plant', 'p1');
-    const withTank = { ...doc, body: addPart(doc.body, host.registry, 'tank').scene };
+    const withTank = { ...doc, body: withPart(doc.body, host.registry, 'tank').scene };
     const text = serializeDocument(withTank);
     expect(text.endsWith('\n')).toBe(true);
     const result = parseDocumentText(text, host);

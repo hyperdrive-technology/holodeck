@@ -42,7 +42,9 @@ export function AppShell() {
     () =>
       channel.subscribe((change) => {
         void client.invalidateQueries({ queryKey: documentKeys.list() });
-        if (change.type === 'deleted') void client.invalidateQueries({ queryKey: documentKeys.detail(change.id) });
+        // Detail too, on saves as well as deletes: an inactive cached copy
+        // would otherwise reopen at a stale revision (holodeck#117).
+        void client.invalidateQueries({ queryKey: documentKeys.detail(change.id) });
       }),
     [channel, client],
   );

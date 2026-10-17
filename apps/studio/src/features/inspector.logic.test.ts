@@ -1,6 +1,6 @@
 import type { IsoPartParamSpec } from '@holodeck/editor-2.5d-react';
 import { describe, expect, it } from 'vitest';
-import { coerceCoordinate, coerceParam, paramValue, rotateQuarter, rotationDegrees, visibleParams } from './inspector.logic';
+import { coerceCoordinate, coerceParam, paramValue, rotationDegrees, visibleParams } from './inspector.logic';
 
 const num = (over: Partial<IsoPartParamSpec> = {}): IsoPartParamSpec => ({ type: 'number', label: 'Level', default: 0.5, ...over });
 
@@ -15,14 +15,6 @@ describe('inspector logic', () => {
     [5 * Math.PI, 180],
   ])('rotationDegrees(%s) = %s', (rad, deg) => {
     expect(rotationDegrees(rad)).toBe(deg);
-  });
-
-  it('rotateQuarter steps by 90 degrees and wraps', () => {
-    expect(rotationDegrees(rotateQuarter(undefined, 1))).toBe(90);
-    expect(rotationDegrees(rotateQuarter(0, -1))).toBe(270);
-    expect(rotateQuarter((3 * Math.PI) / 2, 1)).toBe(0);
-    // Accumulated drift from many turns snaps back to an exact quarter.
-    expect(rotateQuarter(Math.PI / 2 + 1e-9, 1)).toBe(Math.PI);
   });
 
   it('paramValue prefers the placement value, else the default', () => {

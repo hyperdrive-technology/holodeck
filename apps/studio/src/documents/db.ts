@@ -35,9 +35,10 @@ export interface StoredDocument {
 }
 
 /**
- * Camera of one document's canvas. `zoom` is the orthographic zoom; `target`
- * the world point the camera looks at; `yaw` the quarter-turn index of the
- * isometric pose (0–3) and `topDown` the 2D toggle.
+ * Camera of one document's canvas, the editor's `EditorCamera` shape
+ * (@holodeck/editor-2.5d-react, kept structurally here so the store does not
+ * depend on the engine): orthographic `zoom`, look-at `target`, view `yaw`
+ * in radians and the 2D `topDown` toggle.
  */
 export interface StudioCamera {
   zoom: number;

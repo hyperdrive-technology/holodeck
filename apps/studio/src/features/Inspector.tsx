@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { useStudio } from '../studio-context';
 import { DraftField, ReadonlyField } from './fields';
-import { coerceCoordinate, coerceParam, paramValue, rotateQuarter, rotationDegrees, visibleParams } from './inspector.logic';
+import { coerceCoordinate, coerceParam, paramValue, rotationDegrees, visibleParams } from './inspector.logic';
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 /** Defensive: stored metadata predating validation may not parse; show it raw instead of throwing. */
@@ -18,11 +18,19 @@ export const formatTime = (iso: string | undefined) => {
   return Number.isFinite(at.getTime()) ? timeFormat.format(at) : iso;
 };
 
+/** What the object inspector can change, as editor actions understand it. */
+export type InspectorEdit =
+  | { kind: 'move'; patch: { x?: number; y?: number } }
+  | { kind: 'rotate'; direction: 1 | -1 }
+  | { kind: 'param'; name: string; value: unknown };
+
 export interface InspectorProps {
   doc: HolodeckDocument<IsoSceneFile>;
   selectedId: string | null;
   onRename: (name: string) => void;
-  onPatch: (id: string, patch: Partial<Omit<IsoPlacement, 'id' | 'object'>>) => void;
+  /** One object edit; the workspace runs it through the editor (undoable). */
+  onEdit: (id: string, edit: InspectorEdit) => void;
+  /** Delete through the editor (connector anchors detach, hosted parts follow: holodeck#124). */
   onDeleteObject: (id: string) => void;
   onDeleteDocument: () => void;
 }
@@ -103,11 +111,11 @@ function DocumentInspector({ doc, onRename, onDeleteDocument }: InspectorProps) 
   );
 }
 
-function ObjectInspector({ placement, onPatch, onDeleteObject }: InspectorProps & { placement: IsoPlacement }) {
+function ObjectInspector({ placement, onEdit, onDeleteObject }: InspectorProps & { placement: IsoPlacement }) {
   const { host } = useStudio();
   const def = host.registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, placement.object);
   const owner = host.registry.ownerOf(HOLODECK_KINDS.isoPart, placement.object);
-  const patch = (p: Partial<Omit<IsoPlacement, 'id' | 'object'>>) => onPatch(placement.id, p);
+  const edit = (e: InspectorEdit) => onEdit(placement.id, e);
   return (
     <>
       <SectionTitle>{def?.label ?? placement.object}</SectionTitle>
@@ -115,18 +123,18 @@ function ObjectInspector({ placement, onPatch, onDeleteObject }: InspectorProps 
         <ReadonlyField label="Id" value={<code className="text-xs">{placement.id}</code>} testId="inspector-selected-id" />
         <ReadonlyField label="Part" value={<code className="text-xs">{placement.object}</code>} />
         {owner ? <ReadonlyField label="Package" value={host.package(owner)?.manifest.name ?? owner} /> : null}
-        <DraftField label="X" type="number" value={String(placement.x)} coerce={coerceCoordinate} onCommit={(x) => patch({ x: x as number })} />
-        <DraftField label="Y" type="number" value={String(placement.y)} coerce={coerceCoordinate} onCommit={(y) => patch({ y: y as number })} />
+        <DraftField label="X" type="number" value={String(placement.x)} coerce={coerceCoordinate} onCommit={(x) => edit({ kind: 'move', patch: { x: x as number } })} />
+        <DraftField label="Y" type="number" value={String(placement.y)} coerce={coerceCoordinate} onCommit={(y) => edit({ kind: 'move', patch: { y: y as number } })} />
         <div className="grid grid-cols-[6rem_1fr] items-center gap-2">
           <span className="text-xs font-medium text-muted-foreground">Rotation</span>
           <div className="flex items-center gap-1">
-            <Button variant="outline" size="icon-sm" aria-label="Rotate left" onClick={() => patch({ rotation: rotateQuarter(placement.rotation, -1) })}>
+            <Button variant="outline" size="icon-sm" aria-label="Rotate left" onClick={() => edit({ kind: 'rotate', direction: -1 })}>
               <RotateCcwIcon />
             </Button>
             <span className="w-10 text-center text-sm tabular-nums" data-testid="inspector-rotation">
               {rotationDegrees(placement.rotation)}°
             </span>
-            <Button variant="outline" size="icon-sm" aria-label="Rotate right" onClick={() => patch({ rotation: rotateQuarter(placement.rotation, 1) })}>
+            <Button variant="outline" size="icon-sm" aria-label="Rotate right" onClick={() => edit({ kind: 'rotate', direction: 1 })}>
               <RotateCwIcon />
             </Button>
           </div>
@@ -138,7 +146,7 @@ function ObjectInspector({ placement, onPatch, onDeleteObject }: InspectorProps 
           <SectionTitle>Parameters</SectionTitle>
           <div className="flex flex-col gap-2 px-4">
             {visibleParams(def.params).map(([name, spec]) => (
-              <ParamField key={name} name={name} spec={spec} value={paramValue(placement, name, spec)} onCommit={(value) => patch({ params: { [name]: value } })} />
+              <ParamField key={name} name={name} spec={spec} value={paramValue(placement, name, spec)} onCommit={(value) => edit({ kind: 'param', name, value })} />
             ))}
           </div>
         </>
