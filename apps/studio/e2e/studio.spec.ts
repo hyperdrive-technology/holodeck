@@ -139,3 +139,46 @@ test('two tabs: an idle tab picks up the other tab’s save; Mod+S reports the r
   await expect(other.getByTestId('notice').filter({ hasText: 'All changes are saved' })).toBeVisible();
   await expect(other.getByTestId('conflict-dialog')).toHaveCount(0);
 });
+
+// Review of holodeck#102 @ 2b2a498: after adopting another tab's version the
+// editor kept its undo history, so Undo restored a pre-adopt scene and saved
+// it at the adopted revision, wiping the other tab's change with no conflict.
+test('Undo after adopting another tab’s version cannot resurrect the old scene', async ({ page, context }) => {
+  await page.goto('/');
+  await page.getByTestId('welcome').getByRole('button', { name: 'New document' }).click();
+  await expect(page).toHaveURL(/\/d\/[0-9a-f-]{36}$/);
+  const url = page.url();
+
+  // Tab A: place a tank, then delete it on the canvas (a real editor commit, so A has undo history).
+  await page.locator('[data-library-item="tank"]').click();
+  await expect(editor(page)).toHaveAttribute('data-object-count', '1');
+  await page.keyboard.press('Delete');
+  await expect(editor(page)).toHaveAttribute('data-object-count', '0');
+  await expect(page.getByTestId('canvas')).toHaveAttribute('data-revision', '3');
+
+  // Tab B opens the document and adds a valve.
+  const other = await context.newPage();
+  other.on('pageerror', (error) => pageErrors.push(error));
+  await other.addInitScript(() => {
+    delete (Navigator.prototype as { gpu?: unknown }).gpu;
+  });
+  await other.goto(url);
+  await expect(other.getByTestId('canvas')).toHaveAttribute('data-revision', '3');
+  await other.locator('[data-library-item="valve"]').click();
+  await expect(other.getByTestId('canvas')).toHaveAttribute('data-revision', '4');
+
+  // Tab A was clean, so it adopts B's version.
+  await expect(page.getByTestId('canvas')).toHaveAttribute('data-revision', '4');
+  await expect(editor(page)).toHaveAttribute('data-object-count', '1');
+
+  // Undo in A must not bring back A's pre-adopt scene (the tank) over B's valve.
+  await page.getByTestId('canvas').click({ position: { x: 5, y: 5 }, force: true }).catch(() => undefined);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(editor(page)).toHaveAttribute('data-object-count', '1');
+  await expect(page.getByTestId('canvas')).toHaveAttribute('data-revision', '4');
+
+  // What is stored is still B's version.
+  await other.reload();
+  await expect(editor(other)).toHaveAttribute('data-object-count', '1');
+  await expect(other.getByTestId('canvas')).toHaveAttribute('data-revision', '4');
+});

@@ -1,5 +1,4 @@
 import type { HolodeckDocument } from '@holodeck/sdk';
-import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -28,15 +27,17 @@ export function ConflictDialog({
   mine,
   onLoadLatest,
   onSavedCopy,
+  onDiscard,
 }: {
   name: string;
   latest: VersionedDocument | undefined;
   mine: HolodeckDocument;
   onLoadLatest: (latest: VersionedDocument) => void;
   onSavedCopy: (copyId: string) => void;
+  /** Leave without keeping this tab's edits (document deleted elsewhere). */
+  onDiscard: () => void;
 }) {
   const { mutateAsync: createDocument } = useCreateDocument();
-  const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -76,7 +77,7 @@ export function ConflictDialog({
               Load latest (discard mine)
             </Button>
           ) : (
-            <Button variant="outline" disabled={busy} onClick={() => void navigate({ to: '/' })}>
+            <Button variant="outline" disabled={busy} onClick={onDiscard}>
               Close (discard mine)
             </Button>
           )}

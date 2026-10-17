@@ -92,4 +92,66 @@ describe('DocumentWriter', () => {
     await writer.save(base.document);
     expect(writer.getState().status).toEqual({ kind: 'conflict', latest: undefined });
   });
+
+  // Review of holodeck#102 @ 2b2a498: a successful rename after a failed body
+  // save reported `saved`, so unsaved edits looked saved, could be replaced
+  // by another tab's version, and Mod+S said everything was saved.
+  describe('dirty body', () => {
+    it('a failed body save stays unsaved through a successful rename', async () => {
+      const writer = new DocumentWriter(store, 'p', base.revision);
+      vi.spyOn(store, 'save').mockRejectedValueOnce(new Error('QuotaExceededError'));
+      await writer.save(withObject(base.document, 'tank-1'));
+      const renamed = await writer.rename('Brewhouse');
+      expect(renamed?.revision).toBe(2);
+      expect(writer.getState()).toMatchObject({ dirty: true, status: { kind: 'error', message: 'QuotaExceededError' } });
+      expect(writer.isClean()).toBe(false);
+      // The stored body never got the tank.
+      expect(ids((await store.get('p'))?.document)).toEqual([]);
+    });
+
+    it('Mod+S semantics: re-saving reports the failure while the body cannot be saved, then clears it', async () => {
+      const writer = new DocumentWriter(store, 'p', base.revision);
+      const save = vi.spyOn(store, 'save');
+      save.mockRejectedValueOnce(new Error('disk full')).mockRejectedValueOnce(new Error('disk full'));
+      const working = withObject(base.document, 'tank-1');
+      await writer.save(working);
+      await writer.rename('Brewhouse');
+      // Mod+S: save the working copy again and flush.
+      void writer.save({ ...working, name: 'Brewhouse' });
+      expect(await writer.flush()).toEqual({ kind: 'error', message: 'disk full' });
+      void writer.save({ ...working, name: 'Brewhouse' });
+      expect(await writer.flush()).toEqual({ kind: 'saved' });
+      expect(writer.isClean()).toBe(true);
+      expect(ids((await store.get('p'))?.document)).toEqual(['tank-1']);
+    });
+
+    it('only the latest body save clears dirty', async () => {
+      const writer = new DocumentWriter(store, 'p', base.revision);
+      const one = withObject(base.document, 'a');
+      const save = vi.spyOn(store, 'save');
+      // First save succeeds, the second (newer working copy) fails.
+      save.mockImplementationOnce((doc, rev) => DocumentStore.prototype.save.call(store, doc, rev)).mockRejectedValueOnce(new Error('boom'));
+      void writer.save(one);
+      void writer.save(withObject(one, 'b'));
+      expect(await writer.flush()).toMatchObject({ kind: 'error' });
+      expect(writer.getState().dirty).toBe(true);
+    });
+
+    it('is clean only with nothing queued, unsaved, failed or in conflict', async () => {
+      const writer = new DocumentWriter(store, 'p', base.revision);
+      expect(writer.isClean()).toBe(true);
+      const pending = writer.save(withObject(base.document, 'x'));
+      expect(writer.isClean()).toBe(false);
+      await pending;
+      expect(writer.isClean()).toBe(true);
+      // Another tab saves; this tab's next save conflicts and stays dirty.
+      await store.save(withObject(base.document, 'other'), 2);
+      await writer.save(withObject(base.document, 'mine'));
+      expect(writer.getState()).toMatchObject({ dirty: true, status: { kind: 'conflict' } });
+      expect(writer.isClean()).toBe(false);
+      // Adopting the latest is an explicit choice: clean again.
+      writer.adopt((await store.get('p'))!);
+      expect(writer.isClean()).toBe(true);
+    });
+  });
 });

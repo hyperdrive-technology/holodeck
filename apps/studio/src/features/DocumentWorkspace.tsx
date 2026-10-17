@@ -1,6 +1,7 @@
 import { HOLODECK_KINDS, type HolodeckDocument } from '@holodeck/sdk';
 import { ISO_ENGINE_ID, ProcessEditor, type IsoPlacement, type IsoSceneFile } from '@holodeck/editor-2.5d-react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useBlocker, useNavigate } from '@tanstack/react-router';
 import { useSelector } from '@tanstack/react-store';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { addPart, removePlacement, updatePlacement, usedIsoContributions } from '../documents/iso-scene';
@@ -54,6 +55,7 @@ function DocumentWorkspace({ initial }: { initial: VersionedDocument }) {
   const [doc, setDoc] = useState<IsoDoc>(initial.document as IsoDoc);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const { deleteDocument, openDocument } = useStudioActions();
+  const navigate = useNavigate();
   const inspectorOpen = useSelector(panelStore, (s) => s.inspectorOpen);
   const docRef = useRef(doc);
   docRef.current = doc;
@@ -69,16 +71,36 @@ function DocumentWorkspace({ initial }: { initial: VersionedDocument }) {
   );
   const writerState = useSyncExternalStore(writer.subscribe, writer.getState);
 
+  /**
+   * Bumped on every adopt to remount ProcessEditor. The editor keeps its
+   * undo history across a `load` of the same scene id (editor-state.ts
+   * `loadDocument`), so without a remount Undo after adopting another
+   * version restored a pre-adopt scene and saved it at the adopted revision:
+   * the other version vanished with no conflict (review of holodeck#102 @
+   * 2b2a498). A history-reset prop on ProcessEditor would be cleaner (#100).
+   */
+  const [editorEpoch, setEditorEpoch] = useState(0);
+
   /** Replace the working copy with a stored version (load latest, or another tab's change). */
   const adopt = useCallback(
     (version: VersionedDocument) => {
       const next = version.document as IsoDoc;
       docRef.current = next;
       setDoc(next);
+      setEditorEpoch((n) => n + 1);
       writer.adopt(version);
     },
     [writer],
   );
+
+  // Unsaved, failed or conflicting edits: warn before the tab closes or the
+  // route changes (holodeck#116). `isClean` is read at the moment of leaving.
+  /** Set when the user already chose what happens to their edits (copy saved, discard, delete). */
+  const leaving = useRef(false);
+  useBlocker({
+    shouldBlockFn: () => !leaving.current && !writer.isClean() && !window.confirm('This document has changes that are not saved. Leave anyway?'),
+    enableBeforeUnload: () => !leaving.current && !writer.isClean(),
+  });
 
   const saveWorkingCopy = useCallback(() => {
     void writer.save(docRef.current);
@@ -112,10 +134,10 @@ function DocumentWorkspace({ initial }: { initial: VersionedDocument }) {
     () =>
       channel.subscribe((change) => {
         if (change.id !== initial.document.id || change.type !== 'saved') return;
-        const state = writer.getState();
-        if (writer.busy || state.status.kind !== 'saved' || change.revision <= state.revision) return;
+        // Only a clean working copy (nothing queued, unsaved, failed or in conflict) may be replaced.
+        if (!writer.isClean() || change.revision <= writer.getState().revision) return;
         void store.get(change.id).then((latest) => {
-          if (!latest || writer.busy || writer.getState().status.kind !== 'saved') return;
+          if (!latest || !writer.isClean() || latest.revision <= writer.getState().revision) return;
           adopt(latest);
           notify({ tone: 'info', title: 'Updated with changes from another tab' });
         });
@@ -191,9 +213,12 @@ function DocumentWorkspace({ initial }: { initial: VersionedDocument }) {
         data-document-id={doc.id}
         data-save-status={writerState.status.kind}
         data-revision={writerState.revision}
+        data-dirty={writerState.dirty ? 'true' : 'false'}
+        data-editor-epoch={editorEpoch}
       >
         <CanvasErrorBoundary resetKey={doc.id}>
           <ProcessEditor
+            key={`${doc.id}:${editorEpoch}`}
             scene={doc.body}
             onChange={commitScene}
             mode="edit"
@@ -211,7 +236,10 @@ function DocumentWorkspace({ initial }: { initial: VersionedDocument }) {
             onRename={onRename}
             onPatch={onPatch}
             onDeleteObject={onDeleteObject}
-            onDeleteDocument={() => void deleteDocument(doc.id, { navigateAway: true })}
+            onDeleteDocument={() => {
+              leaving.current = true;
+              void deleteDocument(doc.id, { navigateAway: true });
+            }}
           />
         </SidePanel>
       ) : null}
@@ -224,7 +252,14 @@ function DocumentWorkspace({ initial }: { initial: VersionedDocument }) {
             adopt(latest);
             setSelectedId(null);
           }}
-          onSavedCopy={(copyId) => void openDocument(copyId)}
+          onSavedCopy={(copyId) => {
+            leaving.current = true;
+            void openDocument(copyId);
+          }}
+          onDiscard={() => {
+            leaving.current = true;
+            void navigate({ to: '/' });
+          }}
         />
       ) : null}
     </div>
