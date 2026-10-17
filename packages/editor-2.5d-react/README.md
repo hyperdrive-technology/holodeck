@@ -22,7 +22,7 @@ on grid axes, rotate (`[` / `]`, a multi-selection turns about its centre), nudg
 groups (`placement.group`, Mod+G), z-order (Mod+`[` / `]`), layers (`scene.layers` +
 `placement.layer`: show / hide, lock, active layer for new parts) and a connector tool (C:
 click a part, port or cell, then another; drag a selected connector's end handles to
-re-anchor). Every edit is one undo step. Press `?` for the shortcut list (`editor/shortcuts.ts`).
+re-anchor; "+" midpoint handles add waypoints, double-click removes one). Every edit is one undo step. Press `?` for the shortcut list (`editor/shortcuts.ts`).
 
 ### Host props (Studio, holodeck#100)
 

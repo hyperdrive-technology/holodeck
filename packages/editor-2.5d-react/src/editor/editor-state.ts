@@ -14,7 +14,7 @@ import type { IsoLayer, IsoLinkEnd } from '../objects/validate';
 import { MAX_Z } from '../objects/validate';
 import { alignObjects, distributeObjects, moveBy, moveObjects, rotateObjectsAbout, type AlignEdge, type DistributeAxis } from './arrange';
 import { copyObjects, pasteObjects, removeObjects } from './clipboard';
-import { anchorAt, buildConnector, reanchor, sameLinkEnd } from './connect';
+import { anchorAt, buildConnector, insertWaypoint, moveWaypoint, reanchor, removeWaypoint, sameLinkEnd } from './connect';
 import { DEFAULT_LAYER_ID, DEFAULT_LAYER_NAME, expandGroups, isPlacementEditable, isPlacementHidden, nextFreeId, sceneLayers, withLayer } from './layers';
 
 /** Which on-canvas handle a resize drag grabbed. */
@@ -27,6 +27,9 @@ export const REROUTE_FAILED_NOTICE = 'Could not reroute — original run kept';
 
 /** Rerouting is atomic when the carried parts cannot fit on the new run. */
 export const INLINE_PARTS_NO_ROUTE_NOTICE = 'No clear route — inline parts do not fit';
+
+/** Reroute refused because part of the run (or a part on it) is on a locked or hidden layer. */
+export const REROUTE_LOCKED_NOTICE = 'Reroute rejected — part of the run is on a locked or hidden layer';
 
 export const RETAINED_CONNECTIONS_NO_ROUTE_NOTICE = 'Reroute rejected — could not verify retained connections';
 
@@ -65,7 +68,7 @@ export interface EditorState {
   /** First end of a connector being drawn (`draw-connector` mode). */
   linkStart: IsoLinkEnd | null;
   /** Connector end handle being dragged (holodeck#91); drops at `cursor`. */
-  linkDrag: { id: string; end: LinkEndName } | null;
+  linkDrag: { id: string; end: LinkEndName } | { id: string; end: 'via'; index: number } | null;
   /**
    * Id of the placement the last action stamped from `place` mode, else null.
    * Cleared by the next action; `ProcessEditor` reports it via `onPlaced`.
@@ -119,8 +122,17 @@ export type EditorAction =
   | { type: 'select-all' }
   /** Connector tool: click an object / port / cell, then another (holodeck#91). */
   | { type: 'connector-mode' }
-  /** Grab a selected connector's end handle; `link-drag-end` re-anchors it at the drop cell. */
+  /**
+   * Grab a selected connector's end handle (`link-drag-end` re-anchors it at
+   * the drop cell) or a waypoint handle (`end: 'via'`, `index`: the drop cell
+   * moves `link.via[index]`).
+   */
   | { type: 'link-drag-start'; id: string; end: LinkEndName }
+  | { type: 'link-drag-start'; id: string; end: 'via'; index: number }
+  /** Insert a connector waypoint before `link.via[index]` (holodeck#112). One undo step. */
+  | { type: 'waypoint-insert'; id: string; index: number; x: number; y: number }
+  /** Remove `link.via[index]`. One undo step. */
+  | { type: 'waypoint-remove'; id: string; index: number }
   | { type: 'link-drag-end'; x?: number; y?: number }
   /** Copy the selection to the editor clipboard (not a commit). */
   | { type: 'copy' }
@@ -364,6 +376,12 @@ function rerouteSelected(state: EditorState): EditorState {
     const host = hostPipeOf(o, state.scene.objects);
     return host !== null && ids.has(host.id) && !ids.has(o.id);
   });
+  // holodeck#122: a reroute replaces every run member and rewrites the parts
+  // hosted on it. If any of them is on a locked or hidden layer, refuse rather
+  // than silently replacing it with an unlocked, visible copy.
+  if (state.scene.objects.some((o) => (ids.has(o.id) || hosted.includes(o)) && !isPlacementEditable(state.scene, o))) {
+    return { ...state, notice: REROUTE_LOCKED_NOTICE };
+  }
   const retainedPipes = state.scene.objects.filter((o) => !ids.has(o.id) && isPipePlacement(o));
   // An onPipe attachment does not imply that this is the part's only
   // connection. Retained branches (including a second pipe passing through
@@ -605,15 +623,21 @@ function deleteSelection(state: EditorState): EditorState {
 /** Shown when a paste skipped invalid clipboard records; the first reason is included. */
 export const PASTE_REJECTED_PREFIX = 'Paste rejected';
 
-function pasteInto(state: EditorState, clip: readonly unknown[]): EditorState {
+/**
+ * `layers: 'active'` (paste): everything lands on the active layer, the
+ * default layer included (holodeck#121: passing nothing for Default used to
+ * keep the copied part's layer). `'source'` (duplicate): a copy in place keeps
+ * its own layer when the scene declares it.
+ */
+function pasteInto(state: EditorState, clip: readonly unknown[], layers: 'active' | 'source' = 'active'): EditorState {
   if (!Array.isArray(clip) || clip.length === 0) return state;
-  const layer = activeLayerOf(state);
-  const { objects, ids, rejected } = pasteObjects(state.scene, clip, state.registry, layer === DEFAULT_LAYER_ID ? {} : { layer });
+  const opts = layers === 'active' ? { layer: activeLayerOf(state) } : {};
+  const { objects, ids, rejected, skipped } = pasteObjects(state.scene, clip, state.registry, opts);
   if (ids.length === 0) {
     return { ...state, notice: `${PASTE_REJECTED_PREFIX}: ${rejected[0] ?? 'nothing to paste'}` };
   }
-  const notice = rejected.length
-    ? `Pasted ${ids.length} of ${ids.length + rejected.length} parts; skipped: ${rejected[0]}`
+  const notice = skipped > 0
+    ? `Pasted ${ids.length} of ${ids.length + skipped} parts; skipped: ${rejected[0]}`
     : null;
   return commit(state, { ...state.scene, objects }, { ...selection(ids), mode: 'select', placing: null, pipeStart: null, linkStart: null, notice });
 }
@@ -634,11 +658,25 @@ function connectorClick(state: EditorState, click: GridPoint): EditorState {
   );
 }
 
+/** The placement `id` when it is a connector the user may edit (not on a locked / hidden layer). */
+function editableConnector(state: EditorState, id: string): IsoPlacement | null {
+  const connector = state.scene.objects.find((o) => o.id === id);
+  if (!connector || !selectable(state, connector)) return null;
+  return state.registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, connector.object)?.connector ? connector : null;
+}
+
 function linkDragEnd(state: EditorState, cell: GridPoint | null): EditorState {
   const drag = state.linkDrag;
   if (!drag) return state;
   const connector = state.scene.objects.find((o) => o.id === drag.id);
   if (!connector || !cell) return { ...state, linkDrag: null };
+  if (drag.end === 'via') {
+    const moved = moveWaypoint(connector, drag.index, cell);
+    const before = connector.link?.via?.[drag.index];
+    if (moved === connector || (before && before.x === cell.x && before.y === cell.y)) return { ...state, linkDrag: null };
+    const objects = state.scene.objects.map((o) => (o.id === connector.id ? moved : o));
+    return commit(state, { ...state.scene, objects }, { linkDrag: null });
+  }
   const anchor = anchorAt(state.scene, state.registry, cell, new Set([connector.id]));
   const current = connector.link?.[drag.end];
   const unchanged = current
@@ -718,6 +756,12 @@ function numberParam(obj: IsoPlacement, param: string, fallback: unknown): numbe
 }
 
 export function editorReducer(state: EditorState, action: EditorAction): EditorState {
+  const out = reduceChecked(state, action);
+  // Notices can quote untrusted input (clipboard records, validator messages): cap them (holodeck#119).
+  return out.notice && out.notice.length > MAX_NOTICE_LENGTH ? { ...out, notice: capNotice(out.notice) } : out;
+}
+
+function reduceChecked(state: EditorState, action: EditorAction): EditorState {
   // Nothing may throw out of here: in ProcessEditor a throw inside useReducer
   // unmounts the editor and loses unsaved history (PR #114 review). Any
   // failure while reducing is reported like a rejected edit instead.
@@ -769,6 +813,13 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
   }
   const setsNotice = next.notice !== state.notice || action.type === 'floor-click' || action.type === 'reroute-selected';
   return next.notice && !setsNotice && !NOTICE_KEEPERS.has(action.type) ? { ...next, notice: null } : next;
+}
+
+/** Longest `notice` the editor shows; longer ones are cut with an ellipsis. */
+export const MAX_NOTICE_LENGTH = 200;
+
+export function capNotice(text: string): string {
+  return text.length > MAX_NOTICE_LENGTH ? `${text.slice(0, MAX_NOTICE_LENGTH - 1)}…` : text;
 }
 
 /**
@@ -1027,7 +1078,7 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
     case 'paste':
       return pasteInto(state, action.objects ?? state.clipboard ?? []);
     case 'duplicate':
-      return pasteInto(state, copyObjects(state.scene, new Set(state.selectedIds), state.registry));
+      return pasteInto(state, copyObjects(state.scene, new Set(state.selectedIds), state.registry), 'source');
     case 'nudge': {
       if (!Number.isFinite(action.dx) || !Number.isFinite(action.dy)) return state;
       const ids = new Set(state.selectedIds);
@@ -1082,7 +1133,24 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
       if (!connector || !selectable(state, connector) || !state.registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, connector.object)?.connector) {
         return state;
       }
-      return { ...state, ...selection([action.id]), mode: 'select', placing: null, pipeStart: null, linkStart: null, drag: null, resize: null, linkDrag: { id: action.id, end: action.end } };
+      const linkDrag: EditorState['linkDrag'] = action.end === 'via' ? { id: action.id, end: 'via', index: action.index } : { id: action.id, end: action.end };
+      if (linkDrag.end === 'via' && !connector.link?.via?.[linkDrag.index]) return state;
+      return { ...state, ...selection([action.id]), mode: 'select', placing: null, pipeStart: null, linkStart: null, drag: null, resize: null, linkDrag };
+    }
+    case 'waypoint-insert':
+    case 'waypoint-remove': {
+      const connector = editableConnector(state, action.id);
+      if (!connector) return state;
+      let next: IsoPlacement;
+      if (action.type === 'waypoint-insert') {
+        if (!Number.isFinite(action.x) || !Number.isFinite(action.y)) return state;
+        next = insertWaypoint(connector, action.index, { x: action.x, y: action.y });
+      } else {
+        next = removeWaypoint(connector, action.index);
+      }
+      if (next === connector) return state;
+      const objects = state.scene.objects.map((o) => (o.id === connector.id ? next : o));
+      return commit(state, { ...state.scene, objects }, { ...selection([connector.id]), linkDrag: null });
     }
     case 'link-drag-end': {
       const cell = action.x !== undefined && action.y !== undefined ? { x: action.x, y: action.y } : state.cursor;

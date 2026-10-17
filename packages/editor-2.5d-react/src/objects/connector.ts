@@ -206,3 +206,56 @@ export function freeConnectorPath(connector: IsoPlacement): ConnectorPath | null
   const points = simplifyPolyline([from, ...(link.via ?? []).map((p): Vec2 => [p.x, p.y]), to]);
   return points.length >= 2 ? { points, fallback: false } : null;
 }
+
+const ROUTES: ReadonlySet<string> = new Set(['auto', 'straight']);
+
+const isConnectorPart = (o: IsoPlacement, registry: ContributionRegistry) =>
+  registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, o.object)?.connector === true;
+
+/** A connector's live `route` value from `metrics`, when it is a valid route that differs from the static one. */
+function liveRoute(o: IsoPlacement, metrics: Readonly<Record<string, Readonly<Record<string, unknown>>>> | undefined): ConnectorRoute | null {
+  const v = metrics?.[o.id]?.route;
+  if (typeof v !== 'string' || !ROUTES.has(v)) return null;
+  return v === (o.params?.route ?? 'auto') ? null : (v as ConnectorRoute);
+}
+
+/**
+ * Placements with each connector's live `route` (holodeck#107: a binding on
+ * `route` changes the path, not just the look). Paths are resolved from
+ * placements, and live values arrive through `metrics`, so SceneGraph applies
+ * them here before `resolveConnectorPaths`. Returns `objects` itself when no
+ * connector's route is overridden, so memoised consumers keep a stable array.
+ * Invalid values ("diagonal", numbers) are ignored like any bad metric.
+ */
+export function liveConnectorObjects(
+  objects: readonly IsoPlacement[],
+  metrics: Readonly<Record<string, Readonly<Record<string, unknown>>>> | undefined,
+  registry: ContributionRegistry,
+): readonly IsoPlacement[] {
+  if (!metrics) return objects;
+  let out: IsoPlacement[] | null = null;
+  objects.forEach((o, i) => {
+    if (!(o.id in metrics) || !isConnectorPart(o, registry)) return;
+    const route = liveRoute(o, metrics);
+    if (!route) return;
+    out ??= [...objects];
+    out[i] = { ...o, params: { ...o.params, route } };
+  });
+  return out ?? objects;
+}
+
+/** Memo key of the live connector routes: changes only when a connector's effective route changes. */
+export function connectorRouteKey(
+  objects: readonly IsoPlacement[],
+  metrics: Readonly<Record<string, Readonly<Record<string, unknown>>>> | undefined,
+  registry: ContributionRegistry,
+): string {
+  if (!metrics) return '';
+  const parts: string[] = [];
+  for (const o of objects) {
+    if (!(o.id in metrics) || !isConnectorPart(o, registry)) continue;
+    const route = liveRoute(o, metrics);
+    if (route) parts.push(`${o.id}=${route}`);
+  }
+  return parts.join('|');
+}

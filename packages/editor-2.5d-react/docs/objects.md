@@ -106,9 +106,12 @@ obstacles for pipe routing. The editor's Layers tab edits all of this as undoabl
 
 In the editor, the connector tool (C) draws a connector with two clicks (a part, its port within one
 cell, or an empty cell), dragging a selected connector's end handles re-anchors or frees that end, and
-deleting a part turns connector ends anchored to it into free points where they were.
+deleting a part turns connector ends anchored to it into free points where they were. Waypoints: a selected
+connector shows a small "+" handle in the middle of each segment; press and drag it to insert a
+waypoint (`link.via`), drag a square waypoint handle to move it, double-click it to remove it. Each
+is one undo step. A live `route` value (a binding on the `route` param) re-routes the line like the
+static param does.
 
 ## Not here yet
 
 - The `chart` widget (time series from a provider's `history`): holodeck#90.
-- Adding / removing connector waypoints (`link.via`) in the editor; today they come from scene JSON.

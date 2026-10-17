@@ -9,7 +9,7 @@
  */
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
-import { resolveLinkEnd, DEFAULT_CONNECTOR_LENGTH } from '../objects/connector';
+import { resolveConnectorPath, resolveLinkEnd, DEFAULT_CONNECTOR_LENGTH } from '../objects/connector';
 import type { IsoLinkEnd } from '../objects/validate';
 import type { IsoPartDefinition } from '../registry/types';
 import { isRunPlacement } from '../registry/geometry';
@@ -157,4 +157,92 @@ export function reanchor(
   if (link.from || link.to || link.via) next.link = link;
   else delete next.link;
   return next;
+}
+
+/*
+ * Waypoints (`link.via`, holodeck#112). A connector with waypoints is a fixed
+ * polyline from -> via... -> to (no routing), so the first inserted waypoint
+ * also "pins" an auto-routed line. Index i of `via` sits between logical
+ * segment i (ending at it) and segment i + 1 (starting at it).
+ */
+
+type Via = NonNullable<NonNullable<IsoPlacement['link']>['via']>;
+
+function withVia(connector: IsoPlacement, via: Via): IsoPlacement {
+  const link: NonNullable<IsoPlacement['link']> = { ...connector.link };
+  if (via.length) link.via = via;
+  else delete link.via;
+  const next: IsoPlacement = { ...connector };
+  if (link.from || link.to || link.via) next.link = link;
+  else delete next.link;
+  return next;
+}
+
+/** Insert a waypoint before `via[index]` (index = via.length appends). Out-of-range: the same object. */
+export function insertWaypoint(connector: IsoPlacement, index: number, point: GridPoint): IsoPlacement {
+  const via = connector.link?.via ?? [];
+  if (!Number.isInteger(index) || index < 0 || index > via.length) return connector;
+  return withVia(connector, [...via.slice(0, index), { x: point.x, y: point.y }, ...via.slice(index)]);
+}
+
+export function moveWaypoint(connector: IsoPlacement, index: number, point: GridPoint): IsoPlacement {
+  const via = connector.link?.via ?? [];
+  if (!Number.isInteger(index) || index < 0 || index >= via.length) return connector;
+  return withVia(connector, via.map((p, i) => (i === index ? { x: point.x, y: point.y } : p)));
+}
+
+/** Remove `via[index]`; the last one removed drops `via` (and an empty `link`). */
+export function removeWaypoint(connector: IsoPlacement, index: number): IsoPlacement {
+  const via = connector.link?.via ?? [];
+  if (!Number.isInteger(index) || index < 0 || index >= via.length) return connector;
+  return withVia(connector, via.filter((_, i) => i !== index));
+}
+
+/** Snap a handle position to the half-cell grid the editor uses elsewhere. */
+const half = (v: number) => Math.round(v * 2) / 2;
+
+/**
+ * "+" handles for inserting a waypoint: the midpoint of each logical segment
+ * (from -> via... -> to) with the `via` index to insert at. A connector with
+ * no waypoints gets one handle at the middle of its drawn (routed) path, so
+ * the handle sits on the line the user sees.
+ */
+export function waypointInsertHandles(
+  scene: Pick<IsoSceneFile, 'objects'>,
+  registry: ContributionRegistry,
+  connector: IsoPlacement,
+): Array<{ index: number; point: GridPoint }> {
+  const via = connector.link?.via ?? [];
+  if (via.length === 0) {
+    const path = resolveConnectorPath(connector, scene.objects, registry);
+    if (!path) return [];
+    const mid = polylineMidpoint(path.points.map(([x, y]) => ({ x, y })));
+    return mid ? [{ index: 0, point: { x: half(mid.x), y: half(mid.y) } }] : [];
+  }
+  const from = connectorEndPoint(scene, registry, connector, 'from');
+  const to = connectorEndPoint(scene, registry, connector, 'to');
+  if (!from || !to) return [];
+  const pts = [from, ...via, to];
+  return pts.slice(1).map((b, i) => {
+    const a = pts[i]!;
+    return { index: i, point: { x: half((a.x + b.x) / 2), y: half((a.y + b.y) / 2) } };
+  });
+}
+
+/** Point halfway along a polyline by length. */
+export function polylineMidpoint(points: readonly GridPoint[]): GridPoint | null {
+  if (points.length === 0) return null;
+  const lens = points.slice(1).map((b, i) => Math.hypot(b.x - points[i]!.x, b.y - points[i]!.y));
+  let remaining = lens.reduce((a, b) => a + b, 0) / 2;
+  for (let i = 0; i < lens.length; i += 1) {
+    const len = lens[i]!;
+    if (remaining <= len && len > 0) {
+      const a = points[i]!;
+      const b = points[i + 1]!;
+      const t = remaining / len;
+      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+    }
+    remaining -= len;
+  }
+  return points[points.length - 1]!;
 }

@@ -93,6 +93,8 @@ export interface PasteResult {
   ids: string[];
   /** One message per clipboard record that failed validation and was left out. */
   rejected: string[];
+  /** Clipboard records left out: invalid ones plus every record past `MAX_CLIPBOARD_OBJECTS` (holodeck#120). */
+  skipped: number;
 }
 
 /**
@@ -108,14 +110,14 @@ export interface PasteResult {
 export function sanitizeClip(
   clip: readonly unknown[],
   registry: ContributionRegistry,
-): { valid: IsoPlacement[]; rejected: string[] } {
+): { valid: IsoPlacement[]; rejected: string[]; skipped: number } {
   const valid: IsoPlacement[] = [];
   const rejected: string[] = [];
+  // One message for the overflow, but every overflow record counts as skipped.
+  const overflow = Math.max(0, clip.length - MAX_CLIPBOARD_OBJECTS);
+  if (overflow > 0) rejected.push(`${overflow} parts over the ${MAX_CLIPBOARD_OBJECTS}-part paste limit`);
   clip.forEach((raw, i) => {
-    if (i >= MAX_CLIPBOARD_OBJECTS) {
-      if (i === MAX_CLIPBOARD_OBJECTS) rejected.push(`more than ${MAX_CLIPBOARD_OBJECTS} parts`);
-      return;
-    }
+    if (i >= MAX_CLIPBOARD_OBJECTS) return;
     try {
       const placement = validatePlacementGeometry(raw, registry);
       validatePlacementPart(placement, registry);
@@ -124,7 +126,7 @@ export function sanitizeClip(
       rejected.push(error instanceof Error ? error.message : String(error));
     }
   });
-  return { valid, rejected };
+  return { valid, rejected, skipped: clip.length - valid.length };
 }
 
 /**
@@ -138,8 +140,8 @@ export function pasteObjects(
   registry: ContributionRegistry,
   opts: { layer?: string } = {},
 ): PasteResult {
-  const { valid: clip, rejected } = sanitizeClip(untrusted, registry);
-  if (clip.length === 0) return { objects: scene.objects, ids: [], rejected };
+  const { valid: clip, rejected, skipped } = sanitizeClip(untrusted, registry);
+  if (clip.length === 0) return { objects: scene.objects, ids: [], rejected, skipped };
   const taken = new Set(scene.objects.map((o) => o.id));
   const idMap = new Map<string, string>();
   for (const o of clip) {
@@ -189,7 +191,7 @@ export function pasteObjects(
   const settled = fresh.map((o) =>
     o.onPipe === undefined && isInlinePart(o, registry) ? withAttachment(o, objects) : o,
   );
-  return { objects: [...scene.objects, ...settled], ids: settled.map((o) => o.id), rejected };
+  return { objects: [...scene.objects, ...settled], ids: settled.map((o) => o.id), rejected, skipped };
 }
 
 function cascadeOffset(existing: readonly IsoPlacement[], clip: readonly IsoPlacement[]): number {

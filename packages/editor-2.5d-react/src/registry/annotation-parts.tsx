@@ -9,6 +9,7 @@
 import { Connector, connectorLook } from '../objects/ConnectorLine';
 import { connectorExtent, freeConnectorPath } from '../objects/connector';
 import { BUILTIN_ICON_NAMES, MAX_GLYPH_LENGTH } from '../objects/icons';
+import { imageAspect } from '../objects/image-aspect';
 import { IconMark, ImageMark, type MarkOrient } from '../objects/Marks';
 import { gridToWorld } from '../iso/grid';
 import type { IsoPartDefinition, IsoPartParamSpec, IsoPartProps } from './types';
@@ -116,7 +117,10 @@ export const IMAGE_PART: IsoPartDefinition = {
   },
   extent: (p) => {
     const w = numberOr(p.params?.width, 2);
-    const h = numberOr(p.params?.height, 0) || w;
+    // height 0 = width / the loaded aspect, as ImageMarkLoaded draws it
+    // (holodeck#108); square until the image has loaded.
+    const src = typeof p.params?.src === 'string' ? p.params.src : '';
+    const h = numberOr(p.params?.height, 0) || w / (imageAspect(src) ?? 1);
     return { minX: p.x - w / 2, minY: p.y - h / 2, maxX: p.x + w / 2, maxY: p.y + h / 2 };
   },
   component: ImagePart,
