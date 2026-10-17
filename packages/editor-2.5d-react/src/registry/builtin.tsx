@@ -355,7 +355,8 @@ export const BUILTIN_ISO_PARTS: readonly IsoPartDefinition[] = [
     params: {
       text: { type: 'string', label: 'Text', default: '' },
       // Live reading (bind a tag here). Absent = static label. See label-text.ts.
-      value: { type: 'number', label: 'Value', default: undefined },
+      // A number, an ON/OFF boolean (`format: 'onoff'`) or a text state: see label-text.ts.
+      value: { type: 'number', label: 'Value', default: undefined, reading: true },
       unit: { type: 'string', label: 'Unit', default: '' },
       format: { type: 'enum', label: 'Format', default: 'auto', options: ['auto', 'int', 'onoff'] },
       // `{"0":"HeatHLT"}` or "0=HeatHLT,1=FillMash"; object-valued in scene files, so no inspector control.

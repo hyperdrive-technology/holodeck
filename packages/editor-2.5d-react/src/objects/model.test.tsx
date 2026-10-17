@@ -70,6 +70,9 @@ describe('param specs', () => {
     expect(isParamSpec({ type: 'enum', label: 'e', default: 'z', options: ['a'] })).toBe(false);
     expect(isParamSpec({ type: 'enum', label: 'e', default: 'a', options: ['a', 3] })).toBe(false);
     expect(isParamSpec({ type: 'string', label: 's', default: '', format: 'url' })).toBe(true);
+    expect(isParamSpec({ type: 'number', label: 'v', default: undefined, reading: true })).toBe(true);
+    expect(isParamSpec({ type: 'string', label: 'v', default: '', reading: true })).toBe(false);
+    expect(isParamSpec({ type: 'number', label: 'v', default: 0, reading: 'yes' })).toBe(false);
   });
 
   it('every built-in part passes the registry validator (incl. the new params)', () => {
@@ -152,16 +155,22 @@ describe('extents: sceneBounds and fit include connector ends and image sizes', 
 describe('pooling and routing', () => {
   const registry = createIsoRegistryWithBuiltins();
 
-  it('faded or z-ordered placements of pooled parts render as unique meshes', () => {
+  it('faded, z-ordered or metadata-carrying placements of pooled parts render as unique meshes', () => {
     const objects: IsoPlacement[] = [
       { id: 'v1', object: 'valve', x: 0, y: 0 },
       { id: 'v2', object: 'valve', x: 1, y: 0, opacity: 0.5 },
       { id: 'v3', object: 'valve', x: 2, y: 0, z: 1 },
       { id: 'v4', object: 'valve', x: 3, y: 0, opacity: 1, z: 0 },
     ];
+    objects.push(
+      { id: 'v5', object: 'valve', x: 4, y: 0, meta: { tag: 'XV-101' } },
+      { id: 'v6', object: 'valve', x: 5, y: 0, meta: { tag: 'XV-102' }, metaHidden: true },
+      { id: 'v7', object: 'valve', x: 6, y: 0, meta: {} },
+    );
     const { pools, unique } = partitionByPart(objects, registry);
-    expect(pools.get('valve')!.map((o) => o.id)).toEqual(['v1', 'v4']);
-    expect(unique.map((o) => o.id)).toEqual(['v2', 'v3']);
+    // holodeck#95: a visible metadata plane is drawn by SceneObjectView only, so that placement is unique too.
+    expect(pools.get('valve')!.map((o) => o.id)).toEqual(['v1', 'v4', 'v6', 'v7']);
+    expect(unique.map((o) => o.id)).toEqual(['v2', 'v3', 'v5']);
   });
 
   it('connectors, icons and images are floor annotations: never obstacles, never run ends', () => {

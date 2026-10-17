@@ -11,6 +11,7 @@ import {
   MAX_PARAM_STRING,
   MAX_URL_LENGTH,
   metaProblems,
+  normalizeUrlForScheme,
   paramsProblems,
   paramValueProblem,
 } from './validate';
@@ -30,6 +31,16 @@ describe('assetUrlProblem', () => {
     'rejects scheme %s',
     (url) => expect(assetUrlProblem(url)).toMatch(/scheme/),
   );
+  // holodeck#96: browsers strip leading/trailing C0 + space and drop tab/LF/CR anywhere before reading the scheme.
+  it.each([' javascript:alert(1)', '\tfile:///etc/passwd', '\u0000javascript:x', 'java\tscript:alert(1)', 'jav\nascript:x', '\r\njavascript:x', 'javascript:x '])(
+    'rejects a disguised scheme %j',
+    (url) => expect(assetUrlProblem(url)).toMatch(/scheme/),
+  );
+  it('normalizeUrlForScheme mirrors the browser pre-parse', () => {
+    expect(normalizeUrlForScheme('  \t/logo.svg \n')).toBe('/logo.svg');
+    expect(normalizeUrlForScheme('ja\tva\nscript:x')).toBe('javascript:x');
+    expect(assetUrlProblem(' /logo.svg ')).toBeNull();
+  });
   it('rejects empty, whitespace, non-strings and oversized URLs', () => {
     expect(assetUrlProblem('')).toMatch(/non-empty/);
     expect(assetUrlProblem('   ')).toMatch(/non-empty/);
@@ -54,6 +65,17 @@ describe('paramValueProblem', () => {
       expect(paramValueProblem(spec, undefined)).toBeNull();
     }
   });
+  it('reading numbers (label value) also take booleans and bounded strings', () => {
+    const reading: IsoPartParamSpec = { type: 'number', label: 'v', default: undefined, reading: true, min: 0, max: 10 };
+    for (const ok of [true, false, 'Idle', 5]) expect(paramValueProblem(reading, ok)).toBeNull();
+    expect(paramValueProblem(reading, 11)).toMatch(/<= 10/);
+    expect(paramValueProblem(reading, Infinity)).toMatch(/finite/);
+    expect(paramValueProblem(reading, { a: 1 })).toMatch(/finite/);
+    expect(paramValueProblem({ ...reading, maxLength: 3 }, 'abcd')).toMatch(/at most 3/);
+    // Without the flag a number param stays numbers-only.
+    expect(paramValueProblem({ type: 'number', label: 'n', default: 0 }, false)).toMatch(/finite number/);
+  });
+
   it('booleans, enums and colours', () => {
     expect(paramValueProblem({ type: 'boolean', label: 'b', default: false }, 1)).toMatch(/boolean/);
     const e: IsoPartParamSpec = { type: 'enum', label: 'e', default: 'a', options: ['a', 'b'] };

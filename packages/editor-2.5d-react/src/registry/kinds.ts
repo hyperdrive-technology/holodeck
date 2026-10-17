@@ -25,6 +25,7 @@ export function isParamSpec(v: unknown): v is IsoPartParamSpec {
     if (v[bound] !== undefined && !isNum(v[bound])) return false;
   }
   if (isNum(v.min) && isNum(v.max) && v.min > v.max) return false;
+  if (v.reading !== undefined && (typeof v.reading !== 'boolean' || v.type !== 'number')) return false;
   // The default must itself be a value the spec accepts (undefined = "no default").
   return paramValueProblem(v as unknown as IsoPartParamSpec, v.default) === null;
 }

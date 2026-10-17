@@ -32,6 +32,13 @@ export interface IsoPartParamSpec {
   hidden?: boolean;
   /** `type: 'string'`: longest accepted value (default `MAX_PARAM_STRING`, 4096). */
   maxLength?: number;
+  /**
+   * A live reading (label `value`): besides a number of this spec, scene files
+   * and hosts may store a boolean (ON/OFF readings, `format: 'onoff'`) or a
+   * string (enum names, text states). Numbers are still checked against
+   * min/max; strings against `maxLength`.
+   */
+  reading?: boolean;
   /** `type: 'string'`: `url` = an asset URL (http(s), blob:, data:image or relative; see `assetUrlProblem`). */
   format?: 'url';
 }

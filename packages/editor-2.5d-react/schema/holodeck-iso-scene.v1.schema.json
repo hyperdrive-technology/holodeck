@@ -80,7 +80,7 @@
       }
     },
     "paramValue": {
-      "description": "Param values are checked against the installed part's param specs by the TS validator; here only JSON-level finiteness.",
+      "description": "Param values are checked against the installed part's param specs by the TS validator; here only JSON-level finiteness. Reading params (label `value`) take a number, a boolean (ON/OFF, format onoff) or a string state, so this schema keeps every scalar type.",
       "oneOf": [
         { "type": ["string", "boolean", "null", "object", "array"] },
         { "$ref": "#/$defs/finiteNumber" }

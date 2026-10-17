@@ -45,6 +45,16 @@ export function isGridNumber(v: unknown): v is number {
 }
 
 /**
+ * What a browser's URL parser sees before it reads the scheme (WHATWG URL
+ * spec): leading / trailing C0 controls and spaces are stripped, and ASCII
+ * tab / LF / CR are removed anywhere. Without this, " javascript:x" or
+ * "java\tscript:x" looked like relative paths to the scheme check (holodeck#96).
+ */
+export function normalizeUrlForScheme(v: string): string {
+  return v.replace(/[\t\n\r]/g, '').replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, '');
+}
+
+/**
  * Asset URL accepted for logos and images: relative paths, http(s), blob: and
  * `data:image/...`. Anything else (`javascript:`, `file:`, ...) is rejected:
  * scene files are shareable documents and must not smuggle other schemes in.
@@ -52,7 +62,7 @@ export function isGridNumber(v: unknown): v is number {
 export function assetUrlProblem(v: unknown): string | null {
   if (typeof v !== 'string' || v.trim() === '') return 'must be a non-empty URL string';
   if (v.length > MAX_URL_LENGTH) return `must be at most ${MAX_URL_LENGTH} characters`;
-  const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(v)?.[1]?.toLowerCase();
+  const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(normalizeUrlForScheme(v))?.[1]?.toLowerCase();
   if (scheme === undefined) return null; // relative path
   if (scheme === 'http' || scheme === 'https' || scheme === 'blob') return null;
   if (scheme === 'data' && /^data:image\//i.test(v)) return null;
@@ -68,6 +78,12 @@ export function paramValueProblem(spec: IsoPartParamSpec, value: unknown): strin
   if (value === undefined || value === null) return null;
   switch (spec.type) {
     case 'number': {
+      // Readings (label `value`) may also be ON/OFF booleans or text states (core's brewery scenes use `false`).
+      if (spec.reading && typeof value === 'boolean') return null;
+      if (spec.reading && typeof value === 'string') {
+        const max = spec.maxLength ?? MAX_PARAM_STRING;
+        return value.length <= max ? null : `must be at most ${max} characters`;
+      }
       if (typeof value !== 'number' || !Number.isFinite(value)) return `must be a finite number, got ${String(value)}`;
       if (spec.min !== undefined && value < spec.min) return `must be >= ${spec.min}, got ${value}`;
       if (spec.max !== undefined && value > spec.max) return `must be <= ${spec.max}, got ${value}`;
