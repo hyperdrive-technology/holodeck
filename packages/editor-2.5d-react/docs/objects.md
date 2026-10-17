@@ -48,13 +48,15 @@ A part definition needs no React `component`. Without one it renders through `Da
 - `model` (optional): a GLB styled by the active theme (`applyHolodeckStyle`); `colors.body` recolours
   `hd.white`, `colors.accent` recolours `hd.accent` (a placement's `color` beats it), `colors.edge` the
   outlines. Without a model the part is a plain block of the footprint and `blockHeight` (default 1).
-- `logo`: a textured plane on the top face, grid-aligned, letterboxed to the image's aspect.
+- `logo`: a textured plane on the model's logo face (the top face unless the GLB's `logo` empty says
+  otherwise), grid-aligned, letterboxed to the image's aspect.
   **Logo-plane contract (Blender archetypes, lane A1):** if the GLB has an empty named `logo`, the
-  plane sits at that empty facing up and its X/Z scale is the edge length (a unit empty = 1 world
-  unit; `logo.size` overrides). Without one the plane sits on the model's bounding-box top, 60% of the
-  short side. The empty's rotation is ignored today; `@holodeck/library-cloud`'s `cloud:billboard`
-  authors its empty on the sign's front face (local +Y = face normal, local −Z = image top) and
-  needs `logoAnchorFromModel` to honour that orientation before its logo stands upright (holodeck#138).
+  plane sits at that empty in its orientation (the empty's local +Y is the face normal, local −Z the
+  image top; an unrotated empty = a flat top-face logo) and its X/Z scale is the edge length (a unit
+  empty = 1 world unit; `logo.size` overrides). The small lift off the face is applied along the
+  normal, so an upright sign (`cloud:billboard`, empty rotated (π/2, 0, 0) onto the +Z face) shows its
+  logo standing on the front face (holodeck#138). Without an empty the plane lies flat on the model's
+  bounding-box top, 60% of the short side.
 - `floor: true` makes a pack part a floor annotation (never a routing obstacle); `extent(placement)`
   tells fit-to-view about anything beyond the footprint.
 

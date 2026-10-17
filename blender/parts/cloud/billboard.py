@@ -2,10 +2,9 @@
 
 Contract difference: this is the one archetype whose `logo` empty is not on
 the top face. It sits on the sign's front (+Z) face, rotated so its local
-+Y is the face normal; its local X/Z scale is still the square edge. E2's
-`logoAnchorFromModel` currently ignores the empty's rotation and always
-lays the plane flat, so until E2 honours the orientation the billboard
-logo renders inside the panel (holodeck#138).
++Y is the face normal (local -Z is the image top); its local X/Z scale is
+still the square edge. E2's `logoAnchorFromModel` reads that rotation, so
+the logo plane stands upright on the front face.
 """
 
 import math

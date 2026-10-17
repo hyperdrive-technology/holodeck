@@ -18,7 +18,7 @@ import { resolveRouteEnd } from '../routing/ports';
 import { footprint, planRoute, type PlannedRoute } from './routing';
 import { pointerToGrid } from './snap';
 import { stamp, type EditorState, type LinkEndName, type ResizeHandle } from './editor-state';
-import { connectorEndPoint, linkEndPoint, waypointInsertHandles } from './connect';
+import { canInsertWaypoint, connectorEndPoint, linkEndPoint, waypointInsertHandles } from './connect';
 import { isPlacementEditable, visibleObjects } from './layers';
 import { isClickSized, marqueeHits, rectFromPoints, type ScreenRect } from './marquee';
 
@@ -512,6 +512,8 @@ function LinkHandles({
                 name={`waypoint-insert-${index}`}
                 position={[wx, 0.22, wz]}
                 onPointerDown={press(() => {
+                  // At the limit the insert is rejected and the drag would grab via[index] (holodeck#126).
+                  if (!canInsertWaypoint(connector)) return;
                   // Insert (one undo step), then keep dragging the new waypoint (a second step if it moves).
                   waypoints.insert(connector.id, index, point.x, point.y);
                   waypoints.drag(connector.id, index);

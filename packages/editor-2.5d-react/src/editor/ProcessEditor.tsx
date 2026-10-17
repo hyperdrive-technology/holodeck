@@ -1,6 +1,6 @@
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import { useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState, useSyncExternalStore, type Ref } from 'react';
-import { imageAspectVersion, subscribeImageAspects } from '../objects/image-aspect';
+import { imageAspectsKey, sceneImageSrcs, subscribeImageAspects } from '../objects/image-aspect';
 import { initialIsoPose, rotatePose, toggleTopDown } from '../iso/pose';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import type { Vector3Tuple } from 'three';
@@ -12,6 +12,7 @@ import { clampZoom, WHEEL_ZOOM_STEP } from '../iso/pan';
 import { renderState, useRevision } from '../iso/render-signal';
 import { useWebGPUSupport } from '../iso/use-webgpu';
 import { fitView, sceneWorldBox } from './fit';
+import { armedPart, hostPlacingAction } from './placing-sync';
 import {
   committedScene,
   createEditorState,
@@ -241,7 +242,12 @@ export function ProcessEditor({
   // zoomed, panned or rotated: their view wins. The "fit" button resets that.
   // Scene edits never re-fit, except the first placement in an empty document.
   // A camera supplied at mount counts as "fitted" and "the user's view", so no auto-fit overrides it.
-  const aspectVersion = useSyncExternalStore(subscribeImageAspects, imageAspectVersion, imageAspectVersion);
+  // Image URLs in the scene at the last fit: the only ones whose late-loading aspect may refit (holodeck#127).
+  const [fitImageSrcs, setFitImageSrcsState] = useState<string[]>(() => sceneImageSrcs(scene.objects));
+  const setFitImageSrcs = useCallback(
+    (next: string[]) => setFitImageSrcsState((prev) => (prev.length === next.length && prev.every((s, i) => s === next[i]) ? prev : next)),
+    [],
+  );
   const fittedSceneId = useRef<string | null>(initialCamera.current ? scene.id : null);
   // Mirrors fittedSceneId as state so the render hold below re-evaluates when a
   // fit lands even if it changed neither zoom nor target.
@@ -261,9 +267,28 @@ export function ProcessEditor({
     setFittedId(scene.id);
     setZoom(fit.zoom);
     setTarget(fit.target);
+    setFitImageSrcs(sceneImageSrcs(scene.objects));
     if (sceneChanged) setPose(home);
-    // aspectVersion: an image finished loading and its real aspect changed the bounds (holodeck#108).
-  }, [scene.id, hasObjects, fitScene, home, aspectVersion]);
+  }, [scene.id, hasObjects, fitScene, home, setFitImageSrcs]);
+
+  // Images loading after the fit (holodeck#108): the square guess becomes the
+  // real aspect and the bounds change, so refit while the view is still the
+  // fitted one. Only images that were in the scene at the last fit count
+  // (holodeck#127): one in another editor on the page, or one the user just
+  // placed, is a scene edit and never re-fits.
+  const fitAspectsSnapshot = useCallback(() => imageAspectsKey(fitImageSrcs), [fitImageSrcs]);
+  const fitAspects = useSyncExternalStore(subscribeImageAspects, fitAspectsSnapshot, fitAspectsSnapshot);
+  const lastFitAspects = useRef(fitAspects);
+  useEffect(() => {
+    if (lastFitAspects.current === fitAspects) return;
+    lastFitAspects.current = fitAspects;
+    const scene = sceneForFit.current;
+    if (userMovedView.current || fittedSceneId.current !== scene.id) return;
+    const fit = fitScene(scene);
+    if (!fit) return;
+    setZoom(fit.zoom);
+    setTarget(fit.target);
+  }, [fitAspects, fitScene]);
 
   // camera prop -> view (holodeck#100). Declared after the fit effect so a
   // document switch that brings its own camera lands on it, not on the fit.
@@ -403,20 +428,34 @@ export function ProcessEditor({
   }, [state.selectedIds]);
 
   // placing prop -> place tool; editor -> onPlacingChange / onPlaced (holodeck#100).
+  // The rules (run parts arm draw-pipe with `placing: null`, echoes are not
+  // disarms) live in placing-sync.ts (holodeck#133, review of #140).
+  const isRun = useCallback(
+    (id: string) => registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, id)?.draw === 'run',
+    [registry],
+  );
   const placingPropRef = useRef(placing);
   placingPropRef.current = placing;
+  /** The host value the last effect run saw; undefined at mount so an initial `placing` arms. */
+  const prevHostPlacing = useRef<string | null | undefined>(undefined);
   useEffect(() => {
-    if (placing === undefined || placing === stateRef.current.placing) return;
-    dispatch(placing === null ? { type: 'select-mode' } : { type: 'place-mode', object: placing });
+    const prev = prevHostPlacing.current;
+    prevHostPlacing.current = placing;
+    const action = hostPlacingAction(prev, placing, stateRef.current, isRun);
+    if (action) dispatch(action);
+    // isRun is read at the moment of the change; a registry swap alone arms nothing.
   }, [placing]);
   const onPlacingChangeRef = useRef(onPlacingChange);
   onPlacingChangeRef.current = onPlacingChange;
-  const prevPlacing = useRef(state.placing);
+  const reportedArmed = useRef<string | null>(armedPart(state, placing, isRun));
   useEffect(() => {
-    if (state.placing === prevPlacing.current) return;
-    prevPlacing.current = state.placing;
-    if (state.placing !== placingPropRef.current) onPlacingChangeRef.current?.(state.placing);
-  }, [state.placing]);
+    const host = placingPropRef.current;
+    const armed = armedPart(state, host, isRun);
+    if (armed === reportedArmed.current) return;
+    reportedArmed.current = armed;
+    // Report only what the host does not already hold (no echo of its own value).
+    if (armed !== (host ?? null)) onPlacingChangeRef.current?.(armed);
+  }, [state.placing, state.mode, isRun]);
   const onPlacedRef = useRef(onPlaced);
   onPlacedRef.current = onPlaced;
   useEffect(() => {
@@ -634,6 +673,7 @@ export function ProcessEditor({
     if (fit) {
       fittedSceneId.current = state.scene.id;
       setFittedId(state.scene.id);
+      setFitImageSrcs(sceneImageSrcs(state.scene.objects));
     }
     setZoom(fit?.zoom ?? 20);
     setTarget(fit?.target ?? sceneTarget(state.scene, registry));

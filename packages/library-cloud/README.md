@@ -84,10 +84,10 @@ and [Blender contract](../../blender/README.md).
 **Billboard contract difference.** `cloud:billboard` is the one archetype whose
 `logo` empty is not on the top face: it is centered on the sign's front (+Z) face,
 rotated so the empty's local +Y is the face normal (local −Z is the image top).
-Its local X/Z scale is still the square edge. E2's `logoAnchorFromModel` reads
-only the empty's position and scale and lays every logo flat, so until E2 honours
-the empty's orientation (holodeck#138) the billboard logo renders horizontally inside the panel.
-The GLB tests pin the authored orientation so the E2 change has a fixed target.
+Its local X/Z scale is still the square edge. E2's `logoAnchorFromModel` reads the
+empty's rotation as well as its position and scale, so the billboard logo stands
+upright on the sign's front face. The GLB tests here pin the authored orientation;
+E2's `logo-cloud-glb` and objects render tests pin how it is drawn.
 
 ## Build and verify
 

@@ -278,6 +278,35 @@ test('library add and inspector edits are undoable on the canvas', async ({ page
   await expect(editor(page)).toHaveAttribute('data-object-count', '1');
 });
 
+// holodeck#133 + review of #140: arming Tank then Pipe (without placing the
+// tank) keeps the pipe tool; clicking the armed Pipe again leaves it.
+test('library arm: Tank -> Pipe keeps the pipe tool; clicking Pipe again disarms', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId('welcome').getByRole('button', { name: 'New document' }).click();
+  await expect(page).toHaveURL(/\/d\/[0-9a-f-]{36}$/);
+  const canvas = page.getByTestId('canvas');
+  const tank = page.locator('[data-library-item="tank"]');
+  const pipe = page.locator('[data-library-item="pipe"]');
+
+  await tank.click();
+  await expect(editor(page)).toHaveAttribute('data-mode', 'place');
+  await expect(canvas).toHaveAttribute('data-placing', 'tank');
+
+  await pipe.click();
+  await expect(editor(page)).toHaveAttribute('data-mode', 'draw-pipe');
+  await expect(canvas).toHaveAttribute('data-placing', 'pipe');
+  await expect(pipe).toHaveAttribute('aria-pressed', 'true');
+  // Give any echo of the editor's tool change a chance to land, then check again.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect(editor(page)).toHaveAttribute('data-mode', 'draw-pipe');
+  await expect(canvas).toHaveAttribute('data-placing', 'pipe');
+
+  await pipe.click();
+  await expect(editor(page)).toHaveAttribute('data-mode', 'select');
+  await expect(canvas).toHaveAttribute('data-placing', '');
+  await expect(pipe).toHaveAttribute('aria-pressed', 'false');
+});
+
 // holodeck#117: reopening a document must show what another tab saved meanwhile, not a cached copy.
 test('reopening a document after another tab saved it shows the latest and edits without a conflict', async ({ page, context }) => {
   await page.goto('/');

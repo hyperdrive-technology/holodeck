@@ -69,9 +69,35 @@ describe.skipIf(!CHROMIUM)('Arcentry-parity objects in a real canvas', () => {
         (window as any).__objects.scene.traverse((o: any) => {
           if (o.userData?.hdLogo) n += 1;
         });
-        return n >= 3; // web + db blocks, pump GLB
+        return n >= ((window as any).__objects.billboard ? 4 : 3); // web + db blocks, pump GLB (+ billboard)
       });
       await waitForRendered(page);
+      // holodeck#138: each logo plane faces its slot's normal. Top-face logos
+      // face up; the billboard's stands on its +Z front face, image top up.
+      const logos: Array<{ id: string; facing: number[]; top: number[] }> = await page.evaluate(() => {
+        const out: Array<{ id: string; facing: number[]; top: number[] }> = [];
+        (window as any).__objects.scene.traverse((o: any) => {
+          if (!o.userData?.hdLogo) return;
+          const mesh = o.children[0];
+          const e = mesh.matrixWorld.elements as number[];
+          // Columns of the world matrix: local +Y (image top) and +Z (plane normal), normalised.
+          const norm = (v: number[]) => {
+            const l = Math.hypot(v[0]!, v[1]!, v[2]!);
+            return v.map((x) => Math.round((x / l) * 1000) / 1000);
+          };
+          out.push({ id: String(o.userData.hdLogo).slice(0, 24), facing: norm([e[8]!, e[9]!, e[10]!]), top: norm([e[4]!, e[5]!, e[6]!]) });
+        });
+        return out;
+      });
+      const billboardShown = await page.evaluate(() => (window as any).__objects.billboard as boolean);
+      expect(billboardShown, 'the harness found library-cloud billboard.glb').toBe(true);
+      const upright = logos.filter((l) => Math.abs(l.facing[1]!) < 0.5);
+      for (const l of logos.filter((x) => !upright.includes(x))) expect(l.facing[1], `flat logo ${l.id} faces up`).toBeCloseTo(1, 2);
+      expect(upright.length, 'upright logos (only the billboard)').toBe(billboardShown ? 1 : 0);
+      for (const l of upright) {
+        expect(l.facing[2], 'billboard logo faces the sign front (+Z)').toBeCloseTo(1, 2);
+        expect(l.top[1], 'billboard logo image top is up').toBeCloseTo(1, 2);
+      }
       expect(await countUserData(page, 'hdConnector')).toBe(3);
       expect(await countUserData(page, 'hdFlowDots')).toBe(1);
       expect(await countUserData(page, 'hdAreaWalls')).toBe(1);

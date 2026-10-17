@@ -38,12 +38,16 @@ export function DocumentRoute({ docId }: { docId: string }) {
   // Open only on a read made after mount: a cached copy can be stale (holodeck#117).
   // ... and only once the stored camera is known too: opening first would mount
   // the editor without it and the camera arriving later would be ignored
-  // (review of holodeck#128).
-  if (data && isFetchedAfterMount && !camera.isPending && data !== opened) setOpened(data);
+  // (review of holodeck#128). "Known" means read after mount as well: with a
+  // cached camera `isPending` is already false during the mount refetch, and
+  // opening then would start from a camera another tab has since replaced
+  // (holodeck#134). A failed camera read still opens (fit the scene).
+  const cameraReady = camera.isFetchedAfterMount;
+  if (data && isFetchedAfterMount && cameraReady && data !== opened) setOpened(data);
   const kept = opened?.document.id === docId ? opened : null;
   const release = useCallback(() => setOpened(null), []);
   if (error && !kept) return <CenteredMessage tone="error">Could not open the document: {error.message}</CenteredMessage>;
-  if (!kept && (isPending || !isFetchedAfterMount || camera.isPending)) return <CenteredMessage>Loading document…</CenteredMessage>;
+  if (!kept && (isPending || !isFetchedAfterMount || !cameraReady)) return <CenteredMessage>Loading document…</CenteredMessage>;
   const current = (isFetchedAfterMount ? data : undefined) ?? kept;
   if (!current) return <CenteredMessage>This document does not exist (it may have been deleted).</CenteredMessage>;
   if (current.document.engine !== ISO_ENGINE_ID) return <CenteredMessage>No editor for engine “{current.document.engine}” yet.</CenteredMessage>;
@@ -52,7 +56,7 @@ export function DocumentRoute({ docId }: { docId: string }) {
     <DocumentWorkspace
       key={current.document.id}
       initial={current}
-      initialCamera={camera.data ?? undefined}
+      initialCamera={camera.isError ? undefined : (camera.data ?? undefined)}
       deletedElsewhere={!isPending && data === null}
       onReleased={release}
     />
@@ -202,10 +206,21 @@ function DocumentWorkspace({
   );
 
   /** Library click: arm the canvas place tool (click again to disarm); the next floor click stamps it. */
-  const armItem = useCallback((kind: string, itemId: string) => {
-    if (kind !== HOLODECK_KINDS.isoPart) return;
-    setPlacing((current) => (current === itemId ? null : itemId));
-  }, []);
+  const armItem = useCallback(
+    (kind: string, itemId: string) => {
+      if (kind !== HOLODECK_KINDS.isoPart) return;
+      if (placing === itemId) {
+        setPlacing(null);
+        // Disarm explicitly: a run part (Pipe) arms draw-pipe, whose editor
+        // state keeps `placing: null`, so `placing` going back to null alone
+        // looked like no change and canvas clicks kept drawing pipes (holodeck#133).
+        editorRef.current?.dispatch({ type: 'select-mode' });
+        return;
+      }
+      setPlacing(itemId);
+    },
+    [placing],
+  );
 
   /**
    * Library "+": stamp the part next to the scene through the editor's own

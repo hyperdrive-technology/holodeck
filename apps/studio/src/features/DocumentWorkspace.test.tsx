@@ -19,6 +19,7 @@ import { createIsoDocument } from '../documents/new-document';
 import { DocumentStore } from '../documents/store';
 import { createStudioHost, hostDocumentProblems } from '../host/studio-host';
 import { createStudioRouter } from '../router';
+import { documentKeys } from '../documents/queries';
 import { StudioProvider } from '../studio-context';
 import { withPart } from '../test-support';
 
@@ -135,9 +136,26 @@ describe('DocumentWorkspace <-> ProcessEditor', () => {
     act(() => editor.props?.onPlacingChange?.(null));
     expect(tank).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(tank);
+    expect(editor.actions).toEqual([]);
     fireEvent.click(tank);
     expect(editor.props?.placing).toBeNull();
-    expect(editor.actions).toEqual([]);
+    // Disarming also tells the editor directly (holodeck#133).
+    expect(editor.actions).toEqual([{ type: 'select-mode' }]);
+  });
+
+  // holodeck#133: Pipe is a run part; arming it enters draw-pipe, whose editor
+  // state keeps `placing: null`, so `placing` returning to null alone was no
+  // change to the editor and later canvas clicks still drew pipes.
+  it('clicking an armed Pipe again leaves the pipe tool explicitly (holodeck#133)', async () => {
+    await store.create(createIsoDocument('Empty', 'p'));
+    await openWorkspace(createIsoDocument('Empty', 'p'));
+    const pipe = screen.getByRole('button', { name: /^Pipe/ });
+    fireEvent.click(pipe);
+    expect(editor.props?.placing).toBe('pipe');
+    fireEvent.click(pipe);
+    expect(editor.props?.placing).toBeNull();
+    expect(pipe).toHaveAttribute('aria-pressed', 'false');
+    expect(editor.actions).toEqual([{ type: 'select-mode' }]);
   });
 
   it('inspector edits and delete run as editor actions on the selected object (holodeck#111, #124)', async () => {
@@ -208,5 +226,47 @@ describe('DocumentWorkspace <-> ProcessEditor', () => {
     await screen.findByTestId('process-editor');
     expect(editor.props?.camera).toEqual({ zoom: 27, target: [4, 0, 4] });
     expect(editor.mounts).toBe(1);
+  });
+
+  // holodeck#134: with a cached camera, `isPending` is false during the mount
+  // refetch, so the document read finishing first opened the editor on the
+  // cached (stale) camera and a newer one saved by another tab was ignored.
+  it('does not open on a stale cached camera while the camera refetch is in flight', async () => {
+    await store.create(tankDoc());
+    await store.saveCamera('p', { zoom: 45, target: [7, 0, 7] }); // saved later by "another tab"
+    const getCamera = store.getCamera.bind(store);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(store, 'getCamera').mockImplementation(async (id) => {
+      await gate;
+      return getCamera(id);
+    });
+    const router = createStudioRouter(createMemoryHistory({ initialEntries: ['/d/p'] }));
+    const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+    // This tab's cache still holds the camera from an earlier visit.
+    client.setQueryData(documentKeys.camera('p'), { zoom: 12, target: [0, 0, 0] });
+    render(
+      <StudioProvider services={{ host, store, channel }}>
+        <QueryClientProvider client={client}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </StudioProvider>,
+    );
+    await waitFor(async () => expect(await store.get('p')).toBeDefined());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByTestId('process-editor')).toBeNull();
+    release();
+    await screen.findByTestId('process-editor');
+    expect(editor.props?.camera).toEqual({ zoom: 45, target: [7, 0, 7] });
+    expect(editor.mounts).toBe(1);
+  });
+
+  it('a failed camera read still opens the document (fit the scene)', async () => {
+    await store.create(tankDoc());
+    vi.spyOn(store, 'getCamera').mockRejectedValue(new Error('idb down'));
+    await openWorkspace(tankDoc());
+    expect(editor.props?.camera).toBeUndefined();
   });
 });

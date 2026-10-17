@@ -10,7 +10,7 @@ import { FaceCamera, FloorText } from '../../assets/process/Label';
 import { annotationStyle, type HolodeckStyle } from '../../assets/process/style';
 import { PendingAsset } from '../iso/render-signal';
 import { AssetBoundary, useTrackedTexture } from './assets';
-import { setImageAspect } from './image-aspect';
+import { retainImageAspect, setImageAspect } from './image-aspect';
 import { drawIcon, ICON_TEXTURE_PX } from './icons';
 import type { IsoMetaValue } from './validate';
 
@@ -110,6 +110,9 @@ function ImageMarkLoaded({ x, z, src, width, height, orient }: { x: number; z: n
   const image = texture?.image as { width?: number; height?: number } | undefined;
   const loaded = Boolean(image?.width && image?.height);
   const aspect = loaded ? image!.width! / image!.height! : 1;
+  // Hold the aspect entry while mounted so the bounded cache never evicts it (holodeck#132).
+  // Declared first: effects run in order, so the entry is retained before it is set.
+  useEffect(() => retainImageAspect(src), [src]);
   // Bounds (fit-to-view) read the real aspect from here (holodeck#108). After render, not during it.
   useEffect(() => {
     if (loaded) setImageAspect(src, aspect);

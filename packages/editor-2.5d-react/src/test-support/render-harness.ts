@@ -25,7 +25,9 @@ export async function startHarness(dir: string): Promise<Harness> {
   const server = await createServer({
     root: path.join(PKG_ROOT, 'src', dir),
     configFile: path.join(PKG_ROOT, 'src/iso/vite.config.ts'),
-    server: { host: '127.0.0.1', port: 0, strictPort: false, fs: { allow: [PKG_ROOT] } },
+    // The sibling library-cloud GLBs are allowed too: the objects harness
+    // renders cloud:billboard from them (holodeck#138).
+    server: { host: '127.0.0.1', port: 0, strictPort: false, fs: { allow: [PKG_ROOT, path.join(PKG_ROOT, '../library-cloud/assets')] } },
     logLevel: 'error',
     esbuild: { jsx: 'automatic' },
   });
