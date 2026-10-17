@@ -64,12 +64,14 @@ Status: ✓ done · ◐ partial · ✗ missing · — out of scope (SaaS account
 |---|---|---|---|
 | Place from library, drag move, delete | `ProcessEditor` palette, drag, Delete | ✓ | — |
 | Undo / redo | editor-state history (resets on document switch) | ✓ | — |
-| Multi-select (shift-click, marquee), multi-edit capabilities | single selection | ✗ | E3 |
-| Copy / paste / duplicate | — | ✗ | E3 |
-| Align and distribute | — | ✗ | E3 |
-| Rotate objects | `rotation` on placements | ◐ | E3 |
-| Layers: show/hide, lock, assign | — | ✗ | E3 |
-| Keyboard shortcuts + help overlay | shortcuts, no help | ◐ | E3 |
+| Multi-select (shift-click, marquee), multi-edit capabilities | shift-click, Shift+drag marquee, select all; multi drag / delete / nudge; inspector edits shared params, opacity, layer, z-order on the whole selection | ✓ | — |
+| Copy / paste / duplicate | Mod+C / X / V / D; system clipboard JSON (cross-tab / document), ids, groups and anchors remapped, cascading offset | ✓ | — |
+| Align and distribute | 6 align edges + distribute x / y on grid axes; groups move as one unit | ✓ | — |
+| Rotate objects | `[` / `]` and inspector; a multi-selection turns about its centre | ✓ | — |
+| Layers: show/hide, lock, assign | `scene.layers` + `placement.layer`; Layers tab: show / hide, lock, rename, active layer, move selection, remove | ✓ | — |
+| Groups | `placement.group`; Mod+G / Mod+Shift+G; click selects the group | ✓ | — |
+| Draw / re-anchor connectors | connector tool (C): click part / port / cell twice; drag end handles to re-anchor or free; deleting a part detaches its connector ends | ◐ (waypoint editing: follow-up) | — |
+| Keyboard shortcuts + help overlay | one table (`editor/shortcuts.ts`) drives keys and the `?` overlay | ✓ | — |
 | Component library: categories, search | `Palette` by category, no search | ◐ | S1 |
 
 ### Live data

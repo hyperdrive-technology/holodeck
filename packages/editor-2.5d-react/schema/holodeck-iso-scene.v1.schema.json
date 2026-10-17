@@ -11,6 +11,12 @@
     "gridCellSize": { "type": "number", "exclusiveMinimum": 0, "maximum": 1e6 },
     "theme": { "type": "string" },
     "extensions": { "type": "object" },
+    "layers": {
+      "description": "Editor layers (lane E3). Ids must also be unique (TS validator only).",
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/layer" }
+    },
     "objects": { "type": "array", "items": { "$ref": "#/$defs/placement" } }
   },
   "$defs": {
@@ -25,6 +31,18 @@
       "type": "number",
       "minimum": -1.7976931348623157e308,
       "maximum": 1.7976931348623157e308
+    },
+    "shortId": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/shortId" },
+        "name": { "type": "string", "maxLength": 128 },
+        "hidden": { "type": "boolean" },
+        "locked": { "type": "boolean" }
+      }
     },
     "point": {
       "type": "object",
@@ -126,7 +144,9 @@
         "z": { "type": "integer", "minimum": -1000, "maximum": 1000 },
         "meta": { "$ref": "#/$defs/meta" },
         "metaHidden": { "type": "boolean" },
-        "link": { "$ref": "#/$defs/link" }
+        "link": { "$ref": "#/$defs/link" },
+        "layer": { "$ref": "#/$defs/shortId" },
+        "group": { "$ref": "#/$defs/shortId" }
       }
     }
   }

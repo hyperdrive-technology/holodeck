@@ -21,6 +21,8 @@ limits. `src/objects/scene-schema.test.ts` keeps the two in step.
 | `meta` | Metadata plane: `key: value` rows on the floor in front of the object. | ≤ 32 rows, key 1..64 chars, value string ≤ 256 / finite number / boolean |
 | `metaHidden` | Keep `meta` but hide the plane. | boolean |
 | `link` | Connector anchors (see below). | `via` ≤ 64 points |
+| `layer` | Editor layer id (`scene.layers`). Absent or undeclared = the default layer. | 1..64 chars |
+| `group` | Group id: members select, move, copy and delete together in the editor (one level). | 1..64 chars |
 | `params` | Checked against the part's param specs: numbers finite and within `min`/`max` (reading params such as label `value` also take a boolean or a string state), enums one of `options`, `color` params hex or `''`, strings ≤ 4096 chars (`maxLength`), `format: 'url'` params an allowed URL. Undeclared params must be finite JSON. | |
 
 Asset URLs (logos, images) may be relative paths, `http(s):`, `blob:` or `data:image/…`; any other
@@ -95,9 +97,18 @@ per-part constants: connector colour and width, flow dots, icon and text colour,
 width, wall colour / opacity / height, shadow colour / opacity, metadata panel. Themes written
 before these tokens existed fall back to `HOLODECK_ANNOTATION_STYLE`.
 
+## Layers
+
+`scene.layers` (≤ 64): `{ "id": "piping", "name": "Piping", "hidden": true, "locked": false }`. The
+default layer (`"default"`) always exists; declaring it only renames, hides or locks it. Hidden layers
+are not drawn (edit and run mode); hidden and locked placements cannot be selected or edited, but stay
+obstacles for pipe routing. The editor's Layers tab edits all of this as undoable steps.
+
+In the editor, the connector tool (C) draws a connector with two clicks (a part, its port within one
+cell, or an empty cell), dragging a selected connector's end handles re-anchors or frees that end, and
+deleting a part turns connector ends anchored to it into free points where they were.
+
 ## Not here yet
 
 - The `chart` widget (time series from a provider's `history`): holodeck#90.
-- Editor UX for drawing and re-anchoring connectors (holodeck#91); today connectors are placed from
-  the palette and anchored in the scene JSON or by a host.
-- Inspector editing of `meta`, `opacity` and `z` (holodeck#92).
+- Adding / removing connector waypoints (`link.via`) in the editor; today they come from scene JSON.

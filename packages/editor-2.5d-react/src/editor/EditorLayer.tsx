@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useThree, type ThreeEvent } from '@react-three/fiber';
-import { Plane, Raycaster, Vector2, Vector3, type Camera } from 'three';
+import { Mesh, Plane, Raycaster, Vector2, Vector3, type Camera } from 'three';
 import { HOLODECK_KINDS } from '@holodeck/sdk';
 import { Pipe } from '../../assets/process';
 import { AREA_Y } from '../../assets/process/Area';
@@ -17,7 +17,16 @@ import type { ContributionRegistry } from '@holodeck/sdk';
 import { resolveRouteEnd } from '../routing/ports';
 import { footprint, planRoute, type PlannedRoute } from './routing';
 import { pointerToGrid } from './snap';
-import { stamp, type EditorState, type ResizeHandle } from './editor-state';
+import { stamp, type EditorState, type LinkEndName, type ResizeHandle } from './editor-state';
+import { connectorEndPoint, linkEndPoint } from './connect';
+import { isPlacementEditable, visibleObjects } from './layers';
+import { isClickSized, marqueeHits, rectFromPoints, type ScreenRect } from './marquee';
+
+/** Raycast override for meshes the pointer must see through (previews, a handle being dragged). */
+const NO_RAYCAST = () => undefined;
+
+/** Selection halos drawn at most (a select-all on a huge plant still shows the first N). */
+const MAX_HALOS = 400;
 
 /**
  * The invisible floor catcher sits just under the area slab (which itself
@@ -44,9 +53,14 @@ function groundGridFromEvent(event: ThreeEvent<PointerEvent>): { x: number; y: n
  * Scene input for the editor. View panning is not handled here: IsoCanvas
  * pans on any left press that no handler below claimed (`claimPointer`), and
  * on right / middle / Space presses. What this layer claims:
- * - Edit + select mode, press on an object: that is a move drag.
- * - Edit + place / draw-pipe mode, any left press: that places / routes.
- * Run mode and empty floor in select mode stay unclaimed, so they pan.
+ * - Edit + select mode, press on an object: that is a move drag (of the
+ *   whole selection when the object is part of it); Shift+press toggles it
+ *   in the selection instead.
+ * - Edit + select mode, Shift+press on empty floor: a marquee selection.
+ * - Edit + place / draw-pipe / draw-connector mode, any left press: that places / routes.
+ * - Connector end handles (one selected connector): drag to re-anchor.
+ * Run mode, empty floor in select mode, and parts on locked layers stay
+ * unclaimed, so they pan. Parts on hidden layers are not drawn at all.
  */
 export function EditorLayer({
   state,
@@ -63,6 +77,10 @@ export function EditorLayer({
   onResizeStart,
   onResizeMove,
   onResizeEnd,
+  onMarquee,
+  onMarqueeSelect,
+  onLinkDragStart,
+  onLinkDragEnd,
 }: {
   state: EditorState;
   spacePan: boolean;
@@ -76,14 +94,24 @@ export function EditorLayer({
   metrics?: IsoMetrics;
   /** Run mode: no ghost, halo or drags; clicking a part only reports it. */
   readOnly?: boolean;
-  onSelectObject?: (id: string) => void;
+  /** `additive`: Shift was held (toggle in / out of the selection). */
+  onSelectObject?: (id: string, additive?: boolean) => void;
+  /** Live marquee rectangle in client px (null when it ends), for the host overlay. */
+  onMarquee?: (rect: ScreenRect | null) => void;
+  /** Marquee released: ids whose centres fall inside. Omit to disable the marquee. */
+  onMarqueeSelect?: (ids: string[], additive: boolean) => void;
+  /** Connector end handles (holodeck#91). Omit both to hide them. */
+  onLinkDragStart?: (id: string, end: LinkEndName) => void;
+  onLinkDragEnd?: () => void;
   /** Resize handles (parts with `def.resize`). Omit to hide the handles. */
   onResizeStart?: (id: string, handle: ResizeHandle) => void;
   onResizeMove?: (value: number) => void;
   onResizeEnd?: () => void;
 }) {
   const registry = useIsoRegistry();
-  const placing = !readOnly && (state.mode === 'place' || state.mode === 'draw-pipe');
+  const placing = !readOnly && (state.mode === 'place' || state.mode === 'draw-pipe' || state.mode === 'draw-connector');
+  const drawn = visibleObjects(state.scene);
+  const startMarquee = useMarquee(drawn, registry, onMarquee, onMarqueeSelect);
 
   const moveTo = (g: { x: number; y: number }) => {
     onCursor(g.x, g.y);
@@ -105,6 +133,11 @@ export function EditorLayer({
             return;
           }
           if (placing) claimPointer(event.nativeEvent);
+          if (!readOnly && !placing && event.nativeEvent.shiftKey && onMarqueeSelect) {
+            claimPointer(event.nativeEvent);
+            startMarquee(event.nativeEvent.clientX, event.nativeEvent.clientY);
+            return;
+          }
           const g = groundGridFromEvent(event);
           onFloorClick(g.x, g.y);
         }}
@@ -121,7 +154,7 @@ export function EditorLayer({
         onPointerOut={() => onHoverObject?.(false)}
       >
         <SceneGraph
-          objects={state.scene.objects}
+          objects={drawn}
           metrics={metrics}
           selectedId={readOnly ? null : state.selectedId}
           onObjectPointerDown={(id, event) => {
@@ -136,6 +169,11 @@ export function EditorLayer({
               event.stopPropagation();
               return;
             }
+            const target = state.scene.objects.find((o) => o.id === id);
+            if (state.mode === 'select' && target && !isPlacementEditable(state.scene, target)) {
+              // Locked layer: behave like empty floor (the floor catcher deselects, a drag pans).
+              return;
+            }
             claimPointer(event.nativeEvent);
             event.stopPropagation();
             const g = gridFromEvent(event);
@@ -143,16 +181,32 @@ export function EditorLayer({
               onFloorClick(g.x, g.y);
               return;
             }
+            if (event.nativeEvent.shiftKey) {
+              onSelectObject?.(id, true);
+              return;
+            }
             onDragStart(id, g.x, g.y);
           }}
         />
+        {!readOnly
+          ? state.selectedIds.slice(0, MAX_HALOS).map((id) => {
+              if (id === state.selectedId) return null;
+              const o = state.scene.objects.find((p) => p.id === id);
+              return o ? <SelectionHalo key={id} object={o} registry={registry} secondary /> : null;
+            })
+          : null}
         {state.selectedId && !readOnly
           ? (() => {
               const selected = state.scene.objects.find((o) => o.id === state.selectedId);
+              const single = state.selectedIds.length <= 1;
+              const isConnector = selected ? registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, selected.object)?.connector === true : false;
               return selected ? (
                 <>
                   <SelectionHalo object={selected} registry={registry} />
-                  {onResizeStart && onResizeMove && onResizeEnd ? (
+                  {single && isConnector && onLinkDragStart && onLinkDragEnd ? (
+                    <LinkHandles state={state} connector={selected} registry={registry} onStart={onLinkDragStart} onEnd={onLinkDragEnd} />
+                  ) : null}
+                  {single && onResizeStart && onResizeMove && onResizeEnd ? (
                     <ResizeHandles
                       object={selected}
                       registry={registry}
@@ -173,6 +227,12 @@ export function EditorLayer({
       {!readOnly && state.mode === 'draw-pipe' && state.pipeStart && state.cursor ? (
         <PipePreview state={state} registry={registry} />
       ) : null}
+      {!readOnly && state.mode === 'draw-connector' && state.linkStart && state.cursor
+        ? (() => {
+            const from = linkEndPoint(state.scene, registry, state.linkStart);
+            return from ? <FloorSegment from={from} to={state.cursor} color={HANDLE_COLOR} /> : null;
+          })()
+        : null}
     </group>
   );
 }
@@ -250,16 +310,139 @@ function PipePreview({ state, registry }: { state: EditorState; registry: Contri
   );
 }
 
-function SelectionHalo({ object, registry }: { object: IsoPlacement; registry: ContributionRegistry }) {
+/** Primary selection ring colour; other selected parts get a lighter ring. */
+const HALO_PRIMARY = '#18BAE6';
+const HALO_SECONDARY = '#7fd6ee';
+
+function SelectionHalo({ object, registry, secondary = false }: { object: IsoPlacement; registry: ContributionRegistry; secondary?: boolean }) {
   const [wx, , wz] = gridToWorld(object.x, object.y);
   // Per-placement footprint so the halo follows a resized vessel's radius.
   const { w, h } = placementFootprint(registry, object);
   const r = Math.max(w, h) * 0.55;
   return (
-    <mesh position={[wx, 0.03, wz]} rotation={[-Math.PI / 2, 0, 0]}>
-      <ringGeometry args={[r * 0.85, r, 24]} />
-      <meshBasicMaterial color="#18BAE6" />
+    <mesh position={[wx, 0.03, wz]} rotation={[-Math.PI / 2, 0, 0]} name={secondary ? 'selection-halo-secondary' : 'selection-halo'}>
+      <ringGeometry args={[r * (secondary ? 0.9 : 0.85), r, 24]} />
+      <meshBasicMaterial color={secondary ? HALO_SECONDARY : HALO_PRIMARY} />
     </mesh>
+  );
+}
+
+/** Thin flat bar on the floor between two grid points (connector draw preview). */
+function FloorSegment({ from, to, color }: { from: { x: number; y: number }; to: { x: number; y: number }; color: string }) {
+  const [ax, , az] = gridToWorld(from.x, from.y);
+  const [bx, , bz] = gridToWorld(to.x, to.y);
+  const len = Math.hypot(bx - ax, bz - az);
+  if (len < 1e-6) return null;
+  return (
+    <mesh position={[(ax + bx) / 2, 0.05, (az + bz) / 2]} rotation={[-Math.PI / 2, 0, -Math.atan2(bz - az, bx - ax)]} raycast={NO_RAYCAST}>
+      <planeGeometry args={[len, 0.08]} />
+      <meshBasicMaterial color={color} transparent opacity={0.8} depthWrite={false} />
+    </mesh>
+  );
+}
+
+/**
+ * Shift+drag marquee on empty floor. Returns the start function; the live
+ * rectangle goes to `onMarquee` (client px) and the hit ids to `onSelect`
+ * on release. Window listeners so the drag survives leaving the canvas.
+ */
+function useMarquee(
+  objects: readonly IsoPlacement[],
+  registry: ContributionRegistry,
+  onMarquee: ((rect: ScreenRect | null) => void) | undefined,
+  onSelect: ((ids: string[], additive: boolean) => void) | undefined,
+): (clientX: number, clientY: number) => void {
+  const get = useThree((s) => s.get);
+  const latest = useRef({ objects, registry, onMarquee, onSelect });
+  latest.current = { objects, registry, onMarquee, onSelect };
+  const cleanup = useRef<(() => void) | null>(null);
+  useEffect(() => () => cleanup.current?.(), []);
+  return (startX: number, startY: number) => {
+    cleanup.current?.();
+    const start = { x: startX, y: startY };
+    let rect = rectFromPoints(start, start);
+    latest.current.onMarquee?.(rect);
+    const move = (event: PointerEvent) => {
+      rect = rectFromPoints(start, { x: event.clientX, y: event.clientY });
+      latest.current.onMarquee?.(rect);
+    };
+    const up = () => {
+      cleanup.current?.();
+      latest.current.onMarquee?.(null);
+      if (isClickSized(rect)) return;
+      const { camera, gl } = get();
+      const box = gl.domElement.getBoundingClientRect();
+      const v = new Vector3();
+      const toScreen = (gx: number, gy: number) => {
+        const [wx, , wz] = gridToWorld(gx, gy);
+        v.set(wx, 0, wz).project(camera);
+        if (!Number.isFinite(v.x) || !Number.isFinite(v.y)) return null;
+        return { x: box.left + ((v.x + 1) / 2) * box.width, y: box.top + ((1 - v.y) / 2) * box.height };
+      };
+      latest.current.onSelect?.(marqueeHits(latest.current.objects, latest.current.registry, toScreen, rect), true);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    cleanup.current = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      cleanup.current = null;
+    };
+  };
+}
+
+/**
+ * End handles on the selected connector (holodeck#91): press a handle, move
+ * (the floor / parts report the cursor cell), release to re-anchor that end
+ * on the part / port under the cursor or free it on empty floor. The handle
+ * being dragged follows the cursor and ignores raycasts so it never hides
+ * the part underneath.
+ */
+function LinkHandles({
+  state,
+  connector,
+  registry,
+  onStart,
+  onEnd,
+}: {
+  state: EditorState;
+  connector: IsoPlacement;
+  registry: ContributionRegistry;
+  onStart: (id: string, end: LinkEndName) => void;
+  onEnd: () => void;
+}) {
+  const dragging = state.linkDrag?.id === connector.id ? state.linkDrag.end : null;
+  useEffect(() => {
+    if (!dragging) return;
+    const up = () => onEnd();
+    window.addEventListener('pointerup', up);
+    return () => window.removeEventListener('pointerup', up);
+  }, [dragging, onEnd]);
+  return (
+    <group>
+      {(['from', 'to'] as const).map((end) => {
+        const live = dragging === end && state.cursor ? state.cursor : connectorEndPoint(state.scene, registry, connector, end);
+        if (!live) return null;
+        const [wx, , wz] = gridToWorld(live.x, live.y);
+        return (
+          <mesh
+            key={end}
+            name={`link-handle-${end}`}
+            position={[wx, 0.25, wz]}
+            raycast={dragging === end ? NO_RAYCAST : Mesh.prototype.raycast}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              claimPointer(event.nativeEvent);
+              event.stopPropagation();
+              onStart(connector.id, end);
+            }}
+          >
+            <sphereGeometry args={[HANDLE_RADIUS * 1.2, 12, 8]} />
+            <meshBasicMaterial color={dragging === end ? HANDLE_ACTIVE : HANDLE_COLOR} depthTest={false} toneMapped={false} />
+          </mesh>
+        );
+      })}
+    </group>
   );
 }
 
