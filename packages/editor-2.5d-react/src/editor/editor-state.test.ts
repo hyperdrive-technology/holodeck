@@ -82,6 +82,28 @@ describe('editorReducer', () => {
     expect(moved).toMatchObject({ x: 0, y: 2, toX: 4, toY: 2 });
   });
 
+  it('places a connector from the palette and drags its free anchors and waypoints with it', () => {
+    let s = editorReducer(blank(), { type: 'place-mode', object: 'connector' });
+    s = editorReducer(s, { type: 'floor-click', x: 1, y: 1 });
+    const placed = s.scene.objects[0]!;
+    expect(placed).toMatchObject({ object: 'connector', x: 1, y: 1 });
+    // Anchor one end to a tank (stays put) and give it a free end + waypoint (they move).
+    s = editorReducer(s, { type: 'place-mode', object: 'tank' });
+    s = editorReducer(s, { type: 'floor-click', x: 10, y: 10 });
+    const tankId = s.scene.objects.find((o) => o.object === 'tank')!.id;
+    const linked = {
+      ...s.scene,
+      objects: s.scene.objects.map((o) =>
+        o.id === placed.id ? { ...o, link: { from: { x: 1, y: 1 }, to: { object: tankId }, via: [{ x: 4, y: 1 }] } } : o,
+      ),
+    };
+    s = editorReducer(s, { type: 'load', scene: linked });
+    s = editorReducer(s, { type: 'drag-start', id: placed.id, x: 1, y: 1 });
+    s = editorReducer(s, { type: 'drag-move', x: 3, y: 2 });
+    const moved = s.scene.objects.find((o) => o.id === placed.id)!;
+    expect(moved).toMatchObject({ x: 3, y: 2, link: { from: { x: 3, y: 2 }, to: { object: tankId }, via: [{ x: 6, y: 2 }] } });
+  });
+
   it('deletes the selection and undoes it', () => {
     let s = editorReducer(blank(), { type: 'place-mode', object: 'label' });
     s = editorReducer(s, { type: 'floor-click', x: 1, y: 1 });

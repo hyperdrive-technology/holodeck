@@ -9,6 +9,7 @@ import { resolveAutoElbows } from '../routing/elbows';
 import { mergeFittingParams } from '../../assets/process/fitting-params';
 import { bendKeysOf, resolvePipeRuns } from './pipe-runs';
 import type { IsoPlacement } from './scene';
+import { resolveConnectorPaths } from '../objects/connector';
 
 /**
  * Unique meshes for most parts; `instanced` parts (pipes, elbows, valves,
@@ -54,6 +55,10 @@ export function SceneGraph({
     () => resolvePipeRuns(objects, registry, { pipeRadius }),
     [objects, registry, pipeRadius],
   );
+  const connectorPaths = useMemo(
+    () => resolveConnectorPaths(objects, registry, (o) => registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, o.object)?.connector === true),
+    [objects, registry],
+  );
   const drawn = hiddenFittings.size > 0 ? objects.filter((o) => !hiddenFittings.has(o.id)) : objects;
   const view = (object: IsoPlacement) => (
     <group
@@ -67,6 +72,7 @@ export function SceneGraph({
         fittings={fittings}
         bendKeys={bendKeys}
         pipeRuns={pipeRuns}
+        connectorPaths={connectorPaths}
         selected={object.id === selectedId}
         registry={registry}
       />
