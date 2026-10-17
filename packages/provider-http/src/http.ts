@@ -77,6 +77,8 @@ export interface RequestDeps {
   signal: AbortSignal;
   setTimeout: (fn: () => void, ms: number) => unknown;
   clearTimeout: (handle: unknown) => void;
+  /** Origin allowlist check applied to every redirect hop (provider `origins`). */
+  allowOrigin?: (origin: string) => boolean;
 }
 
 export interface RequestOptions {
@@ -118,24 +120,100 @@ export async function request(
     clear();
     deps.signal.removeEventListener('abort', onAbort);
   };
-  const target = withAuthQuery(url, auth);
   try {
-    const response = await deps.fetch(target, {
-      method: options.method ?? 'GET',
-      headers: { accept: 'application/json', ...config.headers, ...options.headers, ...auth.headers },
-      body: options.body,
-      signal: controller.signal,
-      redirect: config.followRedirects ? 'follow' : 'error',
-      // Credentials come from `auth` only; never send ambient browser cookies.
-      credentials: 'omit',
-    });
+    const response = await fetchFollowingRedirects(deps, url, options, controller.signal);
     if (options.headersOnlyTimeout) clear();
     return { response, signal: controller.signal, done };
   } catch (error) {
     done();
+    if (error instanceof HttpProviderError) throw error;
     if (timedOut) throw new HttpProviderError(`${safeUrl(url)}: timed out after ${config.timeoutMs} ms`, 'timeout');
     if (deps.signal.aborted) throw new HttpProviderError('request cancelled', 'closed');
     throw new HttpProviderError(redact(`${safeUrl(url)}: ${errorMessage(error)}`), 'network');
+  }
+}
+
+/** Most redirects followed for one request (fetch's own limit is 20; JSON APIs need far fewer). */
+export const MAX_REDIRECTS = 5;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+/**
+ * fetch with `redirect: 'manual'`, following redirects ourselves (holodeck#89
+ * review, P1). The built-in `redirect: 'follow'` strips only `Authorization`
+ * on a cross-origin hop: custom auth headers (`X-API-Key`) and a query token
+ * would reach the other origin. Here:
+ *
+ * - credentials (auth headers, the auth query parameter) are sent only while
+ *   every hop so far has stayed on the connection's origin; once a hop leaves
+ *   it, no later hop gets them, even one that comes back;
+ * - the auth query parameter is removed from cross-origin `Location`s, in case
+ *   the server echoed it;
+ * - each hop must be http(s) and, with an origin allowlist, inside it;
+ * - at most `MAX_REDIRECTS` hops; 303 (and 301/302 after POST) become a GET
+ *   without a body, 307/308 keep method and body, as fetch does.
+ *
+ * Browsers return an opaque response for manual redirects (no status, no
+ * Location), so a redirect cannot be followed there: it is reported as an error.
+ */
+async function fetchFollowingRedirects(
+  deps: RequestDeps,
+  url: URL,
+  options: RequestOptions,
+  signal: AbortSignal,
+): Promise<Response> {
+  const { config, auth } = deps;
+  const home = httpEquivalent(new URL(config.url)).origin;
+  let current = url;
+  let method = options.method ?? 'GET';
+  let body = options.body;
+  let trusted = current.origin === home;
+  for (let hop = 0; ; hop++) {
+    const headers: Record<string, string> = { accept: 'application/json', ...config.headers, ...options.headers };
+    if (body === undefined) delete headers['content-type'];
+    if (trusted) Object.assign(headers, auth.headers);
+    const response = await deps.fetch(trusted ? withAuthQuery(current, auth) : current, {
+      method,
+      headers,
+      body,
+      signal,
+      redirect: 'manual',
+      // Credentials come from `auth` only; never send ambient browser cookies.
+      credentials: 'omit',
+    });
+    const isRedirect = response.type === 'opaqueredirect' || REDIRECT_STATUSES.has(response.status);
+    if (!isRedirect) return response;
+    await response.body?.cancel().catch(() => {});
+    const where = safeUrl(current);
+    if (!config.followRedirects) {
+      throw new HttpProviderError(`${where}: redirected (HTTP ${response.status}); set followRedirects to follow`, 'http-status', response.status);
+    }
+    if (response.type === 'opaqueredirect') {
+      throw new HttpProviderError(`${where}: redirect cannot be inspected in this environment`, 'http-status');
+    }
+    if (hop >= MAX_REDIRECTS) throw new HttpProviderError(`${where}: too many redirects (more than ${MAX_REDIRECTS})`, 'http-status');
+    const location = response.headers.get('location');
+    if (!location) throw new HttpProviderError(`${where}: redirect without a Location header`, 'http-status', response.status);
+    let next: URL;
+    try {
+      next = new URL(location, current);
+    } catch {
+      throw new HttpProviderError(`${where}: redirect to an invalid URL`, 'http-status', response.status);
+    }
+    if (next.protocol !== 'http:' && next.protocol !== 'https:') {
+      throw new HttpProviderError(`${where}: redirect to a URL that is not http(s)`, 'http-status', response.status);
+    }
+    if (deps.allowOrigin && !deps.allowOrigin(next.origin)) {
+      throw new HttpProviderError(`${where}: redirect to ${next.origin}, which is not in this provider's allowed origins`, 'network');
+    }
+    if (next.origin !== home) {
+      trusted = false;
+      if (auth.query) next.searchParams.delete(auth.query.name);
+    }
+    if (response.status === 303 || ((response.status === 301 || response.status === 302) && method === 'POST')) {
+      if (method !== 'HEAD') method = 'GET';
+      body = undefined;
+    }
+    current = next;
   }
 }
 

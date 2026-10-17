@@ -75,7 +75,12 @@ export interface HttpConnectionConfig {
   write?: WriteConfig;
   /** Largest response body / SSE event / WebSocket message accepted (default 4 MiB). */
   maxBytes: number;
-  /** Follow HTTP redirects (default false: a redirect is an error, so requests cannot leave the configured origin). */
+  /**
+   * Follow HTTP redirects (default false: a redirect is an error). When true,
+   * redirects are followed manually (at most 5 hops): credentials go only to
+   * the connection's origin and are dropped for good once a hop leaves it,
+   * and an origin allowlist applies to every hop.
+   */
   followRedirects: boolean;
 }
 

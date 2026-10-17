@@ -60,7 +60,7 @@ export interface HttpProviderOptions {
   /**
    * Allowed origins (`permissions.network` patterns such as
    * `https://*.example.com`, `wss://feed.example.com:8443`). When set,
-   * `connect` refuses any URL outside them and redirects cannot be enabled.
+   * `connect` refuses any URL outside them, and every redirect hop is checked against them.
    * Unset: the provider contacts whatever origin a connection names.
    */
   origins?: string[];
@@ -127,7 +127,6 @@ export function createHttpProvider(options: HttpProviderOptions = {}): HolodeckP
 
 function checkOrigins(config: HttpConnectionConfig, origins: string[] | undefined): void {
   if (!origins) return;
-  if (config.followRedirects) throw new HttpProviderError('followRedirects cannot be enabled when origins are restricted', 'network');
   const base = new URL(config.url);
   const targets = [base];
   if (config.write) targets.push(httpEquivalent(base));
@@ -197,12 +196,17 @@ async function connectHttp(
     signal: controller.signal,
     setTimeout: setTimer,
     clearTimeout: clearTimer,
+    allowOrigin: origins ? (origin) => origins.some((pattern) => originMatches(pattern, origin)) : undefined,
   });
 
   const statusListeners = new Set<(s: ProviderStatus) => void>();
   const channels = new Map<string, ChannelEntry>();
-  const payloads = new Map<string, { json: unknown; ts: number }>();
-  const sampleCache = new Map<string, Sample>();
+  // Both caches carry the receipt sequence number of the payload they came
+  // from, so "current value" is always the newest one seen, whichever path
+  // (subscription, read, browse) brought it in (holodeck#89 review).
+  const payloads = new Map<string, { json: unknown; ts: number; seq: number }>();
+  const sampleCache = new Map<string, { sample: Sample; seq: number }>();
+  let seq = 0;
   const subscriptions = new Set<() => void>();
   let status: ProviderStatus = { state: 'live', message: 'idle', since: ctx.now() };
   let closed = false;
@@ -242,19 +246,42 @@ async function connectHttp(
     return { source: parsed.source, value: null, ts, quality: 'bad' };
   };
 
-  const remember = (samples: readonly Sample[]) => {
-    for (const s of samples) setBounded(sampleCache, s.source, s, MAX_CACHED_SAMPLES);
+  const remember = (samples: readonly Sample[], from: number) => {
+    for (const sample of samples) {
+      const prev = sampleCache.get(sample.source);
+      if (!prev || prev.seq <= from) setBounded(sampleCache, sample.source, { sample, seq: from }, MAX_CACHED_SAMPLES);
+    }
   };
 
-  const onPayload = (href: string, json: unknown, receivedAt: number) => {
-    if (closed) return;
+  /** Record a payload for an endpoint: timestamp from the `timestamp` selector, next sequence number. */
+  const storePayload = (href: string, json: unknown, receivedAt: number) => {
     let ts = receivedAt;
     if (tsTokens) {
       const hit = lookup(json, tsTokens);
       const parsed = hit.found ? toEpochMs(hit.value) : undefined;
       if (parsed !== undefined) ts = parsed;
     }
-    setBounded(payloads, href, { json, ts }, MAX_CACHED_PAYLOADS);
+    const record = { json, ts, seq: ++seq };
+    setBounded(payloads, href, record, MAX_CACHED_PAYLOADS);
+    return record;
+  };
+
+  /**
+   * The newest known sample for a source: from the endpoint's latest payload
+   * when that is at least as new as the cached sample and contains the source
+   * (or, `partial` false, says it is missing); otherwise the cached sample.
+   */
+  const currentSample = (parsed: ParsedSource, href: string, partial: boolean): Sample | undefined => {
+    const cached = sampleCache.get(parsed.source);
+    const payload = payloads.get(href);
+    const fromPayload = payload && sampleFor(parsed, payload.json, payload.ts, partial);
+    if (fromPayload && (!cached || payload.seq >= cached.seq)) return fromPayload;
+    return cached?.sample ?? fromPayload;
+  };
+
+  const onPayload = (href: string, json: unknown, receivedAt: number) => {
+    if (closed) return;
+    const { ts, seq: from } = storePayload(href, json, receivedAt);
     const entry = channels.get(href);
     if (!entry) return;
     for (const sub of [...entry.subs]) {
@@ -265,7 +292,7 @@ async function connectHttp(
         if (sample) samples.push(sample);
       }
       if (samples.length) {
-        remember(samples);
+        remember(samples, from);
         sub.deliver(samples);
       }
     }
@@ -355,9 +382,8 @@ async function connectHttp(
         entry.subs.add(sub);
         if (fresh) entry.channel.start();
         // First delivery includes current values when we have them.
-        const cached = payloads.get(href);
         for (const parsed of list) {
-          const sample = sampleCache.get(parsed.source) ?? (cached && sampleFor(parsed, cached.json, cached.ts, streaming));
+          const sample = currentSample(parsed, href, streaming);
           if (sample) initial.push(sample);
         }
       }
@@ -390,25 +416,18 @@ async function connectHttp(
       await Promise.all(
         [...byEndpoint].map(async ([href, list]) => {
           if (streaming) {
-            const cached = payloads.get(href);
             for (const parsed of list) {
-              out.push(
-                sampleCache.get(parsed.source) ??
-                  (cached && sampleFor(parsed, cached.json, cached.ts, true)) ?? {
-                    source: parsed.source,
-                    value: null,
-                    ts: ctx.now(),
-                    quality: 'uncertain',
-                  },
-              );
+              out.push(currentSample(parsed, href, true) ?? { source: parsed.source, value: null, ts: ctx.now(), quality: 'uncertain' });
             }
             return;
           }
           try {
             const json = await fetchJson(requestDeps(), new URL(href));
-            const ts = ctx.now();
-            setBounded(payloads, href, { json, ts }, MAX_CACHED_PAYLOADS);
-            for (const parsed of list) out.push(sampleFor(parsed, json, ts, false) as Sample);
+            // Same sample builder as subscriptions: `timestamp` selector, sequence number.
+            const record = storePayload(href, json, ctx.now());
+            const samples = list.map((parsed) => sampleFor(parsed, record.json, record.ts, false) as Sample);
+            remember(samples, record.seq);
+            out.push(...samples);
           } catch (error) {
             log('warn', `holodeck.http read ${safeUrl(href)} failed: ${errorMessage(error)}`);
             const ts = ctx.now();
@@ -453,7 +472,7 @@ async function connectHttp(
         if (json === undefined) return [];
       } else {
         json = await fetchJson(requestDeps(), url);
-        setBounded(payloads, url.href, { json, ts: ctx.now() }, MAX_CACHED_PAYLOADS);
+        storePayload(url.href, json, ctx.now());
       }
       const hit = lookup(json, parsed.tokens);
       if (!hit.found || hit.value === null || typeof hit.value !== 'object') return [];

@@ -580,9 +580,9 @@ describe('holodeck.http: origin allowlist', () => {
     await expect(provider.connect({ url: `${server.url}/s` }, createProviderContext())).rejects.toThrow(/not in this provider's allowed origins/);
     const ok = await provider.connect({ url: 'https://api.example.com/s' }, createProviderContext());
     await ok.close();
-    await expect(provider.connect({ url: 'https://api.example.com/s', followRedirects: true }, createProviderContext())).rejects.toThrow(
-      /followRedirects/,
-    );
+    // Redirects are allowed; each hop is checked against the allowlist (redirects.test.ts).
+    const redirecting = await provider.connect({ url: 'https://api.example.com/s', followRedirects: true }, createProviderContext());
+    await redirecting.close();
     await expect(provider.connect({ url: 'https://a.b.example.com/s' }, createProviderContext())).rejects.toThrow(/allowed origins/);
   });
 

@@ -76,7 +76,7 @@ errors.
 | `protocols` | none | WebSocket subprotocols |
 | `write` | disabled | `{ method?: 'POST'\|'PUT'\|'PATCH', url?: '/tags/{selector}', body?: 'envelope'\|'value' }` |
 | `maxBytes` | 4 MiB | Largest response, SSE event or WebSocket message accepted |
-| `followRedirects` | `false` | A redirect is an error unless enabled |
+| `followRedirects` | `false` | A redirect is an error unless enabled. Enabled: at most 5 hops; credentials go only to the connection's origin and are dropped for good once a hop leaves it |
 
 ### Writes
 
@@ -120,7 +120,7 @@ await host.installPackage(pkg.manifest, pkg); // manifest.permissions.network ==
 ```
 
 The restricted provider refuses to connect outside those origins (including the HTTP origin used for writes on a
-WebSocket connection) and cannot enable redirects. Installing it with the default manifest fails with
+WebSocket connection), and checks every redirect hop against them. Installing it with the default manifest fails with
 `MANIFEST_MISMATCH`, because its provider's `origins` are not covered by `permissions.network`.
 
 ## Lifecycle
