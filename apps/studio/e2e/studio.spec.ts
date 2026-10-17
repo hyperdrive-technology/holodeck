@@ -66,10 +66,12 @@ test('create, place, reload, export, import', async ({ page }, testInfo) => {
   await expect(page.getByTestId('inspector-object-count')).toHaveText('2');
   await expect(page.getByLabel('Document name')).toHaveValue('E2E Plant');
 
-  // Export.
+  // Export (holodeck#42: the header button opens the Export dialog).
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
   const downloadPromise = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Export' }).click();
+  await page.getByTestId('export-dialog').getByRole('button', { name: 'Download JSON' }).click();
   const download = await downloadPromise;
+  await expect(page.getByTestId('export-dialog')).toHaveCount(0);
   expect(download.suggestedFilename()).toBe('e2e-plant.holodeck.json');
   const exportedPath = testInfo.outputPath('exported.holodeck.json');
   await download.saveAs(exportedPath);

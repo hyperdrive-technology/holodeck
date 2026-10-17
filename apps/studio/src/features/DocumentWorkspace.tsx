@@ -19,7 +19,8 @@ import { activeDocumentStore } from './active-document';
 import { CanvasErrorBoundary } from './CanvasErrorBoundary';
 import { ConflictDialog } from './ConflictDialog';
 import { inspectorActions, libraryAddActions } from './editor-commands';
-import { downloadDocument } from './file-io';
+import { downloadBlob, downloadComponentsCsv, downloadDocument } from './file-io';
+import { imageFileName } from '../documents/io';
 import { Inspector, type InspectorEdit } from './Inspector';
 import { describeSaveStatus } from './save-status';
 import { useStudioActions } from './use-studio-actions';
@@ -241,15 +242,24 @@ function DocumentWorkspace({
   useEffect(() => {
     activeDocumentStore.setState(() => ({
       id: initial.document.id,
+      name: doc.name,
       placing,
       armItem,
       addItem,
       exportFile: () => downloadDocument(docRef.current),
+      exportComponents: () => downloadComponentsCsv(docRef.current, host.registry),
+      exportImage: async (scale, signal) => {
+        const editor = editorRef.current;
+        if (!editor) throw new Error('the canvas is not ready');
+        const image = await editor.exportImage({ scale, signal });
+        const name = downloadBlob(image.blob, imageFileName(docRef.current, scale));
+        return { ...image, name };
+      },
       // Writes only when something is unsaved; reports the real outcome (holodeck#118).
       save: () => writer.persist(docRef.current),
     }));
     return () => activeDocumentStore.setState((current) => (current?.id === initial.document.id ? null : current));
-  }, [initial.document.id, placing, armItem, addItem, writer]);
+  }, [initial.document.id, doc.name, placing, armItem, addItem, writer, host]);
 
   /**
    * Inspector edits run as editor actions on the selected object, so they

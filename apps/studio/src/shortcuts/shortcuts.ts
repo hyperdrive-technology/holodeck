@@ -31,7 +31,7 @@ export interface ShortcutSpec {
 export const STUDIO_SHORTCUTS: readonly ShortcutSpec[] = [
   { command: 'document.new', hotkey: 'Mod+Alt+N', label: 'New document' },
   { command: 'document.import', hotkey: 'Mod+O', label: 'Import document file' },
-  { command: 'document.export', hotkey: 'Mod+Shift+E', label: 'Export document file' },
+  { command: 'document.export', hotkey: 'Mod+Shift+E', label: 'Export (document, components CSV, PNG, embed)' },
   { command: 'document.save', hotkey: 'Mod+S', label: 'Save (documents also save automatically)' },
   { command: 'library.search', hotkey: 'Mod+K', label: 'Search the library' },
   { command: 'panel.sidebar', hotkey: 'Mod+B', label: 'Toggle sidebar' },

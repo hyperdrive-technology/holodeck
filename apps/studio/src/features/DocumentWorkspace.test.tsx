@@ -22,6 +22,7 @@ import { createStudioRouter } from '../router';
 import { documentKeys } from '../documents/queries';
 import { StudioProvider } from '../studio-context';
 import { withPart } from '../test-support';
+import { activeDocumentStore } from './active-document';
 
 const editor = vi.hoisted(() => ({
   mounts: 0,
@@ -30,6 +31,8 @@ const editor = vi.hoisted(() => ({
   selectedId: null as string | null,
   /** What the stub's `getCamera` returns (the live view, ahead of the debounced onCameraChange). */
   liveCamera: { zoom: 1, target: [0, 0, 0] } as { zoom: number; target: [number, number, number] },
+  /** Options of every `exportImage` call on the stub handle. */
+  exportCalls: [] as unknown[],
 }));
 
 vi.mock('@holodeck/editor-2.5d-react', async (importOriginal) => {
@@ -47,6 +50,10 @@ vi.mock('@holodeck/editor-2.5d-react', async (importOriginal) => {
       },
       getState: () => ({ selectedId: editor.selectedId, selectedIds: editor.selectedId ? [editor.selectedId] : [] }) as never,
       getCamera: () => editor.liveCamera,
+      exportImage: async (options?: unknown) => {
+        editor.exportCalls.push(options);
+        return { width: 20, height: 10, tiles: 1, blob: new Blob(['png'], { type: 'image/png' }) };
+      },
     }));
     return <div data-testid="process-editor" data-object-count={props.scene.objects.length} />;
   }
@@ -74,7 +81,7 @@ beforeEach(() => {
   globalThis.indexedDB = new IDBFactory();
   store = new DocumentStore(openStudioDb('workspace-test'), { validate: (doc) => hostDocumentProblems(host, doc) });
   listeners = [];
-  Object.assign(editor, { mounts: 0, props: null, actions: [], selectedId: null, liveCamera: { zoom: 1, target: [0, 0, 0] } });
+  Object.assign(editor, { mounts: 0, props: null, actions: [], selectedId: null, liveCamera: { zoom: 1, target: [0, 0, 0] }, exportCalls: [] });
 });
 
 async function openWorkspace(doc: HolodeckDocument) {
@@ -268,5 +275,60 @@ describe('DocumentWorkspace <-> ProcessEditor', () => {
     vi.spyOn(store, 'getCamera').mockRejectedValue(new Error('idb down'));
     await openWorkspace(tankDoc());
     expect(editor.props?.camera).toBeUndefined();
+  });
+});
+
+describe('export commands (holodeck#42)', () => {
+  /** Captures `downloadBlob` (object URL + anchor click) without a real download. */
+  function captureDownloads() {
+    const downloads: Array<{ name: string; blob: Blob }> = [];
+    const blobs = new Map<string, Blob>();
+    let seq = 0;
+    const create = vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+      const url = `blob:test/${++seq}`;
+      blobs.set(url, blob as Blob);
+      return url;
+    });
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      downloads.push({ name: this.download, blob: blobs.get(this.href)! });
+    });
+    return { downloads, restore: () => [create, revoke, click].forEach((m) => m.mockRestore()) };
+  }
+
+  it('publishes the name and downloads a PNG at the chosen scale, named after the document', async () => {
+    await store.create(tankDoc());
+    await openWorkspace(tankDoc());
+    const { downloads, restore } = captureDownloads();
+    try {
+      const active = activeDocumentStore.state!;
+      expect(active.name).toBe('Plant');
+      const image = await active.exportImage(4);
+      expect(editor.exportCalls).toEqual([{ scale: 4, signal: undefined }]);
+      expect(image).toMatchObject({ name: 'plant@4x.png', width: 20, height: 10 });
+      expect(downloads.map((d) => d.name)).toEqual(['plant@4x.png']);
+      expect(downloads[0]!.blob.type).toBe('image/png');
+    } finally {
+      restore();
+    }
+  });
+
+  it('downloads the components CSV and the document JSON', async () => {
+    await store.create(tankDoc());
+    await openWorkspace(tankDoc());
+    const { downloads, restore } = captureDownloads();
+    try {
+      activeDocumentStore.state!.exportComponents();
+      activeDocumentStore.state!.exportFile();
+      expect(downloads.map((d) => d.name)).toEqual(['plant.components.csv', 'plant.holodeck.json']);
+      const csv = await downloads[0]!.blob.text();
+      expect(downloads[0]!.blob.type).toBe('text/csv;charset=utf-8');
+      const lines = csv.replace(/^\uFEFF/, '').split('\r\n');
+      expect(lines[0]!.startsWith('id,part,label,category,package,layer')).toBe(true);
+      expect(lines[1]!.startsWith('tank-1,tank,')).toBe(true);
+      expect(JSON.parse(await downloads[1]!.blob.text())).toMatchObject({ format: 'holodeck.document.v1', id: 'p', name: 'Plant' });
+    } finally {
+      restore();
+    }
   });
 });

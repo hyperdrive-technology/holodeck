@@ -14,6 +14,7 @@ import { SidePanel } from '../layout/SidePanel';
 import { panelStore, togglePanel } from '../layout/ui-state';
 import { activeDocumentStore, shellStore } from './active-document';
 import { DocumentList } from './DocumentList';
+import { ExportDialog } from './ExportDialog';
 import { IMPORT_INPUT_ID, openImportPicker } from './file-io';
 import { LibraryPanel } from './LibraryPanel';
 import { Notices } from './Notices';
@@ -90,7 +91,7 @@ export function AppShell() {
           variant="ghost"
           size="sm"
           disabled={!active}
-          onClick={() => active?.exportFile()}
+          onClick={() => shellStore.setState((s) => ({ ...s, exportOpen: true }))}
           title={`Export (${formatForDisplay('Mod+Shift+E')})`}
         >
           <DownloadIcon /> Export
@@ -150,6 +151,7 @@ export function AppShell() {
       </div>
       <StudioHotkeys />
       <ShortcutsDialog />
+      {active ? <ExportDialog key={active.id} documentName={active.name} /> : null}
       <Notices />
     </div>
   );
