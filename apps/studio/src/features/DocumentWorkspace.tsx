@@ -28,12 +28,28 @@ const messageOf = (error: unknown) => (error instanceof Error ? error.message : 
 /** Route component for `/d/$docId`: loads the document, then hands it to the editor. */
 export function DocumentRoute({ docId }: { docId: string }) {
   const { data, isPending, error } = useDocument(docId);
-  if (isPending) return <CenteredMessage>Loading document…</CenteredMessage>;
-  if (error) return <CenteredMessage tone="error">Could not open the document: {error.message}</CenteredMessage>;
-  if (!data) return <CenteredMessage>This document does not exist (it may have been deleted).</CenteredMessage>;
-  if (data.document.engine !== ISO_ENGINE_ID) return <CenteredMessage>No editor for engine “{data.document.engine}” yet.</CenteredMessage>;
+  // The version this route last opened. If the document then disappears
+  // (deleted in another tab, holodeck#115), the workspace stays mounted with
+  // its working copy until it is clean or the user has chosen what to keep;
+  // unmounting it here would drop unsaved edits without any prompt.
+  const [opened, setOpened] = useState<VersionedDocument | null>(null);
+  if (data && data !== opened) setOpened(data);
+  const kept = opened?.document.id === docId ? opened : null;
+  const release = useCallback(() => setOpened(null), []);
+  if (isPending && !kept) return <CenteredMessage>Loading document…</CenteredMessage>;
+  if (error && !kept) return <CenteredMessage tone="error">Could not open the document: {error.message}</CenteredMessage>;
+  const current = data ?? kept;
+  if (!current) return <CenteredMessage>This document does not exist (it may have been deleted).</CenteredMessage>;
+  if (current.document.engine !== ISO_ENGINE_ID) return <CenteredMessage>No editor for engine “{current.document.engine}” yet.</CenteredMessage>;
   // key: a different document gets fresh editor state (selection, working copy, writer).
-  return <DocumentWorkspace key={data.document.id} initial={data} />;
+  return (
+    <DocumentWorkspace
+      key={current.document.id}
+      initial={current}
+      deletedElsewhere={!isPending && data === null}
+      onReleased={release}
+    />
+  );
 }
 
 function CenteredMessage({ children, tone }: { children: React.ReactNode; tone?: 'error' }) {
@@ -49,7 +65,17 @@ function CenteredMessage({ children, tone }: { children: React.ReactNode; tone?:
  * committed change goes through one DocumentWriter (serial, revision-checked
  * writes; see documents/writer.ts).
  */
-function DocumentWorkspace({ initial }: { initial: VersionedDocument }) {
+function DocumentWorkspace({
+  initial,
+  deletedElsewhere,
+  onReleased,
+}: {
+  initial: VersionedDocument;
+  /** The stored document is gone (another tab deleted it). */
+  deletedElsewhere: boolean;
+  /** Let the route drop this workspace (nothing here needs keeping). */
+  onReleased: () => void;
+}) {
   const { host, store, channel } = useStudio();
   const client = useQueryClient();
   const [doc, setDoc] = useState<IsoDoc>(initial.document as IsoDoc);
@@ -196,6 +222,15 @@ function DocumentWorkspace({ initial }: { initial: VersionedDocument }) {
     },
     [writer],
   );
+
+  // Deleted elsewhere: a clean workspace just closes; one with unsaved,
+  // failed or pending edits enters the "deleted elsewhere" conflict so the
+  // user can save their version as a copy or discard it.
+  useEffect(() => {
+    if (!deletedElsewhere) return;
+    if (leaving.current || writer.isClean()) onReleased();
+    else writer.markDeleted();
+  }, [deletedElsewhere, onReleased, writer]);
 
   const conflict = writerState.status.kind === 'conflict' ? writerState.status : null;
 

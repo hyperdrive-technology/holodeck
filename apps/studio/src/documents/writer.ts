@@ -111,6 +111,17 @@ export class DocumentWriter {
     this.set({ revision: version.revision, status: { kind: 'saved' }, dirty: false });
   }
 
+  /**
+   * The document was deleted elsewhere while this tab still has it open.
+   * Only meaningful when not clean: the writer enters the same conflict
+   * state a save against a missing record produces (`latest` undefined), so
+   * nothing more is written and the user saves a copy or discards.
+   */
+  markDeleted() {
+    if (this.state.status.kind === 'conflict' && this.state.status.latest === undefined) return;
+    this.set({ ...this.state, status: { kind: 'conflict', latest: undefined } });
+  }
+
   /** Status after a write settles: still saving if more are queued, else saved unless the body is unsaved. */
   private settledStatus(): SaveStatus {
     if (this.queued > 1) return { kind: 'saving' };

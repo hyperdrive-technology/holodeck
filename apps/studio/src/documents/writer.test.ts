@@ -154,4 +154,28 @@ describe('DocumentWriter', () => {
       expect(writer.isClean()).toBe(true);
     });
   });
+
+  // holodeck#115: another tab deleted the document while this one had unsaved edits.
+  describe('deleted elsewhere', () => {
+    it('markDeleted blocks further writes and keeps the edits dirty for a copy', async () => {
+      const writer = new DocumentWriter(store, 'p', base.revision);
+      vi.spyOn(store, 'save').mockRejectedValueOnce(new Error('disk full'));
+      await writer.save(withObject(base.document, 'tank-1'));
+      await store.remove('p');
+      writer.markDeleted();
+      writer.markDeleted(); // idempotent: no extra notifications
+      expect(writer.getState()).toMatchObject({ dirty: true, status: { kind: 'conflict', latest: undefined } });
+      expect(await writer.save(withObject(base.document, 'tank-1'))).toBeUndefined();
+      expect(await store.get('p')).toBeUndefined();
+    });
+
+    it('markDeleted notifies once', () => {
+      const writer = new DocumentWriter(store, 'p', base.revision);
+      const listener = vi.fn();
+      writer.subscribe(listener);
+      writer.markDeleted();
+      writer.markDeleted();
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+  });
 });

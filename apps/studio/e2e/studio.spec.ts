@@ -182,3 +182,56 @@ test('Undo after adopting another tab’s version cannot resurrect the old scene
   await expect(editor(other)).toHaveAttribute('data-object-count', '1');
   await expect(other.getByTestId('canvas')).toHaveAttribute('data-revision', '4');
 });
+
+// holodeck#115: tab B deleting the document must not silently drop tab A's
+// unsaved edits (A's save failed, so they exist only in A's working copy).
+test('deleted in another tab while this tab has unsaved edits: save mine as a copy', async ({ page, context }) => {
+  await page.goto('/');
+  await page.getByTestId('welcome').getByRole('button', { name: 'New document' }).click();
+  await expect(page).toHaveURL(/\/d\/[0-9a-f-]{36}$/);
+  const url = page.url();
+  const docId = url.split('/').pop()!;
+
+  const other = await context.newPage();
+  other.on('pageerror', (error) => pageErrors.push(error));
+  await other.addInitScript(() => {
+    delete (Navigator.prototype as { gpu?: unknown }).gpu;
+  });
+  await other.goto(url);
+  await expect(other.getByTestId('canvas')).toHaveAttribute('data-revision', '1');
+
+  // Tab A: make IndexedDB writes fail, then place a tank: the autosave fails, the edit is only in memory.
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.put;
+    (window as { __restorePut?: () => void }).__restorePut = () => {
+      IDBObjectStore.prototype.put = original;
+    };
+    IDBObjectStore.prototype.put = function () {
+      throw new DOMException('simulated write failure', 'QuotaExceededError');
+    };
+  });
+  await page.locator('[data-library-item="tank"]').click();
+  await expect(page.getByTestId('canvas')).toHaveAttribute('data-save-status', 'error');
+  await expect(page.getByTestId('canvas')).toHaveAttribute('data-dirty', 'true');
+  await page.evaluate(() => (window as { __restorePut?: () => void }).__restorePut?.());
+
+  // Tab B deletes the document.
+  await other.getByRole('button', { name: /Delete document/ }).click();
+  await other.getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect(other).toHaveURL(/\/$/);
+
+  // Tab A keeps its working copy and asks what to keep.
+  const dialog = page.getByTestId('conflict-dialog');
+  await expect(dialog).toContainText('deleted in another tab');
+  await expect(editor(page)).toHaveAttribute('data-object-count', '1');
+  await dialog.getByRole('button', { name: 'Save mine as a copy' }).click();
+
+  // The copy holds A's edit and opens.
+  await expect(page).not.toHaveURL(url);
+  await expect(page).toHaveURL(/\/d\/[0-9a-f-]{36}$/);
+  expect(page.url()).not.toContain(docId);
+  await expect(editor(page)).toHaveAttribute('data-object-count', '1');
+  await expect(page.getByTestId('document-list').getByRole('link', { name: /\(my version\)/ })).toBeVisible();
+  await page.reload();
+  await expect(editor(page)).toHaveAttribute('data-object-count', '1');
+});
