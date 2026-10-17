@@ -199,5 +199,17 @@ function ParamField({ name, spec, value, onCommit }: { name: string; spec: IsoPa
       );
     case 'string':
       return <DraftField label={label} value={typeof value === 'string' ? value : ''} coerce={(s) => coerceParam(spec, s)} onCommit={onCommit} />;
+    case 'color':
+      return (
+        <DraftField
+          label={label}
+          value={typeof value === 'string' ? value : ''}
+          coerce={(s) => coerceParam(spec, s)}
+          onCommit={onCommit}
+          inputProps={{ placeholder: '#rrggbb, empty = theme colour' }}
+        />
+      );
+    default:
+      return <ReadonlyField label={label} value={<code className="text-xs">{JSON.stringify(value)}</code>} />;
   }
 }

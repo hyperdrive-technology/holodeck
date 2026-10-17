@@ -3,7 +3,7 @@
  * turning what the user typed into a valid value (or a reason it is not).
  */
 
-import type { IsoPartParamSpec, IsoPlacement } from '@holodeck/editor-2.5d-react';
+import { paramValueProblem, type IsoPartParamSpec, type IsoPlacement } from '@holodeck/editor-2.5d-react';
 
 /** Radians -> whole degrees in [0, 360). */
 export function rotationDegrees(rotation: number | undefined): number {
@@ -27,10 +27,22 @@ export type Coerced = { ok: true; value: unknown } | { ok: false; reason: string
 
 /**
  * Typed input -> param value. Numbers must be finite and are clamped to
- * `min`/`max`; enums must be one of `options`; booleans pass through.
+ * `min`/`max`; enums must be one of `options`; colours are hex or '' (theme
+ * colour); booleans pass through. The result is then checked with the
+ * engine's own `paramValueProblem`, so the studio never accepts a value the
+ * engine would reject (string length limits, URL schemes, …).
  */
 export function coerceParam(spec: IsoPartParamSpec, input: string | boolean): Coerced {
+  const parsed = parseParam(spec, input);
+  if (!parsed.ok) return parsed;
+  const problem = paramValueProblem(spec, parsed.value);
+  return problem ? { ok: false, reason: problem } : parsed;
+}
+
+function parseParam(spec: IsoPartParamSpec, input: string | boolean): Coerced {
   switch (spec.type) {
+    case 'color':
+      return typeof input === 'string' ? { ok: true, value: input.trim() } : { ok: false, reason: 'expected a colour' };
     case 'boolean':
       return typeof input === 'boolean' ? { ok: true, value: input } : { ok: false, reason: 'expected on/off' };
     case 'number': {
@@ -50,6 +62,9 @@ export function coerceParam(spec: IsoPartParamSpec, input: string | boolean): Co
     }
     case 'string':
       return typeof input === 'string' ? { ok: true, value: input } : { ok: false, reason: 'expected text' };
+    default:
+      // A param type newer than this studio: refuse rather than guess.
+      return { ok: false, reason: `unsupported param type "${String((spec as { type: unknown }).type)}"` };
   }
 }
 

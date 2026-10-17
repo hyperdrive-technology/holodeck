@@ -55,6 +55,23 @@ describe('inspector logic', () => {
     });
   });
 
+  it('accepts hex colours or empty (theme colour) and rejects others via the engine validator', () => {
+    const spec: IsoPartParamSpec = { type: 'color', label: 'Colour', default: '' };
+    expect(coerceParam(spec, ' #ff8800 ')).toEqual({ ok: true, value: '#ff8800' });
+    expect(coerceParam(spec, '')).toEqual({ ok: true, value: '' });
+    expect(coerceParam(spec, 'orange')).toMatchObject({ ok: false, reason: expect.stringContaining('hex colour') });
+  });
+
+  it('applies engine limits beyond the type (string maxLength)', () => {
+    const spec: IsoPartParamSpec = { type: 'string', label: 'Text', default: '', maxLength: 3 };
+    expect(coerceParam(spec, 'abc').ok).toBe(true);
+    expect(coerceParam(spec, 'abcd')).toMatchObject({ ok: false, reason: expect.stringContaining('at most 3') });
+  });
+
+  it('refuses a param type it does not know', () => {
+    expect(coerceParam({ type: 'vector' as never, label: 'V', default: 0 }, '1').ok).toBe(false);
+  });
+
   it('coerceCoordinate rounds to 2 decimals and rejects junk', () => {
     expect(coerceCoordinate('3')).toEqual({ ok: true, value: 3 });
     expect(coerceCoordinate('-1.239')).toEqual({ ok: true, value: -1.24 });
