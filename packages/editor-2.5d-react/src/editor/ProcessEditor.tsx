@@ -1,5 +1,6 @@
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
-import { useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState, type Ref } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState, useSyncExternalStore, type Ref } from 'react';
+import { imageAspectVersion, subscribeImageAspects } from '../objects/image-aspect';
 import { initialIsoPose, rotatePose, toggleTopDown } from '../iso/pose';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import type { Vector3Tuple } from 'three';
@@ -240,6 +241,7 @@ export function ProcessEditor({
   // zoomed, panned or rotated: their view wins. The "fit" button resets that.
   // Scene edits never re-fit, except the first placement in an empty document.
   // A camera supplied at mount counts as "fitted" and "the user's view", so no auto-fit overrides it.
+  const aspectVersion = useSyncExternalStore(subscribeImageAspects, imageAspectVersion, imageAspectVersion);
   const fittedSceneId = useRef<string | null>(initialCamera.current ? scene.id : null);
   // Mirrors fittedSceneId as state so the render hold below re-evaluates when a
   // fit lands even if it changed neither zoom nor target.
@@ -260,7 +262,8 @@ export function ProcessEditor({
     setZoom(fit.zoom);
     setTarget(fit.target);
     if (sceneChanged) setPose(home);
-  }, [scene.id, hasObjects, fitScene, home]);
+    // aspectVersion: an image finished loading and its real aspect changed the bounds (holodeck#108).
+  }, [scene.id, hasObjects, fitScene, home, aspectVersion]);
 
   // camera prop -> view (holodeck#100). Declared after the fit effect so a
   // document switch that brings its own camera lands on it, not on the fit.
@@ -426,6 +429,7 @@ export function ProcessEditor({
   const fitRef = useRef<() => void>(() => {});
   const pendingPaste = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clipboardText = useRef<string | null>(null);
+  const keyboardCut = useRef(false);
   const runShortcut = useCallback((id: ShortcutId): boolean => {
     const s = stateRef.current;
     const nudge = (dx: number, dy: number) => dispatch({ type: 'nudge', dx, dy });
@@ -525,8 +529,11 @@ export function ProcessEditor({
         // by then a cut has already removed the parts from the state.
         const s = stateRef.current;
         clipboardText.current = s.selectedIds.length ? serializeClipboard(copyObjects(s.scene, new Set(s.selectedIds), s.registry)) : null;
+        // The keydown already cut: the native 'cut' event it triggers must not delete again.
+        keyboardCut.current = shortcut.id === 'cut';
         setTimeout(() => {
           clipboardText.current = null;
+          keyboardCut.current = false;
         }, 0);
       }
       // Copy / cut / paste keep the browser default so the native clipboard
@@ -555,6 +562,16 @@ export function ProcessEditor({
       event.clipboardData.setData('text/plain', text);
       event.preventDefault();
     };
+    // Native cut with no keydown (browser Edit > Cut, a context menu): write
+    // the parts like copy, then cut them here (holodeck#123: it used to copy
+    // without deleting, so a later paste duplicated them).
+    const onCut = (event: ClipboardEvent) => {
+      const fromKeyboard = keyboardCut.current;
+      keyboardCut.current = false;
+      const canCut = !fromKeyboard && !readOnlyRef.current && !inField(event) && !hasTextSelection() && stateRef.current.selectedIds.length > 0;
+      onCopy(event);
+      if (canCut) dispatch({ type: 'cut' });
+    };
     const onPaste = (event: ClipboardEvent) => {
       if (inField(event) || readOnlyRef.current) return;
       const parts = parseClipboard(event.clipboardData?.getData('text/plain') ?? '');
@@ -569,13 +586,13 @@ export function ProcessEditor({
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', onUp);
     window.addEventListener('copy', onCopy);
-    window.addEventListener('cut', onCopy);
+    window.addEventListener('cut', onCut);
     window.addEventListener('paste', onPaste);
     return () => {
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keyup', onUp);
       window.removeEventListener('copy', onCopy);
-      window.removeEventListener('cut', onCopy);
+      window.removeEventListener('cut', onCut);
       window.removeEventListener('paste', onPaste);
       if (pendingPaste.current) clearTimeout(pendingPaste.current);
     };
@@ -813,6 +830,9 @@ export function ProcessEditor({
                 onMarqueeSelect={(ids, additive) => dispatch({ type: 'select-many', ids, additive })}
                 onLinkDragStart={(id, end) => dispatch({ type: 'link-drag-start', id, end })}
                 onLinkDragEnd={linkDragEnd}
+                onWaypointInsert={(id, index, x, y) => dispatch({ type: 'waypoint-insert', id, index, x, y })}
+                onWaypointDragStart={(id, index) => dispatch({ type: 'link-drag-start', id, end: 'via', index })}
+                onWaypointRemove={(id, index) => dispatch({ type: 'waypoint-remove', id, index })}
               />
             </ProcessSceneView>
             </div>

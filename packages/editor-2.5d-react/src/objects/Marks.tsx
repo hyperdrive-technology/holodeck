@@ -10,6 +10,7 @@ import { FaceCamera, FloorText } from '../../assets/process/Label';
 import { annotationStyle, type HolodeckStyle } from '../../assets/process/style';
 import { PendingAsset } from '../iso/render-signal';
 import { AssetBoundary, useTrackedTexture } from './assets';
+import { setImageAspect } from './image-aspect';
 import { drawIcon, ICON_TEXTURE_PX } from './icons';
 import type { IsoMetaValue } from './validate';
 
@@ -106,9 +107,14 @@ export function ImageMark(props: { x: number; z: number; src: string; width: num
 
 function ImageMarkLoaded({ x, z, src, width, height, orient }: { x: number; z: number; src: string; width: number; height: number; orient: MarkOrient }) {
   const texture = useTrackedTexture(src);
+  const image = texture?.image as { width?: number; height?: number } | undefined;
+  const loaded = Boolean(image?.width && image?.height);
+  const aspect = loaded ? image!.width! / image!.height! : 1;
+  // Bounds (fit-to-view) read the real aspect from here (holodeck#108). After render, not during it.
+  useEffect(() => {
+    if (loaded) setImageAspect(src, aspect);
+  }, [src, aspect, loaded]);
   if (!texture) return null;
-  const image = texture.image as { width?: number; height?: number } | undefined;
-  const aspect = image?.width && image?.height ? image.width / image.height : 1;
   // height 0 = keep the image's aspect at `width`; both set = letterbox inside width x height.
   const [w, h] = height > 0 ? fitBox(width, height, aspect) : [width, width / aspect];
   return <MarkPlane x={x} z={z} w={w} h={h} orient={orient} texture={texture} userData={{ hdImage: src.slice(0, 120) }} />;

@@ -1,5 +1,5 @@
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
-import { createElement, useMemo } from 'react';
+import { createElement, useMemo, useRef } from 'react';
 import type { IsoMetrics, IsoPartDefinition, IsoPartTuning } from '../registry/types';
 import { useIsoRegistry } from '../registry/react';
 import { SceneObjectView } from './SceneObjectView';
@@ -9,7 +9,7 @@ import { resolveAutoElbows } from '../routing/elbows';
 import { mergeFittingParams } from '../../assets/process/fitting-params';
 import { bendKeysOf, resolvePipeRuns } from './pipe-runs';
 import type { IsoPlacement } from './scene';
-import { resolveConnectorPaths } from '../objects/connector';
+import { connectorRouteKey, liveConnectorObjects, resolveConnectorPaths } from '../objects/connector';
 
 /**
  * Unique meshes for most parts; `instanced` parts (pipes, elbows, valves,
@@ -55,9 +55,19 @@ export function SceneGraph({
     () => resolvePipeRuns(objects, registry, { pipeRadius }),
     [objects, registry, pipeRadius],
   );
+  // Live `route` values (metrics) change connector paths (holodeck#107). The key
+  // keeps the memo from re-routing on every metrics tick that leaves routes alone.
+  const routeKey = connectorRouteKey(objects, metrics, registry);
+  const metricsRef = useRef(metrics);
+  metricsRef.current = metrics;
   const connectorPaths = useMemo(
-    () => resolveConnectorPaths(objects, registry, (o) => registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, o.object)?.connector === true),
-    [objects, registry],
+    () => resolveConnectorPaths(
+      liveConnectorObjects(objects, metricsRef.current, registry),
+      registry,
+      (o) => registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, o.object)?.connector === true,
+    ),
+    // routeKey stands in for metrics (read through the ref) on purpose.
+    [objects, registry, routeKey],
   );
   const drawn = hiddenFittings.size > 0 ? objects.filter((o) => !hiddenFittings.has(o.id)) : objects;
   const view = (object: IsoPlacement) => (

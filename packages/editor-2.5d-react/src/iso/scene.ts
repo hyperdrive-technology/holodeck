@@ -239,7 +239,9 @@ export function validatePlacementGeometry(raw: unknown, registry: ContributionRe
     throw new Error('scene.objects entries must be records');
   }
   if (typeof raw.id !== 'string' || typeof raw.object !== 'string') {
-    throw new Error(`placement missing id/object: ${JSON.stringify(raw)}`);
+    // Never stringify the whole record: it can be untrusted and megabytes long (holodeck#119).
+    const keys = Object.keys(raw).slice(0, 8).join(', ');
+    throw new Error(`placement missing id/object (fields: ${keys.length > 120 ? `${keys.slice(0, 120)}…` : keys})`);
   }
   if (typeof raw.x !== 'number' || typeof raw.y !== 'number' || Number.isNaN(raw.x) || Number.isNaN(raw.y)) {
     throw new Error(`placement ${raw.id} missing numeric x,y`);

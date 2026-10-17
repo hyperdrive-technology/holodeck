@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useThree, type ThreeEvent } from '@react-three/fiber';
 import { Mesh, Plane, Raycaster, Vector2, Vector3, type Camera } from 'three';
 import { HOLODECK_KINDS } from '@holodeck/sdk';
@@ -18,7 +18,7 @@ import { resolveRouteEnd } from '../routing/ports';
 import { footprint, planRoute, type PlannedRoute } from './routing';
 import { pointerToGrid } from './snap';
 import { stamp, type EditorState, type LinkEndName, type ResizeHandle } from './editor-state';
-import { connectorEndPoint, linkEndPoint } from './connect';
+import { connectorEndPoint, linkEndPoint, waypointInsertHandles } from './connect';
 import { isPlacementEditable, visibleObjects } from './layers';
 import { isClickSized, marqueeHits, rectFromPoints, type ScreenRect } from './marquee';
 
@@ -81,6 +81,9 @@ export function EditorLayer({
   onMarqueeSelect,
   onLinkDragStart,
   onLinkDragEnd,
+  onWaypointInsert,
+  onWaypointDragStart,
+  onWaypointRemove,
 }: {
   state: EditorState;
   spacePan: boolean;
@@ -103,6 +106,14 @@ export function EditorLayer({
   /** Connector end handles (holodeck#91). Omit both to hide them. */
   onLinkDragStart?: (id: string, end: LinkEndName) => void;
   onLinkDragEnd?: () => void;
+  /**
+   * Connector waypoints (holodeck#112): press a "+" midpoint handle to insert
+   * one (then drag it), drag a waypoint handle to move it, double-click to
+   * remove it. Omit to hide the waypoint handles.
+   */
+  onWaypointInsert?: (id: string, index: number, x: number, y: number) => void;
+  onWaypointDragStart?: (id: string, index: number) => void;
+  onWaypointRemove?: (id: string, index: number) => void;
   /** Resize handles (parts with `def.resize`). Omit to hide the handles. */
   onResizeStart?: (id: string, handle: ResizeHandle) => void;
   onResizeMove?: (value: number) => void;
@@ -204,7 +215,14 @@ export function EditorLayer({
                 <>
                   <SelectionHalo object={selected} registry={registry} />
                   {single && isConnector && onLinkDragStart && onLinkDragEnd ? (
-                    <LinkHandles state={state} connector={selected} registry={registry} onStart={onLinkDragStart} onEnd={onLinkDragEnd} />
+                    <LinkHandles
+                      state={state}
+                      connector={selected}
+                      registry={registry}
+                      onStart={onLinkDragStart}
+                      onEnd={onLinkDragEnd}
+                      waypoints={onWaypointInsert && onWaypointDragStart && onWaypointRemove ? { insert: onWaypointInsert, drag: onWaypointDragStart, remove: onWaypointRemove } : undefined}
+                    />
                   ) : null}
                   {single && onResizeStart && onResizeMove && onResizeEnd ? (
                     <ResizeHandles
@@ -404,20 +422,41 @@ function LinkHandles({
   registry,
   onStart,
   onEnd,
+  waypoints,
 }: {
   state: EditorState;
   connector: IsoPlacement;
   registry: ContributionRegistry;
   onStart: (id: string, end: LinkEndName) => void;
   onEnd: () => void;
+  /** Waypoint editing (holodeck#112); omit to show end handles only. */
+  waypoints?: {
+    insert: (id: string, index: number, x: number, y: number) => void;
+    drag: (id: string, index: number) => void;
+    remove: (id: string, index: number) => void;
+  };
 }) {
-  const dragging = state.linkDrag?.id === connector.id ? state.linkDrag.end : null;
+  const drag = state.linkDrag?.id === connector.id ? state.linkDrag : null;
+  const dragging = drag?.end ?? null;
+  const draggingVia = drag?.end === 'via' ? drag.index : null;
   useEffect(() => {
     if (!dragging) return;
     const up = () => onEnd();
     window.addEventListener('pointerup', up);
     return () => window.removeEventListener('pointerup', up);
   }, [dragging, onEnd]);
+  const press = (fn: () => void) => (event: ThreeEvent<PointerEvent>) => {
+    if (event.button !== 0) return;
+    claimPointer(event.nativeEvent);
+    event.stopPropagation();
+    fn();
+  };
+  const editingWaypoints = waypoints !== undefined;
+  const inserts = useMemo(
+    () => (editingWaypoints ? waypointInsertHandles(state.scene, registry, connector) : []),
+    [editingWaypoints, state.scene, registry, connector],
+  );
+  const via = connector.link?.via ?? [];
   return (
     <group>
       {(['from', 'to'] as const).map((end) => {
@@ -430,18 +469,64 @@ function LinkHandles({
             name={`link-handle-${end}`}
             position={[wx, 0.25, wz]}
             raycast={dragging === end ? NO_RAYCAST : Mesh.prototype.raycast}
-            onPointerDown={(event) => {
-              if (event.button !== 0) return;
-              claimPointer(event.nativeEvent);
-              event.stopPropagation();
-              onStart(connector.id, end);
-            }}
+            onPointerDown={press(() => onStart(connector.id, end))}
           >
             <sphereGeometry args={[HANDLE_RADIUS * 1.2, 12, 8]} />
             <meshBasicMaterial color={dragging === end ? HANDLE_ACTIVE : HANDLE_COLOR} depthTest={false} toneMapped={false} />
           </mesh>
         );
       })}
+      {waypoints
+        ? via.map((p, index) => {
+            const live = draggingVia === index && state.cursor ? state.cursor : p;
+            const [wx, , wz] = gridToWorld(live.x, live.y);
+            return (
+              <mesh
+                key={`via-${index}`}
+                name={`waypoint-handle-${index}`}
+                position={[wx, 0.25, wz]}
+                raycast={draggingVia === index ? NO_RAYCAST : Mesh.prototype.raycast}
+                onPointerDown={press(() => waypoints.drag(connector.id, index))}
+                onDoubleClick={(event) => {
+                  event.stopPropagation();
+                  waypoints.remove(connector.id, index);
+                }}
+              >
+                {/* Invisible hit sphere: the visible marker is a few px wide at normal zoom. */}
+                <sphereGeometry args={[HANDLE_HIT_RADIUS, 10, 6]} />
+                <meshBasicMaterial transparent opacity={0} depthWrite={false} depthTest={false} />
+                <mesh raycast={NO_RAYCAST}>
+                  <boxGeometry args={[HANDLE_RADIUS * 1.6, HANDLE_RADIUS * 1.6, HANDLE_RADIUS * 1.6]} />
+                  <meshBasicMaterial color={draggingVia === index ? HANDLE_ACTIVE : HANDLE_COLOR} depthTest={false} toneMapped={false} />
+                </mesh>
+              </mesh>
+            );
+          })
+        : null}
+      {waypoints && !drag
+        ? inserts.map(({ index, point }) => {
+            const [wx, , wz] = gridToWorld(point.x, point.y);
+            return (
+              <mesh
+                key={`insert-${index}`}
+                name={`waypoint-insert-${index}`}
+                position={[wx, 0.22, wz]}
+                onPointerDown={press(() => {
+                  // Insert (one undo step), then keep dragging the new waypoint (a second step if it moves).
+                  waypoints.insert(connector.id, index, point.x, point.y);
+                  waypoints.drag(connector.id, index);
+                })}
+              >
+                <sphereGeometry args={[HANDLE_HIT_RADIUS, 10, 6]} />
+                <meshBasicMaterial transparent opacity={0} depthWrite={false} depthTest={false} />
+                <mesh raycast={NO_RAYCAST}>
+                  <sphereGeometry args={[HANDLE_RADIUS * 0.8, 10, 6]} />
+                  <meshBasicMaterial color={HANDLE_COLOR} transparent opacity={0.55} depthTest={false} toneMapped={false} />
+                </mesh>
+              </mesh>
+            );
+          })
+        : null}
     </group>
   );
 }
@@ -449,6 +534,8 @@ function LinkHandles({
 const HANDLE_COLOR = '#18BAE6';
 const HANDLE_ACTIVE = '#ff9f1c';
 const HANDLE_RADIUS = 0.14;
+/** Pick radius (grid cells) of the connector end / waypoint handles; larger than the drawn marker. */
+const HANDLE_HIT_RADIUS = 0.4;
 /** Screen-right in the default iso view (camera on +X+Z): world (+X, -Z). */
 const SIDE_DIR: [number, number] = [Math.SQRT1_2, -Math.SQRT1_2];
 

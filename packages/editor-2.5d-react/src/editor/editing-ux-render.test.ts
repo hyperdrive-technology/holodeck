@@ -133,6 +133,82 @@ describe.skipIf(!CHROMIUM)('editing UX in the editor (E3)', () => {
     }
   }, 120_000);
 
+  it('a native cut with no keydown (browser Edit > Cut) copies and deletes, once (holodeck#123)', async () => {
+    const browser = await launchRenderBrowser();
+    const page = await browser.newPage({ viewport: { width: 1280, height: 760 } });
+    try {
+      const toScreen = await openTopDown(page, 'scene=editing');
+      await clickCell(page, toScreen, 0, 0);
+      expect(await selected(page)).toBe('tank-a');
+      // Edit > Cut fires only the 'cut' ClipboardEvent: no keydown reaches the editor.
+      const written = await page.evaluate(() => {
+        const data = new DataTransfer();
+        document.body.dispatchEvent(new ClipboardEvent('cut', { clipboardData: data, bubbles: true, cancelable: true }));
+        return data.getData('text/plain');
+      });
+      expect(written).toContain('holodeck.iso.clipboard.v1');
+      expect(written).toContain('"tank-a"');
+      await page.waitForFunction(() => (window as unknown as { __scene: IsoSceneFile }).__scene.objects.length === 3);
+      expect((await sceneOf(page)).objects.some((o) => o.id === 'tank-a')).toBe(false);
+
+      // Keyboard cut still deletes exactly once (keydown + its native cut event).
+      await clickCell(page, toScreen, 6, 0);
+      await page.keyboard.press('ControlOrMeta+x');
+      await page.waitForFunction(() => (window as unknown as { __scene: IsoSceneFile }).__scene.objects.length === 2);
+      await animationFrames(page, 10);
+      expect((await sceneOf(page)).objects.map((o) => o.id).sort()).toEqual(['tank-c', 'valve-a']);
+      // Undo brings back exactly the keyboard-cut tank (one step), then the menu-cut one.
+      await page.keyboard.press('ControlOrMeta+z');
+      await page.waitForFunction(() => (window as unknown as { __scene: IsoSceneFile }).__scene.objects.length === 3);
+      await page.keyboard.press('ControlOrMeta+z');
+      await page.waitForFunction(() => (window as unknown as { __scene: IsoSceneFile }).__scene.objects.length === 4);
+    } finally {
+      await browser.close();
+    }
+  }, 120_000);
+
+  it('adds, drags and removes a connector waypoint with the pointer (holodeck#112)', async () => {
+    const browser = await launchRenderBrowser();
+    const page = await browser.newPage({ viewport: { width: 1280, height: 760 } });
+    try {
+      const toScreen = await openTopDown(page, 'scene=editing');
+      const viaOf = async () => (await sceneOf(page)).objects.find((o) => o.object === 'connector')?.link?.via;
+      // A free line on an empty row (the fitted view shows y = -2..8 or so).
+      await page.keyboard.press('c');
+      await clickCell(page, toScreen, 0, 3);
+      await clickCell(page, toScreen, 10, 3);
+      await page.waitForFunction(() => (window as unknown as { __scene: IsoSceneFile }).__scene.objects.length === 5);
+      await page.keyboard.press('Escape');
+      expect(await selected(page)).toBe('connector-1');
+      await settle(page);
+
+      // Press the "+" handle at the middle of the line, drag it two cells down, release.
+      await moveToCell(page, toScreen, 5, 3);
+      await page.mouse.down();
+      const target = toScreen(5, 5);
+      await page.mouse.move(target.x, target.y, { steps: 6 });
+      await moveToCell(page, toScreen, 5, 5);
+      await page.mouse.up();
+      await page.waitForFunction(() => {
+        const c = (window as unknown as { __scene: IsoSceneFile }).__scene.objects.find((o) => o.object === 'connector');
+        return c?.link?.via?.[0]?.y === 5;
+      });
+      expect(await viaOf()).toEqual([{ x: 5, y: 5 }]);
+      await settle(page);
+      await page.screenshot({ path: path.join(shots, 'editing-waypoint.png'), type: 'png' });
+
+      // Double-click the waypoint handle to remove it.
+      const p = await moveToCell(page, toScreen, 5, 5);
+      await page.mouse.dblclick(p.x, p.y);
+      await page.waitForFunction(() => {
+        const c = (window as unknown as { __scene: IsoSceneFile }).__scene.objects.find((o) => o.object === 'connector');
+        return c !== undefined && c.link?.via === undefined;
+      });
+    } finally {
+      await browser.close();
+    }
+  }, 120_000);
+
   it('shows the shortcut overlay, hides a layer and draws a connector', async () => {
     const browser = await launchRenderBrowser();
     const page = await browser.newPage({ viewport: { width: 1280, height: 760 } });
