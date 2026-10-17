@@ -242,3 +242,65 @@ export function appearanceProblems(placementId: string, raw: Record<string, unkn
   }
   return out;
 }
+
+/** Layers per scene, layer / group id length, layer name length (lane E3, holodeck#37). */
+export const MAX_LAYERS = 64;
+export const MAX_LAYER_ID = 64;
+export const MAX_LAYER_NAME = 128;
+
+/**
+ * One editor layer (`scene.layers`). Placements opt in with `placement.layer`;
+ * a placement without one, or naming an undeclared layer, is on the implicit
+ * default layer (`DEFAULT_LAYER_ID`, which may itself be declared to rename,
+ * hide or lock it). Hidden layers are not drawn; hidden and locked layers
+ * cannot be selected or edited in the editor.
+ */
+export interface IsoLayer {
+  id: string;
+  name: string;
+  hidden?: boolean;
+  locked?: boolean;
+}
+
+function idProblem(v: unknown): string | null {
+  return typeof v === 'string' && v.length > 0 && v.length <= MAX_LAYER_ID ? null : `must be a string of 1..${MAX_LAYER_ID} characters`;
+}
+
+/** `placement.layer` / `placement.group`: optional short id strings. */
+export function layerGroupProblems(placementId: string, raw: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const field of ['layer', 'group'] as const) {
+    if (raw[field] === undefined) continue;
+    const p = idProblem(raw[field]);
+    if (p) out.push(`placement ${placementId}: ${field} ${p}`);
+  }
+  return out;
+}
+
+/** `scene.layers`: at most MAX_LAYERS entries with unique ids and only known fields. */
+export function layersProblems(layers: unknown): string[] {
+  if (layers === undefined) return [];
+  if (!Array.isArray(layers)) return ['scene.layers must be an array'];
+  const out: string[] = [];
+  if (layers.length > MAX_LAYERS) out.push(`scene.layers has ${layers.length} entries (max ${MAX_LAYERS})`);
+  const seen = new Set<string>();
+  layers.slice(0, MAX_LAYERS + 1).forEach((layer, i) => {
+    if (!isRecord(layer)) {
+      out.push(`scene.layers[${i}] must be { id, name, hidden?, locked? }`);
+      return;
+    }
+    const idP = idProblem(layer.id);
+    if (idP) out.push(`scene.layers[${i}].id ${idP}`);
+    else if (seen.has(layer.id as string)) out.push(`scene.layers[${i}].id "${String(layer.id)}" is a duplicate`);
+    else seen.add(layer.id as string);
+    if (typeof layer.name !== 'string' || layer.name.length > MAX_LAYER_NAME) {
+      out.push(`scene.layers[${i}].name must be a string of at most ${MAX_LAYER_NAME} characters`);
+    }
+    for (const flag of ['hidden', 'locked'] as const) {
+      if (layer[flag] !== undefined && typeof layer[flag] !== 'boolean') out.push(`scene.layers[${i}].${flag} must be a boolean`);
+    }
+    const extra = Object.keys(layer).filter((k) => !['id', 'name', 'hidden', 'locked'].includes(k));
+    if (extra.length) out.push(`scene.layers[${i}] has unknown field(s) ${extra.join(', ')}`);
+  });
+  return out;
+}

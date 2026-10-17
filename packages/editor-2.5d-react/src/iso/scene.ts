@@ -23,8 +23,11 @@ import {
   appearanceProblems,
   isGridNumber,
   isRecord,
+  layerGroupProblems,
+  layersProblems,
   linkProblems,
   metaProblems,
+  type IsoLayer,
   paramsProblems,
   type IsoLink,
   type IsoMetaValue,
@@ -92,6 +95,13 @@ export interface IsoPlacement {
   metaHidden?: boolean;
   /** Connector anchors (`connector` part); see `IsoLink`. */
   link?: IsoLink;
+  /** Editor layer id (`scene.layers`); absent = the default layer. */
+  layer?: string;
+  /**
+   * Group id: placements sharing one select, move, copy and delete together
+   * in the editor (one level, no nesting). Opaque; the editor allocates `group-N`.
+   */
+  group?: string;
   /** Screen-space px on the frozen 760×540 snapshot (CSS translate). */
   nudgeX?: number;
   nudgeY?: number;
@@ -109,6 +119,8 @@ export interface IsoSceneFile {
   theme?: string;
   /** Host bags keyed by extension id; opaque to the editor. */
   extensions?: Record<string, unknown>;
+  /** Editor layers (show / hide, lock); see `IsoLayer`. Absent = one implicit default layer. */
+  layers?: IsoLayer[];
 }
 
 /** @deprecated use `IsoSceneFile` */
@@ -265,6 +277,7 @@ export function validatePlacementGeometry(raw: unknown, registry: ContributionRe
     ...appearanceProblems(raw.id, raw),
     ...metaProblems(raw.id, raw.meta),
     ...linkProblems(raw.id, raw.link),
+    ...layerGroupProblems(raw.id, raw),
   ];
   if (objectProblems.length) throw new Error(objectProblems.join('; '));
   const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, raw.object);
@@ -302,6 +315,10 @@ export function validateSceneGeometry(raw: unknown, registry: ContributionRegist
   }
   if (file.extensions !== undefined && !isRecord(file.extensions)) {
     throw new Error('scene.extensions must be an object');
+  }
+  const layerProblems = layersProblems(file.layers);
+  if (layerProblems.length) {
+    throw new Error(layerProblems.join('; '));
   }
   if (
     file.gridCellSize !== undefined &&

@@ -1,7 +1,7 @@
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState, type Ref } from 'react';
 import { initialIsoPose, rotatePose, toggleTopDown } from '../iso/pose';
-import type { IsoSceneFile } from '../iso/scene';
+import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import type { Vector3Tuple } from 'three';
 import { getDefaultIsoRegistry } from '../registry/default';
 import { IsoRegistryProvider, useIsoParts, useIsoRegistryVersion } from '../registry/react';
@@ -16,9 +16,19 @@ import {
   createEditorState,
   editorReducer,
   selectedObject,
+  selectedObjects,
+  type EditorAction,
   type EditorHostMode,
   type EditorMode,
+  type EditorState,
 } from './editor-state';
+import { CAMERA_CHANGE_DEBOUNCE_MS, cameraFromView, clampCamera, isValidCamera, poseFromCamera, sameCamera, type EditorCamera } from './camera';
+import { copyObjects, parseClipboard, serializeClipboard } from './clipboard';
+import { sceneLayers } from './layers';
+import { LayersPanel } from './LayersPanel';
+import type { ScreenRect } from './marquee';
+import { matchShortcut, type ShortcutId } from './shortcuts';
+import { ShortcutHelp } from './ShortcutHelp';
 import {
   ACCENT,
   BAR,
@@ -43,6 +53,44 @@ import {
 import { InspectorPanel } from './InspectorPanel';
 import { Palette } from './Palette';
 import { ProcessSceneView, sceneTarget } from './ProcessSceneView';
+
+/** Which built-in panels `ProcessEditor` draws in edit mode (holodeck#100). All default to true. */
+export interface ProcessEditorChrome {
+  /** Tool rail (add / select / pipe / connector). */
+  rail?: boolean;
+  /** Part palette (left sidebar, "Parts" tab). */
+  palette?: boolean;
+  /** Layers list (left sidebar, "Layers" tab). */
+  layers?: boolean;
+  /** Right-hand inspector. */
+  inspector?: boolean;
+  /** Bottom toolbar (undo / redo / zoom / view). */
+  bottomBar?: boolean;
+}
+
+/** Imperative access for hosts that draw their own chrome (holodeck#100). */
+export interface ProcessEditorHandle {
+  /** Run any editor action (align, group, copy, layers...); same rules and undo history as the built-in UI. */
+  dispatch: (action: EditorAction) => void;
+  /** Current editor state (selection, mode, clipboard...). A snapshot: read it when needed, don't keep it. */
+  getState: () => EditorState;
+  /** Current view, as `onCameraChange` reports it. */
+  getCamera: () => EditorCamera;
+}
+
+function resolveChrome(chrome: ProcessEditorProps['chrome']): Required<ProcessEditorChrome> {
+  if (chrome === 'canvas') return { rail: false, palette: false, layers: false, inspector: false, bottomBar: false };
+  const c = chrome === 'full' || chrome === undefined ? {} : chrome;
+  return {
+    rail: c.rail ?? true,
+    palette: c.palette ?? true,
+    layers: c.layers ?? true,
+    inspector: c.inspector ?? true,
+    bottomBar: c.bottomBar ?? true,
+  };
+}
+
+const sameIds = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((id, i) => id === b[i]);
 
 export interface ProcessEditorProps {
   /**
@@ -75,6 +123,39 @@ export interface ProcessEditorProps {
    * stale: compare it with `data-holodeck-revision` when that matters.
    */
   onRendered?: (revision: number) => void;
+  /**
+   * Built-in panels in edit mode: `'full'` (default), `'canvas'` (canvas
+   * only: hosts with their own library / inspector), or per panel.
+   */
+  chrome?: 'full' | 'canvas' | ProcessEditorChrome;
+  /**
+   * Controlled / initial camera. When set at mount the editor opens on it
+   * instead of fitting the scene; a later value that differs from the current
+   * view moves the view there. Echoing back what `onCameraChange` reported is a no-op.
+   */
+  camera?: EditorCamera;
+  /** User zoom / pan / rotate / fit, debounced to the end of the gesture (`CAMERA_CHANGE_DEBOUNCE_MS`). */
+  onCameraChange?: (camera: EditorCamera) => void;
+  /**
+   * Arm the place tool for a part from outside (a host library click):
+   * the next floor click stamps it. `null` returns to select. Omit to leave
+   * the tool to the editor.
+   */
+  placing?: string | null;
+  /** The armed part changed inside the editor (palette pick, Escape, another tool). */
+  onPlacingChange?: (partId: string | null) => void;
+  /** A part was stamped by the place tool (palette or `placing`). */
+  onPlaced?: (placement: IsoPlacement) => void;
+  /** Controlled multi-selection (all ids). `selectedId` stays the primary (last) id. */
+  selectedIds?: readonly string[];
+  onSelectionChange?: (ids: string[]) => void;
+  /** Imperative handle (`dispatch`, `getState`, `getCamera`). */
+  editorRef?: Ref<ProcessEditorHandle>;
+  /**
+   * Window keyboard shortcuts (`?` lists them). Default true; hosts with
+   * their own key handling can turn them off and use `editorRef.dispatch`.
+   */
+  keyboard?: boolean;
 }
 
 export function ProcessEditor({
@@ -87,19 +168,35 @@ export function ProcessEditor({
   onSelect,
   inspector,
   onRendered,
+  chrome: chromeProp,
+  camera,
+  onCameraChange,
+  placing,
+  onPlacingChange,
+  onPlaced,
+  selectedIds,
+  onSelectionChange,
+  editorRef,
+  keyboard = true,
 }: ProcessEditorProps) {
   const registry = registryProp ?? getDefaultIsoRegistry();
   const registryVersion = useIsoRegistryVersion(registry);
   const readOnly = mode === 'run';
+  const chrome = resolveChrome(chromeProp);
   const home = useMemo(() => initialIsoPose(18), []);
   const [state, dispatch] = useReducer(
     editorReducer,
     undefined,
     () => createEditorState(scene, { registry, readOnly }),
   );
-  const [zoom, setZoom] = useState(20);
-  const [pose, setPose] = useState(home);
-  const [target, setTarget] = useState(() => sceneTarget(scene, registry));
+  // A valid `camera` at mount wins over fit-to-scene (see the fit effect below).
+  const initialCamera = useRef(isValidCamera(camera) ? clampCamera(camera) : null);
+  const [zoom, setZoom] = useState(() => initialCamera.current?.zoom ?? 20);
+  const [pose, setPose] = useState(() => (initialCamera.current ? poseFromCamera(initialCamera.current, home) : home));
+  const [target, setTarget] = useState<Vector3Tuple>(() => initialCamera.current?.target ?? sceneTarget(scene, registry));
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [sideTab, setSideTab] = useState<'parts' | 'layers'>('parts');
+  const [marquee, setMarquee] = useState<ScreenRect | null>(null);
   const [spacePan, setSpacePan] = useState(false);
   const [overObject, setOverObject] = useState(false);
   // Canvas size, for fit-to-scene. Null until the first layout.
@@ -142,11 +239,12 @@ export function ProcessEditor({
   // and would otherwise leave the plant clipped) only while the user has not
   // zoomed, panned or rotated: their view wins. The "fit" button resets that.
   // Scene edits never re-fit, except the first placement in an empty document.
-  const fittedSceneId = useRef<string | null>(null);
+  // A camera supplied at mount counts as "fitted" and "the user's view", so no auto-fit overrides it.
+  const fittedSceneId = useRef<string | null>(initialCamera.current ? scene.id : null);
   // Mirrors fittedSceneId as state so the render hold below re-evaluates when a
   // fit lands even if it changed neither zoom nor target.
-  const [fittedId, setFittedId] = useState<string | null>(null);
-  const userMovedView = useRef(false);
+  const [fittedId, setFittedId] = useState<string | null>(initialCamera.current ? scene.id : null);
+  const userMovedView = useRef(initialCamera.current !== null);
   const sceneForFit = useRef(scene);
   sceneForFit.current = scene;
   const hasObjects = scene.objects.length > 0;
@@ -163,6 +261,44 @@ export function ProcessEditor({
     setTarget(fit.target);
     if (sceneChanged) setPose(home);
   }, [scene.id, hasObjects, fitScene, home]);
+
+  // camera prop -> view (holodeck#100). Declared after the fit effect so a
+  // document switch that brings its own camera lands on it, not on the fit.
+  // Keyed on the value (and scene id), so an echo of onCameraChange is a no-op.
+  const cameraKey = isValidCamera(camera) ? JSON.stringify(clampCamera(camera)) : '';
+  const viewNow = useRef({ zoom, target, pose });
+  viewNow.current = { zoom, target, pose };
+  const lastReportedCamera = useRef<EditorCamera | null>(initialCamera.current);
+  useEffect(() => {
+    if (!cameraKey) return;
+    const next = JSON.parse(cameraKey) as EditorCamera;
+    const v = viewNow.current;
+    lastReportedCamera.current = next;
+    fittedSceneId.current = sceneForFit.current.id;
+    setFittedId(sceneForFit.current.id);
+    userMovedView.current = true;
+    if (sameCamera(cameraFromView(v.zoom, v.target, v.pose), next)) return;
+    setZoom(next.zoom);
+    setTarget(next.target);
+    setPose(poseFromCamera(next, home));
+  }, [cameraKey, scene.id, home]);
+
+  // view -> onCameraChange, only for user gestures, once the view has been still for a moment.
+  const cameraDirty = useRef(false);
+  const onCameraChangeRef = useRef(onCameraChange);
+  onCameraChangeRef.current = onCameraChange;
+  useEffect(() => {
+    if (!cameraDirty.current) return;
+    const timer = setTimeout(() => {
+      cameraDirty.current = false;
+      const v = viewNow.current;
+      const cam = cameraFromView(v.zoom, v.target, v.pose);
+      if (sameCamera(cam, lastReportedCamera.current)) return;
+      lastReportedCamera.current = cam;
+      onCameraChangeRef.current?.(cam);
+    }, CAMERA_CHANGE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [zoom, target, pose]);
 
   // Rendered signal (holodeck#34, render-signal.tsx). Held until the canvas is
   // measured and, for a non-empty scene, fitted: the first "ready" frame is the
@@ -183,6 +319,21 @@ export function ProcessEditor({
   onChangeRef.current = onChange;
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  useImperativeHandle(
+    editorRef,
+    () => ({
+      dispatch,
+      getState: () => stateRef.current,
+      getCamera: () => {
+        const v = viewNow.current;
+        return cameraFromView(v.zoom, v.target, v.pose);
+      },
+    }),
+    [],
+  );
 
   // mode prop -> reducer guard (the guard is what makes drags no-ops in run mode).
   useEffect(() => {
@@ -228,74 +379,221 @@ export function ProcessEditor({
     if (state.selectedId !== selectedPropRef.current) onSelectRef.current?.(state.selectedId);
   }, [state.selectedId]);
 
+  // Multi-selection: same prop-vs-state rule as selectedId above (no ping-pong on echo).
+  const selectedIdsKey = selectedIds ? JSON.stringify(selectedIds) : null;
+  const selectedIdsPropRef = useRef(selectedIds);
+  selectedIdsPropRef.current = selectedIds;
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  onSelectionChangeRef.current = onSelectionChange;
   useEffect(() => {
+    const ids = selectedIdsPropRef.current;
+    if (!ids || sameIds(ids, stateRef.current.selectedIds)) return;
+    dispatch({ type: 'select-many', ids });
+  }, [selectedIdsKey]);
+  const prevSelectedIds = useRef(state.selectedIds);
+  useEffect(() => {
+    if (state.selectedIds === prevSelectedIds.current) return;
+    const changed = !sameIds(state.selectedIds, prevSelectedIds.current);
+    prevSelectedIds.current = state.selectedIds;
+    const prop = selectedIdsPropRef.current;
+    if (changed && !(prop && sameIds(prop, state.selectedIds))) onSelectionChangeRef.current?.(state.selectedIds);
+  }, [state.selectedIds]);
+
+  // placing prop -> place tool; editor -> onPlacingChange / onPlaced (holodeck#100).
+  const placingPropRef = useRef(placing);
+  placingPropRef.current = placing;
+  useEffect(() => {
+    if (placing === undefined || placing === stateRef.current.placing) return;
+    dispatch(placing === null ? { type: 'select-mode' } : { type: 'place-mode', object: placing });
+  }, [placing]);
+  const onPlacingChangeRef = useRef(onPlacingChange);
+  onPlacingChangeRef.current = onPlacingChange;
+  const prevPlacing = useRef(state.placing);
+  useEffect(() => {
+    if (state.placing === prevPlacing.current) return;
+    prevPlacing.current = state.placing;
+    if (state.placing !== placingPropRef.current) onPlacingChangeRef.current?.(state.placing);
+  }, [state.placing]);
+  const onPlacedRef = useRef(onPlaced);
+  onPlacedRef.current = onPlaced;
+  useEffect(() => {
+    if (!state.placed) return;
+    const placement = state.scene.objects.find((o) => o.id === state.placed);
+    if (placement) onPlacedRef.current?.(placement);
+  }, [state.placed, state.scene]);
+
+  // One handler per shortcut id; the table (shortcuts.ts) maps keys to ids and feeds the help overlay.
+  const fitRef = useRef<() => void>(() => {});
+  const pendingPaste = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clipboardText = useRef<string | null>(null);
+  const runShortcut = useCallback((id: ShortcutId): boolean => {
+    const s = stateRef.current;
+    const nudge = (dx: number, dy: number) => dispatch({ type: 'nudge', dx, dy });
+    switch (id) {
+      case 'select-tool': dispatch({ type: 'select-mode' }); return true;
+      case 'pipe-tool': dispatch({ type: 'pipe-mode' }); return true;
+      case 'connector-tool': dispatch({ type: 'connector-mode' }); return true;
+      case 'cancel':
+        // Esc: leave a tool / drop an in-flight gesture first; in plain select mode it clears the selection.
+        if (s.mode === 'select' && !s.drag && !s.resize && !s.linkDrag) dispatch({ type: 'select', id: null });
+        else dispatch({ type: 'cancel' });
+        return true;
+      case 'undo': dispatch({ type: 'undo' }); return true;
+      case 'redo': dispatch({ type: 'redo' }); return true;
+      case 'delete': dispatch({ type: 'delete' }); return true;
+      case 'select-all': dispatch({ type: 'select-all' }); return true;
+      case 'copy': dispatch({ type: 'copy' }); return true;
+      case 'cut': dispatch({ type: 'cut' }); return true;
+      case 'paste':
+        // The native 'paste' event (below) may bring system-clipboard parts; it cancels this fallback.
+        if (pendingPaste.current) clearTimeout(pendingPaste.current);
+        pendingPaste.current = setTimeout(() => {
+          pendingPaste.current = null;
+          dispatch({ type: 'paste' });
+        }, 0);
+        return true;
+      case 'duplicate': dispatch({ type: 'duplicate' }); return true;
+      case 'group': dispatch({ type: 'group-selected' }); return true;
+      case 'ungroup': dispatch({ type: 'ungroup-selected' }); return true;
+      case 'rotate-left': dispatch({ type: 'rotate-selected', direction: 1 }); return true;
+      case 'rotate-right': dispatch({ type: 'rotate-selected', direction: -1 }); return true;
+      case 'nudge-left': nudge(-1, 0); return true;
+      case 'nudge-right': nudge(1, 0); return true;
+      case 'nudge-up': nudge(0, -1); return true;
+      case 'nudge-down': nudge(0, 1); return true;
+      case 'nudge-left-5': nudge(-5, 0); return true;
+      case 'nudge-right-5': nudge(5, 0); return true;
+      case 'nudge-up-5': nudge(0, -5); return true;
+      case 'nudge-down-5': nudge(0, 5); return true;
+      case 'bring-forward': dispatch({ type: 'z-order', to: 'forward' }); return true;
+      case 'send-backward': dispatch({ type: 'z-order', to: 'backward' }); return true;
+      case 'bring-to-front': dispatch({ type: 'z-order', to: 'front' }); return true;
+      case 'send-to-back': dispatch({ type: 'z-order', to: 'back' }); return true;
+      case 'reroute': dispatch({ type: 'reroute-selected' }); return true;
+      case 'view-rotate-left':
+        cameraDirty.current = true;
+        userMovedView.current = true;
+        setPose((p) => rotatePose(p, 1));
+        return true;
+      case 'view-rotate-right':
+        cameraDirty.current = true;
+        userMovedView.current = true;
+        setPose((p) => rotatePose(p, -1));
+        return true;
+      case 'toggle-2d':
+        cameraDirty.current = true;
+        userMovedView.current = true;
+        setPose((p) => toggleTopDown(p, home.radius));
+        return true;
+      case 'fit': fitRef.current(); return true;
+      case 'help': setHelpOpen((open) => !open); return true;
+      default: {
+        const _never: never = id;
+        return _never;
+      }
+    }
+  }, [home.radius]);
+
+  useEffect(() => {
+    if (!keyboard) return;
     const onKey = (event: KeyboardEvent) => {
-      const meta = event.metaKey || event.ctrlKey;
-      const inField = Boolean((event.target as HTMLElement | null)?.closest?.('input, textarea, select'));
+      const inField = Boolean((event.target as HTMLElement | null)?.closest?.('input, textarea, select, [contenteditable="true"]'));
       if (event.code === 'Space') {
         if (inField) return;
         setSpacePan(true);
         event.preventDefault();
         return;
       }
-      if (event.key === 'Escape') {
-        dispatch({ type: 'cancel' });
+      if (event.key === 'Escape' && helpOpenRef.current) {
+        setHelpOpen(false);
         return;
       }
       if (inField) {
+        // Escape in an inspector field only drops the tool / gesture (it never clears the selection under the field).
+        if (event.key === 'Escape') dispatch({ type: 'cancel' });
         return;
       }
-      if (event.key === 'Delete' || event.key === 'Backspace') {
-        dispatch({ type: 'delete' });
-        return;
+      const shortcut = matchShortcut(event);
+      if (!shortcut) return;
+      // Run mode: only view shortcuts, copy and Escape (the reducer ignores edits anyway).
+      if (readOnlyRef.current && shortcut.group !== 'View' && shortcut.id !== 'copy' && shortcut.id !== 'cancel') return;
+      // Leave Cmd/Ctrl+C alone while the user has text selected on the page.
+      if (shortcut.id === 'copy' && (stateRef.current.selectedIds.length === 0 || hasTextSelection())) return;
+      if ((shortcut.id === 'cut' || shortcut.id === 'duplicate' || shortcut.id === 'select-all') && hasTextSelection()) return;
+      if (shortcut.id === 'copy' || shortcut.id === 'cut') {
+        // Snapshot for the native copy / cut event that follows this keydown:
+        // by then a cut has already removed the parts from the state.
+        const s = stateRef.current;
+        clipboardText.current = s.selectedIds.length ? serializeClipboard(copyObjects(s.scene, new Set(s.selectedIds), s.registry)) : null;
+        setTimeout(() => {
+          clipboardText.current = null;
+        }, 0);
       }
-      if (meta && event.key.toLowerCase() === 'z') {
-        event.preventDefault();
-        dispatch({ type: event.shiftKey ? 'redo' : 'undo' });
-        return;
-      }
-      if (event.key === 'v' || event.key === 'V') {
-        dispatch({ type: 'select-mode' });
-      }
-      if (event.key === 'p' || event.key === 'P') {
-        dispatch({ type: 'pipe-mode' });
-      }
-      // R = reroute (the view rotates on Q/E, so R was free). Cmd/Ctrl+R stays the browser's reload.
-      if (!meta && (event.key === 'r' || event.key === 'R')) {
-        dispatch({ type: 'reroute-selected' });
-      }
-      if (event.key === 'q' || event.key === 'Q') {
-        setPose((p) => rotatePose(p, 1));
-      }
-      if (event.key === 'e' || event.key === 'E') {
-        setPose((p) => rotatePose(p, -1));
-      }
-      if (event.key === 'x' || event.key === 'X') {
-        setPose((p) => toggleTopDown(p, home.radius));
-      }
+      // Copy / cut / paste keep the browser default so the native clipboard
+      // event fires: onCopy writes the parts, onPaste reads parts copied in
+      // another tab. preventDefault on Mod+V suppressed the paste event, so a
+      // cross-tab paste did nothing or pasted stale editor contents (PR #114 review).
+      const native = shortcut.id === 'copy' || shortcut.id === 'cut' || shortcut.id === 'paste';
+      if (runShortcut(shortcut.id) && !native) event.preventDefault();
     };
     const onUp = (event: KeyboardEvent) => {
       if (event.code === 'Space') {
         setSpacePan(false);
       }
     };
+    // System clipboard: copy / cut write the parts as JSON text so they paste
+    // into another editor (tab, document); paste reads them back. The editor
+    // clipboard (state.clipboard) is the fallback when the text is anything else.
+    const inField = (event: Event) => Boolean((event.target as HTMLElement | null)?.closest?.('input, textarea, select, [contenteditable="true"]'));
+    const onCopy = (event: ClipboardEvent) => {
+      if (inField(event) || hasTextSelection() || !event.clipboardData) return;
+      const s = stateRef.current;
+      const text = clipboardText.current
+        ?? (s.selectedIds.length ? serializeClipboard(copyObjects(s.scene, new Set(s.selectedIds), s.registry)) : null);
+      clipboardText.current = null;
+      if (!text) return;
+      event.clipboardData.setData('text/plain', text);
+      event.preventDefault();
+    };
+    const onPaste = (event: ClipboardEvent) => {
+      if (inField(event) || readOnlyRef.current) return;
+      const parts = parseClipboard(event.clipboardData?.getData('text/plain') ?? '');
+      if (!parts) return;
+      if (pendingPaste.current) {
+        clearTimeout(pendingPaste.current);
+        pendingPaste.current = null;
+      }
+      event.preventDefault();
+      dispatch({ type: 'paste', objects: parts });
+    };
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', onUp);
+    window.addEventListener('copy', onCopy);
+    window.addEventListener('cut', onCopy);
+    window.addEventListener('paste', onPaste);
     return () => {
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keyup', onUp);
+      window.removeEventListener('copy', onCopy);
+      window.removeEventListener('cut', onCopy);
+      window.removeEventListener('paste', onPaste);
+      if (pendingPaste.current) clearTimeout(pendingPaste.current);
     };
-  }, [home.radius]);
+  }, [keyboard, runShortcut]);
+  const helpOpenRef = useRef(helpOpen);
+  helpOpenRef.current = helpOpen;
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
 
   // IsoCanvas swaps in `grabbing` while a pan is live. Idle: `grab` wherever a
   // left drag would pan (all of Run mode; empty floor in Edit/select), the
   // default arrow over objects you can drag, a crosshair while placing.
   const cursor =
-    state.mode === 'select' && state.drag
+    state.mode === 'select' && (state.drag || state.linkDrag)
       ? 'grabbing'
       : spacePan || readOnly
         ? 'grab'
-        : state.mode === 'place' || state.mode === 'draw-pipe'
+        : state.mode === 'place' || state.mode === 'draw-pipe' || state.mode === 'draw-connector' || marquee
           ? 'crosshair'
           : overObject
             ? 'default'
@@ -304,12 +602,34 @@ export function ProcessEditor({
   /** Any user zoom / pan / rotate: the view is theirs and stops auto-fitting until "fit". */
   const userZoom = (z: number) => {
     userMovedView.current = true;
+    cameraDirty.current = true;
     setZoom(z);
   };
   const userTarget = (t: Vector3Tuple) => {
     userMovedView.current = true;
+    cameraDirty.current = true;
     setTarget(t);
   };
+  const fitNow = () => {
+    userMovedView.current = false;
+    cameraDirty.current = true;
+    const fit = fitScene(state.scene);
+    if (fit) {
+      fittedSceneId.current = state.scene.id;
+      setFittedId(state.scene.id);
+    }
+    setZoom(fit?.zoom ?? 20);
+    setTarget(fit?.target ?? sceneTarget(state.scene, registry));
+    setPose(home);
+  };
+  fitRef.current = fitNow;
+  const act = useCallback((action: EditorAction) => dispatch(action), []);
+  const linkDragEnd = useCallback(() => dispatch({ type: 'link-drag-end' }), []);
+  const selection = selectedObjects(state);
+  const layers = sceneLayers(state.scene);
+  const showSidebar = !readOnly && (chrome.palette || chrome.layers);
+  // Marquee overlay is drawn in the view's own coordinates.
+  const viewBox = marquee ? viewRef.current?.getBoundingClientRect() : undefined;
 
   return (
     <IsoRegistryProvider registry={registry}>
@@ -320,6 +640,8 @@ export function ProcessEditor({
         data-cursor={state.cursor ? `${state.cursor.x},${state.cursor.y}` : ''}
         data-pipe-start={state.pipeStart ? `${state.pipeStart.x},${state.pipeStart.y}` : ''}
         data-object-count={String(state.scene.objects.length)}
+        data-selected-ids={state.selectedIds.join(',')}
+        data-layer-count={String(layers.length)}
         data-zoom={zoom.toFixed(1)}
         data-target={target.map((v) => v.toFixed(3)).join(',')}
         data-holodeck-revision={revision}
@@ -348,35 +670,70 @@ export function ProcessEditor({
         onContextMenu={(event) => event.preventDefault()}
       >
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-          {readOnly ? null : (
-            <>
-              <Rail
-                mode={state.mode}
-                onSelect={() => dispatch({ type: 'select-mode' })}
-                onAdd={() => firstPlaceable && dispatch({ type: 'place-mode', object: firstPlaceable })}
-                onPipe={() => dispatch({ type: 'pipe-mode' })}
-              />
-              <aside
-                style={{
-                  width: PANEL,
-                  flex: 'none',
-                  background: SIDEBAR,
-                  color: SIDEBAR_TEXT,
-                  position: 'relative',
-                  minHeight: 0,
-                }}
-              >
-                <div style={FILL}>
-                  <Palette
-                    registry={registry}
-                    placing={state.placing}
-                    drawing={state.mode === 'draw-pipe'}
-                    onPick={(id) => dispatch({ type: 'place-mode', object: id })}
-                  />
-                </div>
-              </aside>
-            </>
+          {readOnly || !chrome.rail ? null : (
+            <Rail
+              mode={state.mode}
+              onSelect={() => dispatch({ type: 'select-mode' })}
+              onAdd={() => firstPlaceable && dispatch({ type: 'place-mode', object: firstPlaceable })}
+              onPipe={() => dispatch({ type: 'pipe-mode' })}
+              onConnect={() => dispatch({ type: 'connector-mode' })}
+            />
           )}
+          {showSidebar ? (
+            <aside
+              style={{
+                width: PANEL,
+                flex: 'none',
+                background: SIDEBAR,
+                color: SIDEBAR_TEXT,
+                position: 'relative',
+                minHeight: 0,
+              }}
+            >
+              <div style={{ ...FILL, flexDirection: 'column' }}>
+                {chrome.palette && chrome.layers ? (
+                  <div role="tablist" aria-label="Sidebar" style={{ display: 'flex', flex: 'none', borderBottom: `1px solid ${RAIL_BG}` }}>
+                    {(['parts', 'layers'] as const).map((tab) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        role="tab"
+                        aria-selected={sideTab === tab}
+                        onClick={() => setSideTab(tab)}
+                        style={{
+                          flex: 1,
+                          padding: '8px 0',
+                          border: 0,
+                          borderBottom: `2px solid ${sideTab === tab ? ACCENT : 'transparent'}`,
+                          background: 'transparent',
+                          color: sideTab === tab ? SIDEBAR_TEXT : MUTED,
+                          font: FONT,
+                          cursor: 'pointer',
+                          textTransform: 'capitalize',
+                        }}
+                      >
+                        {tab}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
+                  <div style={FILL}>
+                    {chrome.palette && (sideTab === 'parts' || !chrome.layers) ? (
+                      <Palette
+                        registry={registry}
+                        placing={state.placing}
+                        drawing={state.mode === 'draw-pipe'}
+                        onPick={(id) => dispatch({ type: 'place-mode', object: id })}
+                      />
+                    ) : (
+                      <LayersPanel scene={state.scene} activeLayer={state.activeLayer} hasSelection={state.selectedIds.length > 0} onAction={act} />
+                    )}
+                  </div>
+                </div>
+              </div>
+            </aside>
+          ) : null}
           <div ref={viewRef} style={{ flex: 1, minWidth: 0, minHeight: 0, position: 'relative' }}>
             {state.notice ? (
               <div
@@ -400,6 +757,22 @@ export function ProcessEditor({
                 {state.notice}
               </div>
             ) : null}
+            {marquee && viewBox ? (
+              <div
+                data-testid="marquee"
+                style={{
+                  position: 'absolute',
+                  zIndex: 2,
+                  left: marquee.left - viewBox.left,
+                  top: marquee.top - viewBox.top,
+                  width: marquee.right - marquee.left,
+                  height: marquee.bottom - marquee.top,
+                  border: `1px dashed ${ACCENT}`,
+                  background: 'rgba(24, 186, 230, 0.08)',
+                  pointerEvents: 'none',
+                }}
+              />
+            ) : null}
             <div style={FILL}>
             <ProcessSceneView
               scene={state.scene}
@@ -411,6 +784,7 @@ export function ProcessEditor({
               pose={pose}
               onPoseChange={(p) => {
                 userMovedView.current = true;
+                cameraDirty.current = true;
                 setPose(p);
               }}
               showControls={false}
@@ -425,7 +799,7 @@ export function ProcessEditor({
                 spacePan={spacePan}
                 metrics={metrics}
                 readOnly={readOnly}
-                onSelectObject={(id) => dispatch({ type: 'select', id })}
+                onSelectObject={(id, additive) => dispatch({ type: 'select', id, additive })}
                 onCursor={(x, y) => dispatch({ type: 'cursor', x, y })}
                 onFloorClick={(x, y) => dispatch({ type: 'floor-click', x, y })}
                 onDragStart={(id, x, y) => dispatch({ type: 'drag-start', id, x, y })}
@@ -435,17 +809,24 @@ export function ProcessEditor({
                 onResizeMove={(value) => dispatch({ type: 'resize-move', value })}
                 onResizeEnd={() => dispatch({ type: 'resize-end' })}
                 onHoverObject={setOverObject}
+                onMarquee={setMarquee}
+                onMarqueeSelect={(ids, additive) => dispatch({ type: 'select-many', ids, additive })}
+                onLinkDragStart={(id, end) => dispatch({ type: 'link-drag-start', id, end })}
+                onLinkDragEnd={linkDragEnd}
               />
             </ProcessSceneView>
             </div>
           </div>
-          {readOnly ? null : (
+          {readOnly || !chrome.inspector ? null : (
             <div style={{ width: PANEL, flex: 'none', position: 'relative', minHeight: 0 }}>
               <div style={FILL}>
                 <InspectorPanel
                   registry={registry}
                   def={selectedDef}
                   selected={selected}
+                  selection={selection}
+                  layers={layers}
+                  onAction={act}
                   slot={inspector}
                   onParam={(param, value) => dispatch({ type: 'set-param', param, value })}
                   onPatch={(patch) => dispatch({ type: 'patch-selected', patch })}
@@ -456,7 +837,8 @@ export function ProcessEditor({
             </div>
           )}
         </div>
-        <BottomBar
+        {helpOpen ? <ShortcutHelp onClose={() => setHelpOpen(false)} /> : null}
+        {chrome.bottomBar ? <BottomBar
           zoom={zoom}
           readOnly={readOnly}
           canUndo={state.past.length > 0}
@@ -470,29 +852,27 @@ export function ProcessEditor({
           onRedo={() => dispatch({ type: 'redo' })}
           onZoomIn={() => userZoom(clampZoom(zoom * WHEEL_ZOOM_STEP))}
           onZoomOut={() => userZoom(clampZoom(zoom / WHEEL_ZOOM_STEP))}
-          onFit={() => {
-            userMovedView.current = false;
-            const fit = fitScene(state.scene);
-            if (fit) {
-              fittedSceneId.current = state.scene.id;
-              setFittedId(state.scene.id);
-            }
-            setZoom(fit?.zoom ?? 20);
-            setTarget(fit?.target ?? sceneTarget(state.scene, registry));
-            setPose(home);
-          }}
+          onFit={fitNow}
           onRotate={(dir) => {
             userMovedView.current = true;
+            cameraDirty.current = true;
             setPose((p) => rotatePose(p, dir));
           }}
           onToggle2d={() => {
             userMovedView.current = true;
+            cameraDirty.current = true;
             setPose((p) => toggleTopDown(p, home.radius));
           }}
-        />
+          onHelp={() => setHelpOpen((open) => !open)}
+        /> : null}
       </div>
     </IsoRegistryProvider>
   );
+}
+
+function hasTextSelection(): boolean {
+  const sel = typeof window !== 'undefined' ? window.getSelection?.() : null;
+  return Boolean(sel && !sel.isCollapsed && sel.toString().length > 0);
 }
 
 /**
@@ -508,11 +888,13 @@ function Rail({
   onSelect,
   onAdd,
   onPipe,
+  onConnect,
 }: {
   mode: EditorMode;
   onSelect: () => void;
   onAdd: () => void;
   onPipe: () => void;
+  onConnect: () => void;
 }) {
   return (
     <div
@@ -533,6 +915,9 @@ function Rail({
       </RailBtn>
       <RailBtn label="Pipe" active={mode === 'draw-pipe'} onClick={onPipe}>
         /
+      </RailBtn>
+      <RailBtn label="Connector" active={mode === 'draw-connector'} onClick={onConnect}>
+        ⤳
       </RailBtn>
     </div>
   );
@@ -586,6 +971,7 @@ function BottomBar({
   onFit,
   onRotate,
   onToggle2d,
+  onHelp,
 }: {
   zoom: number;
   canUndo: boolean;
@@ -603,6 +989,7 @@ function BottomBar({
   onFit: () => void;
   onRotate: (direction: 1 | -1) => void;
   onToggle2d: () => void;
+  onHelp: () => void;
 }) {
   return (
     <div
@@ -642,6 +1029,9 @@ function BottomBar({
       <span data-testid="item-count" style={{ marginLeft: 'auto', color: BAR_MUTED }}>
         {count} items
       </span>
+      <BarBtn onClick={onHelp} title="Keyboard shortcuts (?)">
+        ?
+      </BarBtn>
     </div>
   );
 }

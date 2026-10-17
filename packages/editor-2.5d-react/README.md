@@ -14,6 +14,38 @@ import { ProcessEditor } from '@holodeck/editor-2.5d-react';
 Give the editor a box with a definite size; it fills it, never grows past it, and fits
 the scene to it on load.
 
+## Editing (lane E3)
+
+Multi-select (click, Shift+click, Shift+drag marquee, Mod+A), copy / cut / paste / duplicate
+(also through the system clipboard as `holodeck.iso.clipboard.v1` JSON), align and distribute
+on grid axes, rotate (`[` / `]`, a multi-selection turns about its centre), nudge (arrows),
+groups (`placement.group`, Mod+G), z-order (Mod+`[` / `]`), layers (`scene.layers` +
+`placement.layer`: show / hide, lock, active layer for new parts) and a connector tool (C:
+click a part, port or cell, then another; drag a selected connector's end handles to
+re-anchor). Every edit is one undo step. Press `?` for the shortcut list (`editor/shortcuts.ts`).
+
+### Host props (Studio, holodeck#100)
+
+```tsx
+<ProcessEditor
+  scene={doc.body}
+  onChange={save}
+  mode="edit"
+  chrome="canvas"                      // or { palette: false, inspector: false, ... }
+  camera={storedCamera}                // { zoom, target, yaw?, topDown? }: opens there, no fit
+  onCameraChange={saveCamera}          // user zoom / pan / rotate / fit, debounced
+  placing={armedPartId}                // arm the place tool from a host library
+  onPlacingChange={setArmedPartId}
+  onPlaced={(placement) => {}}
+  selectedIds={ids}                    // multi-selection (selectedId stays the primary)
+  onSelectionChange={setIds}
+  editorRef={handle}                   // handle.current.dispatch({ type: 'align', edge: 'min-x' })
+/>;
+```
+
+`stampPlacement(registry, partId, x, y, { objects })` returns exactly what the palette would
+place, for hosts that add parts themselves.
+
 ## Rendered signal
 
 `ProcessEditor` (on `[data-testid="process-editor"]`) and `IsoCanvas` (on its container)
