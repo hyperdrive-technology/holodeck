@@ -165,3 +165,107 @@ jobs:
         working-directory: holodeck/packages/${{ matrix.package }}
         timeout-minutes: 15
         run: pnpm check:vite-consumer
+
+  # Holodeck Studio (apps/studio): a Vite app that consumes the BUILT
+  # editor-2.5d-react package (file: dependency, copied at install time), so
+  # the editor is built before the studio installs. Unit tests (vitest +
+  # fake-indexeddb), production build, then Playwright e2e over `vite preview`
+  # on the runner's preinstalled Google Chrome (no `playwright install`: it
+  # hangs on hosted runners, holodeck#29).
+  studio:
+    name: studio
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout holodeck
+        uses: actions/checkout@v4
+        with:
+          path: holodeck
+
+      # Same SDK ref rule as the package matrix above (paired branch, pinned
+      # .github/holodeck-sdk-ref, else main).
+      - name: Pick holodeck-sdk ref
+        id: sdk
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          remote=https://github.com/hyperdrive-technology/holodeck-sdk.git
+          pinned=$(tr -d '[:space:]' < holodeck/.github/holodeck-sdk-ref 2>/dev/null || true)
+          ref=main
+          for candidate in "$BRANCH" "$pinned"; do
+            if [ -n "$candidate" ] && git ls-remote --exit-code --heads "$remote" "$candidate" >/dev/null; then
+              ref=$candidate
+              break
+            fi
+          done
+          echo "Using holodeck-sdk ref: $ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout holodeck-sdk (${{ steps.sdk.outputs.ref }})
+        uses: actions/checkout@v4
+        with:
+          repository: hyperdrive-technology/holodeck-sdk
+          ref: ${{ steps.sdk.outputs.ref }}
+          path: holodeck-sdk
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: holodeck/.node-version
+          cache: pnpm
+          cache-dependency-path: |
+            holodeck-sdk/ts/pnpm-lock.yaml
+            holodeck/packages/editor-2.5d-react/pnpm-lock.yaml
+            holodeck/apps/studio/pnpm-lock.yaml
+
+      - name: Build holodeck-sdk
+        working-directory: holodeck-sdk/ts
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Build editor-2.5d-react
+        working-directory: holodeck/packages/editor-2.5d-react
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Install
+        working-directory: holodeck/apps/studio
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        working-directory: holodeck/apps/studio
+        run: pnpm type-check
+
+      - name: Unit tests
+        working-directory: holodeck/apps/studio
+        run: pnpm exec vitest run
+
+      - name: Build
+        working-directory: holodeck/apps/studio
+        run: pnpm build
+
+      - name: Use the runner's preinstalled Chrome for e2e
+        run: |
+          chrome=$(command -v google-chrome || command -v google-chrome-stable)
+          "$chrome" --version
+          echo "HOLODECK_CHROMIUM=$chrome" >> "$GITHUB_ENV"
+
+      - name: E2E (Playwright over the production build)
+        working-directory: holodeck/apps/studio
+        timeout-minutes: 15
+        run: pnpm exec playwright test
+
+      - name: Upload e2e report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-e2e
+          path: |
+            holodeck/apps/studio/playwright-report/
+            holodeck/apps/studio/test-results/
+          if-no-files-found: ignore
