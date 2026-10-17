@@ -18,6 +18,11 @@ node scripts/build-parts.mjs --out-dir /tmp/x valve
 npx vitest run src/models       # asset contract tests (rebuild check skips without Blender)
 ```
 
+Cloud archetypes live in `parts/cloud/` and belong to `@holodeck/library-cloud`.
+From `packages/library-cloud`, run `pnpm parts:build` for its GLBs or
+`pnpm parts:preview` for GLBs plus `/tmp/a1-previews/<archetype>.png`. See the
+[cloud library README](../packages/library-cloud/README.md) for its catalogue and tests.
+
 Blender is found via `$BLENDER`, then `/Applications/Blender.app/Contents/MacOS/Blender`,
 then `blender` on `PATH`. Tested with Blender 5.2.2 LTS. To render a preview
 (Workbench, orthographic iso camera, not exported), run:
@@ -72,6 +77,10 @@ material outside `hd.*`. Note that GLTFLoader removes `.` from node names
   - `port.<name>` marks a pipe connection point (`hd.add_port`).
   - `anim.<name>` is the pivot of an animated sub-assembly (`hd.add_anim`). Its
     meshes are children positioned relative to it.
+  - Cloud data-only parts have exactly one `logo` empty centered on a flat top
+    face. Its X/Z scale is the safe logo-square edge length in three.js units;
+    E2 supplies the depth offset. Their `hd.white` and `hd.accent` materials
+    support per-part recolouring. See the [E2 contract](../packages/editor-2.5d-react/docs/objects.md).
 - Geometry is low-poly and flat-shaded, with explicit segment counts. Don't use
   subdivision, textures or UVs. Cameras and lights are rejected on export.
   Modifiers are applied on export.

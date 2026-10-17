@@ -19,6 +19,8 @@ jobs:
         # packages/cli is not built here: it has an empty package-lock.json, no
         # src/index.ts (its build entry), and depends on @holodeck/sdk from the npm
         # registry, which is not published. Add it once it is revived.
+        # library-cloud follows provider-http's type/test/build/package smoke
+        # path; its shipped GLBs are checked without requiring Blender in CI.
         package: [editor-2.5d-react, editor-2d-react, viewer-3d-react, flow-runtime, provider-http, library-cloud]
     timeout-minutes: 30
     steps:
@@ -141,6 +143,7 @@ jobs:
       # HolodeckHost through the manifest path (SDK packaging contract, holodeck#15).
       # flow-runtime's script also deploys a small flow through holodeck.flow.local;
       # provider-http's reads a value through holodeck.http from a local server.
+      # library-cloud's checks its 13 models, logo assets and two theme installs.
       - name: Smoke-test the Holodeck package entry
         if: matrix.package == 'editor-2.5d-react' || matrix.package == 'flow-runtime' || matrix.package == 'provider-http' || matrix.package == 'library-cloud'
         working-directory: holodeck/packages/${{ matrix.package }}
