@@ -84,7 +84,7 @@ Status: ✓ done · ◐ partial · ✗ missing · — out of scope (SaaS account
 | Chart widget (time series) | provider `history` (CloudWatch metric series, alarm state changes) | ◐ | E2 follow-up (chart part) |
 | Scale group: scale components by a metric | animators drive params; no generic scale | ◐ | E1 (`scale` transform) |
 | Alarm colouring | animators + `threshold`/`map` transforms (SDK) | ◐ | E1 |
-| API: external systems set object state | `holodeck.http` provider (`@holodeck/provider-http`): poll / SSE / WebSocket JSON, pointer or JSONPath-lite sources, HTTP writes | ◐ | S2 (embed API) |
+| API: external systems set object state | `holodeck.http` provider (`@holodeck/provider-http`): poll / SSE / WebSocket JSON, pointer or JSONPath-lite sources, HTTP writes; embed `postMessage` `setObjectState` (studio `/embed/:doc`, origin allow-list, validated messages) | ✓ | S2 |
 | Demo data without credentials | `holodeck.sim` provider (SDK) | ✓ | — |
 
 ### Documents, export, sharing
@@ -92,10 +92,10 @@ Status: ✓ done · ◐ partial · ✗ missing · — out of scope (SaaS account
 | Arcentry | Holodeck today | Status | Lane |
 |---|---|---|---|
 | Documents and folders | one scene in props | ✗ | S1 (local: IndexedDB + file import/export) |
-| Export PNG (tiled, high resolution) | — | ✗ | S2 |
-| Export JSON | scene JSON | ◐ | S2 (document envelope) |
-| CSV export of components | — | ✗ | S2 |
-| Embed / live embed (read-only viewer with live data) | `mode: 'run'` | ◐ | S2 |
+| Export PNG (tiled, high resolution) | `ProcessEditorHandle.exportImage({ scale })`: tiled, render-signal gated; Studio Export dialog 1x / 2x / 4x | ✓ | S2 |
+| Export JSON | `holodeck.document.v1` envelope (Studio Export dialog, `.holodeck.json`) | ✓ | S2 |
+| CSV export of components | `isoComponentsCsv`: one row per placement, `meta:<key>` columns, formula-injection safe; Studio Export dialog | ✓ | S2 |
+| Embed / live embed (read-only viewer with live data) | Studio `/embed/:doc`: run mode, no chrome, provider hub + `postMessage` API (`setObjectState`, `clearObjectState`, `loadDocument`, `getInfo`) | ✓ | S2 |
 | Collaboration, access control, accounts, billing, notifications | — | — | — |
 
 ## M3 — flow engine (Node-RED-style)

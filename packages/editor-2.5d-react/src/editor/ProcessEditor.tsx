@@ -55,6 +55,7 @@ import {
 import { InspectorPanel } from './InspectorPanel';
 import { Palette } from './Palette';
 import { ProcessSceneView, sceneTarget } from './ProcessSceneView';
+import { ImageExportError, type ExportedImage, type ImageExportOptions, type IsoCanvasCapture } from '../export/capture';
 
 /** Which built-in panels `ProcessEditor` draws in edit mode (holodeck#100). All default to true. */
 export interface ProcessEditorChrome {
@@ -78,6 +79,16 @@ export interface ProcessEditorHandle {
   getState: () => EditorState;
   /** Current view, as `onCameraChange` reports it. */
   getCamera: () => EditorCamera;
+  /**
+   * High-resolution PNG of the current view (holodeck#42): the canvas size
+   * times `scale`, drawn in tiles (export/tiles.ts). Selection and tool
+   * overlays are hidden for the capture. Waits for the rendered signal (every
+   * GLB loaded, fit and camera animation settled) instead of sleeping, so the
+   * picture is deterministic. Exports run one at a time. Rejects with
+   * `ImageExportError` without WebGPU or after unmount, `ExportSizeError` on
+   * bad options, the signal's reason when aborted.
+   */
+  exportImage: (options?: ImageExportOptions) => Promise<ExportedImage>;
 }
 
 function resolveChrome(chrome: ProcessEditorProps['chrome']): Required<ProcessEditorChrome> {
@@ -332,7 +343,11 @@ export function ProcessEditor({
   // measured and, for a non-empty scene, fitted: the first "ready" frame is the
   // fitted one, whatever size the host gives the editor.
   const holdRender = view === null || (scene.objects.length > 0 && fittedId !== scene.id);
-  const revision = useRevision([scene, state, metrics, registry, registryVersion, readOnly, zoom, target, pose, view, holdRender]);
+  // Image export (exportImage below): the id of the export in progress, or
+  // null. A fresh id per export is part of the revision, so every export waits
+  // for a frame drawn with the editor overlays hidden, even two back to back.
+  const [captureId, setCaptureId] = useState<number | null>(null);
+  const revision = useRevision([scene, state, metrics, registry, registryVersion, readOnly, zoom, target, pose, view, holdRender, captureId]);
   const [renderedRevision, setRenderedRevision] = useState<number | null>(null);
   const onRenderedRef = useRef(onRendered);
   onRenderedRef.current = onRendered;
@@ -341,6 +356,76 @@ export function ProcessEditor({
     onRenderedRef.current?.(rev);
   }, []);
   const webgpu = useWebGPUSupport();
+  const webgpuRef = useRef(webgpu);
+  webgpuRef.current = webgpu;
+
+  // Image export plumbing. `captureRef` reaches the R3F tree (SceneCapture);
+  // waiters resolve once the frame for their export id is presented.
+  const captureRef = useRef<IsoCanvasCapture | null>(null);
+  type RenderWaiter = { captureId: number; resolve: () => void; reject: (reason: unknown) => void };
+  const renderWaiters = useRef<RenderWaiter[]>([]);
+  const nextCaptureId = useRef(1);
+  const exportChain = useRef<Promise<unknown>>(Promise.resolve());
+  useEffect(() => {
+    if (webgpu === 'missing') {
+      const waiting = renderWaiters.current.splice(0);
+      for (const w of waiting) w.reject(new ImageExportError('image export needs WebGPU, which this browser does not provide'));
+      return;
+    }
+    if (captureId === null || renderedRevision !== revision) return;
+    const ready = renderWaiters.current.filter((w) => w.captureId === captureId);
+    renderWaiters.current = renderWaiters.current.filter((w) => w.captureId !== captureId);
+    for (const w of ready) w.resolve();
+  }, [captureId, revision, renderedRevision, webgpu]);
+  // Mounted flag for queued exports (holodeck#154): an export that starts
+  // after unmount (it was queued behind one that the cleanup rejected) must
+  // fail at once, not register a waiter nobody will ever settle.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      const waiting = renderWaiters.current.splice(0);
+      for (const w of waiting) w.reject(new ImageExportError('the editor was unmounted during an image export'));
+    };
+  }, []);
+  const exportImage = useCallback((options: ImageExportOptions = {}): Promise<ExportedImage> => {
+    const run = async (): Promise<ExportedImage> => {
+      const { signal } = options;
+      if (signal?.aborted) throw signal.reason ?? new DOMException('image export aborted', 'AbortError');
+      if (!mounted.current) throw new ImageExportError('the editor was unmounted before this image export started');
+      if (webgpuRef.current === 'missing') throw new ImageExportError('image export needs WebGPU, which this browser does not provide');
+      const id = nextCaptureId.current++;
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const onAbort = () => {
+            renderWaiters.current = renderWaiters.current.filter((w) => w !== waiter);
+            reject(signal?.reason ?? new DOMException('image export aborted', 'AbortError'));
+          };
+          const settle = (fn: () => void) => {
+            signal?.removeEventListener('abort', onAbort);
+            fn();
+          };
+          const waiter: RenderWaiter = {
+            captureId: id,
+            resolve: () => settle(resolve),
+            reject: (reason) => settle(() => reject(reason)),
+          };
+          renderWaiters.current.push(waiter);
+          signal?.addEventListener('abort', onAbort, { once: true });
+          setCaptureId(id);
+        });
+        const capture = captureRef.current;
+        if (!mounted.current || !capture) throw new ImageExportError('the canvas is not mounted');
+        return await capture.capture(options);
+      } finally {
+        setCaptureId((current) => (current === id ? null : current));
+      }
+    };
+    const result = exportChain.current.then(run, run);
+    exportChain.current = result.catch(() => undefined);
+    return result;
+  }, []);
 
   // Host callbacks via refs so effects below depend only on what they watch.
   const onChangeRef = useRef(onChange);
@@ -359,8 +444,9 @@ export function ProcessEditor({
         const v = viewNow.current;
         return cameraFromView(v.zoom, v.target, v.pose);
       },
+      exportImage,
     }),
-    [],
+    [exportImage],
   );
 
   // mode prop -> reducer guard (the guard is what makes drags no-ops in run mode).
@@ -850,12 +936,13 @@ export function ProcessEditor({
               revision={revision}
               holdRender={holdRender}
               onRendered={reportRendered}
+              captureRef={captureRef}
             >
               <EditorLayer
                 state={state}
                 spacePan={spacePan}
                 metrics={metrics}
-                readOnly={readOnly}
+                readOnly={readOnly || captureId !== null}
                 onSelectObject={(id, additive) => dispatch({ type: 'select', id, additive })}
                 onCursor={(x, y) => dispatch({ type: 'cursor', x, y })}
                 onFloorClick={(x, y) => dispatch({ type: 'floor-click', x, y })}

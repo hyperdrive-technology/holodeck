@@ -39,7 +39,7 @@ describe('<LibraryPanel />', () => {
     expect(screen.getByText('Open a document to place components.')).toBeInTheDocument();
     const armItem = vi.fn();
     const addItem = vi.fn();
-    act(() => activeDocumentStore.setState(() => ({ id: 'd', placing: null, armItem, addItem, exportFile: vi.fn(), save: vi.fn() })));
+    act(() => activeDocumentStore.setState(() => ({ id: 'd', placing: null, armItem, addItem, name: 'Doc', exportFile: vi.fn(), exportComponents: vi.fn(), exportImage: vi.fn(), save: vi.fn() })));
     expect(tank).toBeEnabled();
     expect(tank).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(tank);

@@ -24,7 +24,9 @@ export function StudioHotkeys() {
   const run: Record<StudioCommand, () => void> = {
     'document.new': () => void newDocument(),
     'document.import': openImportPicker,
-    'document.export': () => activeDocumentStore.state?.exportFile(),
+    'document.export': () => {
+      if (activeDocumentStore.state) shellStore.setState((s) => ({ ...s, exportOpen: true }));
+    },
     'document.save': () => {
       const active = activeDocumentStore.state;
       if (!active) return;

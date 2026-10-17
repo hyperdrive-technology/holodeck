@@ -2,7 +2,7 @@ import { withPart } from '../test-support';
 import { HOLODECK_DOCUMENT_FORMAT, type HolodeckHost } from '@holodeck/sdk';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createStudioHost } from '../host/studio-host';
-import { exportFileName, MAX_IMPORT_BYTES, parseDocumentText, serializeDocument } from './io';
+import { COMPONENTS_FILE_SUFFIX, documentFileStem, exportFileName, imageFileName, MAX_IMPORT_BYTES, parseDocumentText, serializeDocument } from './io';
 import { createIsoDocument } from './new-document';
 
 let host: HolodeckHost;
@@ -112,5 +112,25 @@ describe('import / export', () => {
     [{ name: '', id: '' }, 'document.holodeck.json'],
   ])('exportFileName(%j) = %s', (doc, name) => {
     expect(exportFileName(doc)).toBe(name);
+  });
+
+  it('exportFileName takes another suffix (components CSV)', () => {
+    expect(exportFileName({ name: 'My Plant', id: 'x' }, COMPONENTS_FILE_SUFFIX)).toBe('my-plant.components.csv');
+  });
+
+  it.each([
+    [2, 'my-plant@2x.png'],
+    [1, 'my-plant@1x.png'],
+    [1.5, 'my-plant@1.5x.png'],
+    [1 / 3, 'my-plant@0.33x.png'],
+    [Number.NaN, 'my-plant@1x.png'],
+    [0, 'my-plant@1x.png'],
+  ])('imageFileName at scale %s = %s', (scale, name) => {
+    expect(imageFileName({ name: 'My Plant', id: 'x' }, scale)).toBe(name);
+  });
+
+  it('documentFileStem never contains path separators or dots', () => {
+    expect(documentFileStem({ name: '../../etc/passwd', id: 'x' })).toBe('etc-passwd');
+    expect(documentFileStem({ name: 'a\\b:c*?"<>|', id: 'x' })).toBe('a-b-c');
   });
 });

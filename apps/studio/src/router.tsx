@@ -1,22 +1,40 @@
 /**
- * Route tree (TanStack Router, code-based: three routes do not need the
- * file-route generator).
+ * Route tree (TanStack Router, code-based: a handful of routes do not need
+ * the file-route generator).
  *
- *   /            Welcome (no document open)
- *   /d/$docId    DocumentRoute (canvas + inspector)
+ *   (shell)          AppShell: header, sidebar, hotkeys (pathless layout)
+ *     /              Welcome (no document open)
+ *     /d/$docId      DocumentRoute (canvas + inspector)
+ *   /embed/$docId    EmbedRoute: read-only live view for iframes, no studio chrome
  */
 
-import { createRootRoute, createRoute, createRouter, type RouterHistory } from '@tanstack/react-router';
+import { createRootRoute, createRoute, createRouter, Outlet, type RouterHistory } from '@tanstack/react-router';
+import { EmbedRoute } from './embed/EmbedRoute';
 import { AppShell } from './features/AppShell';
 import { DocumentRoute } from './features/DocumentWorkspace';
+import { FrameGuard } from './features/FrameGuard';
 import { Welcome } from './features/Welcome';
 
-const rootRoute = createRootRoute({ component: AppShell });
+const rootRoute = createRootRoute({ component: Outlet });
 
-const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: '/', component: Welcome });
+/** Everything with the studio chrome. Pathless: adds no URL segment. */
+const shellRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  id: 'shell',
+  // Never inside a frame (holodeck#152): only /embed/* is embeddable.
+  component: function Shell() {
+    return (
+      <FrameGuard>
+        <AppShell />
+      </FrameGuard>
+    );
+  },
+});
+
+const indexRoute = createRoute({ getParentRoute: () => shellRoute, path: '/', component: Welcome });
 
 const documentRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => shellRoute,
   path: '/d/$docId',
   component: function DocumentPage() {
     const { docId } = documentRoute.useParams();
@@ -27,7 +45,16 @@ const documentRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, documentRoute]);
+const embedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/embed/$docId',
+  component: function EmbedPage() {
+    const { docId } = embedRoute.useParams();
+    return <EmbedRoute key={docId} docId={docId} />;
+  },
+});
+
+const routeTree = rootRoute.addChildren([shellRoute.addChildren([indexRoute, documentRoute]), embedRoute]);
 
 export function createStudioRouter(history?: RouterHistory) {
   return createRouter({ routeTree, history, defaultPreload: false });

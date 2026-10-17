@@ -8,13 +8,37 @@
  * Chromium (`pnpm exec playwright install chromium`). On CI a missing
  * HOLODECK_CHROMIUM is an error, not a silent fallback.
  *
- * The flow under test needs no GPU (it checks documents, placements and
- * persistence, not pixels), so no WebGPU flags are passed.
+ * Two projects:
+ *  - `chromium`: the GPU-free suites (documents, placements, persistence,
+ *    embed messages; they delete `navigator.gpu`), no WebGPU flags.
+ *  - `webgpu`: `*.webgpu.spec.ts` only (PNG export, holodeck#42), with the
+ *    same headless-WebGPU flags as the engine's render tests (SwiftShader
+ *    software Vulkan on GPU-less Linux CI). Kept to a few interactions:
+ *    software WebGPU is slow and starves input events.
  */
 import { existsSync } from 'node:fs';
 import { defineConfig } from '@playwright/test';
 
 const MAC_CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+
+/**
+ * Headless WebGPU flags. Same list as RENDER_ARGS in
+ * packages/editor-2.5d-react/src/test-support/chromium.ts (keep them in step;
+ * that module imports `playwright`, which this app does not depend on).
+ */
+const WEBGPU_ARGS = [
+  '--enable-unsafe-webgpu',
+  '--ignore-gpu-blocklist',
+  ...(process.platform !== 'linux'
+    ? ['--enable-features=WebGPU']
+    : [
+        '--enable-features=WebGPU,Vulkan',
+        '--use-vulkan=swiftshader',
+        '--use-webgpu-adapter=swiftshader',
+        '--use-angle=swiftshader',
+        '--enable-unsafe-swiftshader',
+      ]),
+];
 const PORT = 4174;
 
 function chromiumPath(): string | undefined {
@@ -48,7 +72,18 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      testIgnore: /\.webgpu\.spec\.ts$/,
       use: { browserName: 'chromium', viewport: { width: 1440, height: 900 }, launchOptions: { executablePath: chromiumPath() } },
+    },
+    {
+      name: 'webgpu',
+      testMatch: /\.webgpu\.spec\.ts$/,
+      use: {
+        browserName: 'chromium',
+        viewport: { width: 1280, height: 800 },
+        deviceScaleFactor: 1,
+        launchOptions: { executablePath: chromiumPath(), args: WEBGPU_ARGS },
+      },
     },
   ],
   webServer: {

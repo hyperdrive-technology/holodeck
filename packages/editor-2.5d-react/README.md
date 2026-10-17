@@ -46,6 +46,25 @@ re-anchor; "+" midpoint handles add waypoints, double-click removes one). Every 
 `stampPlacement(registry, partId, x, y, { objects })` returns exactly what the palette would
 place, for hosts that add parts themselves.
 
+### Export (holodeck#42)
+
+```ts
+// High-resolution PNG of the current view: canvas size x scale, drawn in 1024 px tiles.
+const { blob, width, height, tiles } = await editorRef.current.exportImage({ scale: 4, signal });
+// Components table: one row per placement (+ meta:<key> columns), formula-safe CSV.
+const csv = isoComponentsCsv(doc.body, host.registry);
+```
+
+`exportImage` waits for the rendered signal (below) before drawing, hides selection and tool
+overlays, scales screen-space line widths with the picture, and runs one export at a time. Each
+tile is the same orthographic camera narrowed with `setViewOffset`, rendered into an off-screen
+output render target (same colour conversion as the canvas) and read back; the screen is never
+resized. Limits: scale <= 8, 16384 px per side, 100 MP (`planExportTiles` throws
+`ExportSizeError`). `toCsv` / `csvCell` prefix text cells that start with `=`, `+`, `-`, `@`, tab
+or CR with `'` (spreadsheet formula injection); numbers are never prefixed.
+`src/export/export-render.test.ts` checks the export against the on-screen canvas, tiled vs one
+tile, byte determinism, and hidden overlays.
+
 ## Rendered signal
 
 `ProcessEditor` (on `[data-testid="process-editor"]`) and `IsoCanvas` (on its container)

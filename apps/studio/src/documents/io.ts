@@ -67,16 +67,29 @@ export function serializeDocument(doc: HolodeckDocument): string {
 }
 
 export const DOCUMENT_FILE_SUFFIX = '.holodeck.json';
+/** Components table export (CSV). */
+export const COMPONENTS_FILE_SUFFIX = '.components.csv';
 
-/** `My Plant #2` -> `my-plant-2.holodeck.json`; falls back to the id, then `document`. */
-export function exportFileName(doc: Pick<HolodeckDocument, 'name' | 'id'>): string {
+/** `My Plant #2` -> `my-plant-2`; falls back to the id, then `document`. Safe in any file system. */
+export function documentFileStem(doc: Pick<HolodeckDocument, 'name' | 'id'>): string {
   const slug = (s: string) =>
     s
       .normalize('NFKD')
-      .replace(/[̀-ͯ]/g, '')
+      .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .slice(0, 80);
-  return `${slug(doc.name) || slug(doc.id) || 'document'}${DOCUMENT_FILE_SUFFIX}`;
+  return slug(doc.name) || slug(doc.id) || 'document';
+}
+
+/** `My Plant #2` -> `my-plant-2.holodeck.json` (or another `suffix`). */
+export function exportFileName(doc: Pick<HolodeckDocument, 'name' | 'id'>, suffix = DOCUMENT_FILE_SUFFIX): string {
+  return `${documentFileStem(doc)}${suffix}`;
+}
+
+/** PNG export name with its scale: `my-plant-2@2x.png`, `my-plant-2@1.5x.png`. */
+export function imageFileName(doc: Pick<HolodeckDocument, 'name' | 'id'>, scale: number): string {
+  const label = Number.isFinite(scale) && scale > 0 ? String(Math.round(scale * 100) / 100) : '1';
+  return `${documentFileStem(doc)}@${label}x.png`;
 }

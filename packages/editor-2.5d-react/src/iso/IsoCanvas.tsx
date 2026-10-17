@@ -13,7 +13,9 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type Ref,
 } from 'react';
+import { SceneCapture, type IsoCanvasCapture } from '../export/capture';
 import type { OrthographicCamera as OrthoCam, Vector3Tuple } from 'three';
 import type { WebGPURendererParameters } from 'three/webgpu';
 import type { ContributionRegistry } from '@holodeck/sdk';
@@ -176,6 +178,12 @@ export interface IsoCanvasProps {
    * `data-render-state` on the canvas container.
    */
   onRendered?: (revision: number) => void;
+  /**
+   * Tiled PNG export of what this canvas shows (export/capture.tsx). Call
+   * `capture()` only after the rendered signal reports the current revision;
+   * `ProcessEditorHandle.exportImage` does that wait for you.
+   */
+  captureRef?: Ref<IsoCanvasCapture | null>;
 }
 
 export function IsoCanvas({
@@ -196,6 +204,7 @@ export function IsoCanvas({
   revision: revisionProp,
   holdRender = false,
   onRendered,
+  captureRef,
 }: IsoCanvasProps) {
   const contextRegistry = useIsoRegistry();
   const registry = registryProp ?? contextRegistry;
@@ -269,6 +278,7 @@ export function IsoCanvas({
         <RenderTrackerContext.Provider value={tracker}>
         <RenderSignal revision={identity} hold={holdRender} dimensions={dimensions} onDimensions={setDimensions} onRendered={reportRendered} />
         <IsoRig pose={pose} zoom={zoom} target={target} />
+        {captureRef ? <SceneCapture captureRef={captureRef} /> : null}
         {/* Key from the camera-right so the leftmost tank segment is
             darkest, the right is a bit lighter, and the interior back
             wall (facing the key) stays near-white. Ambient 0.5 is the

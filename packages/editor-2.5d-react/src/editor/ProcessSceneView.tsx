@@ -60,6 +60,7 @@ export function ProcessSceneView({
   revision,
   holdRender,
   onRendered,
+  captureRef,
 }: {
   scene: IsoSceneFile;
   zoom?: number;
@@ -76,7 +77,7 @@ export function ProcessSceneView({
   children?: ReactNode;
   /** Resolves `scene.theme`. Default: registry from context. */
   registry?: ContributionRegistry;
-} & Pick<IsoCanvasProps, 'revision' | 'holdRender' | 'onRendered'>) {
+} & Pick<IsoCanvasProps, 'revision' | 'holdRender' | 'onRendered' | 'captureRef'>) {
   const contextRegistry = useIsoRegistry();
   const holodeckStyle = useIsoThemeStyle(scene.theme, registry);
   const lookAt = target ?? sceneTarget(scene, registry ?? contextRegistry);
@@ -97,6 +98,7 @@ export function ProcessSceneView({
       revision={revision}
       holdRender={holdRender}
       onRendered={onRendered}
+      captureRef={captureRef}
     >
       {children}
     </IsoCanvas>
