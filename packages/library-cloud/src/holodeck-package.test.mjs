@@ -37,6 +37,14 @@ describe('cloud package contract', () => {
   it('provides all twenty-six data-only parts accepted by E2', () => {
     expect(CLOUD_PART_DEFINITIONS.map((part) => part.id)).toEqual(expectedIds);
     expect(new Set(expectedIds).size).toBe(26);
+    // Library pickers show label + hint: both must tell the archetypes apart.
+    expect(new Set(CLOUD_PART_DEFINITIONS.map((part) => part.label)).size).toBe(26);
+    expect(new Set(CLOUD_PART_DEFINITIONS.map((part) => part.hint)).size).toBe(26);
+    const categories = ['Compute', 'Data', 'Storage', 'Networking', 'Security', 'Operations', 'Devices', 'People', 'Generic'];
+    for (const part of CLOUD_PART_DEFINITIONS) {
+      expect(categories, part.id).toContain(part.category);
+      expect(part.hint.length, part.id).toBeGreaterThan(8);
+    }
     for (const part of createCloudParts(context.assetUrl)) {
       expect(isIsoPartDefinition(part), part.id).toBe(true);
       expect(part).not.toHaveProperty('component');

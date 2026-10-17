@@ -263,7 +263,7 @@
     "id": "cloud:broker",
     "label": "Broker",
     "category": "Data",
-    "hint": "Central message hub with four satellite nodes",
+    "hint": "Octagonal hub with four satellite nodes",
     "footprint": {
       "w": 2,
       "h": 2
@@ -283,7 +283,7 @@
     "id": "cloud:cdn",
     "label": "CDN",
     "category": "Networking",
-    "hint": "Distributed edge nodes around a delivery hub",
+    "hint": "Faceted globe with edge nodes on a ring",
     "footprint": {
       "w": 2,
       "h": 2
@@ -303,7 +303,7 @@
     "id": "cloud:registry",
     "label": "Registry",
     "category": "Compute",
-    "hint": "Open shelves of package crates",
+    "hint": "Open shelves of banded package crates",
     "footprint": {
       "w": 2,
       "h": 2
@@ -323,7 +323,7 @@
     "id": "cloud:disk",
     "label": "Disk",
     "category": "Storage",
-    "hint": "Single low storage platter in a drive enclosure",
+    "hint": "Single platter with a read arm",
     "footprint": {
       "w": 2,
       "h": 2
@@ -343,7 +343,7 @@
     "id": "cloud:warehouse",
     "label": "Warehouse",
     "category": "Data",
-    "hint": "Wide storage hall with a raised flat roof",
+    "hint": "Low hall with a clerestory roof and roller door",
     "footprint": {
       "w": 2,
       "h": 2
@@ -363,7 +363,7 @@
     "id": "cloud:stream",
     "label": "Stream",
     "category": "Data",
-    "hint": "Parallel flowing channels with message blocks",
+    "hint": "Chevron channels around a raised island",
     "footprint": {
       "w": 2,
       "h": 2
@@ -383,7 +383,7 @@
     "id": "cloud:firewall",
     "label": "Firewall",
     "category": "Security",
-    "hint": "Staggered brick barrier with a broad cap",
+    "hint": "Staggered brick wall with a broad cap",
     "footprint": {
       "w": 2,
       "h": 2
@@ -403,7 +403,7 @@
     "id": "cloud:vault",
     "label": "Vault",
     "category": "Security",
-    "hint": "Armoured safe with a circular locking wheel",
+    "hint": "Safe with a spoked locking wheel",
     "footprint": {
       "w": 2,
       "h": 2
@@ -423,7 +423,7 @@
     "id": "cloud:identity",
     "label": "Identity",
     "category": "Security",
-    "hint": "Upright identity badge with a portrait",
+    "hint": "Upright badge with a portrait",
     "footprint": {
       "w": 2,
       "h": 2
@@ -463,7 +463,7 @@
     "id": "cloud:mobile",
     "label": "Mobile",
     "category": "Devices",
-    "hint": "Handset on a compact dock",
+    "hint": "Upright handset on a dock",
     "footprint": {
       "w": 2,
       "h": 2
@@ -483,7 +483,7 @@
     "id": "cloud:pc",
     "label": "PC",
     "category": "Devices",
-    "hint": "Desktop monitor with a keyboard base",
+    "hint": "Monitor on a stand with a keyboard",
     "footprint": {
       "w": 2,
       "h": 2
@@ -503,7 +503,7 @@
     "id": "cloud:billboard",
     "label": "Billboard",
     "category": "Generic",
-    "hint": "Upright sign with a vertical logo face",
+    "hint": "Upright sign with a front-facing logo",
     "footprint": {
       "w": 2,
       "h": 2

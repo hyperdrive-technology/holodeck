@@ -48,7 +48,7 @@ Status: ✓ done · ◐ partial · ✗ missing · — out of scope (SaaS account
 | Arcentry | Holodeck today | Status | Lane |
 |---|---|---|---|
 | Component: archetype model + brand logo + colours | data-only parts (`model` + `logo` + `colors`, no code; `DataPart`), logo plane on the top face (`logo` empty contract) | ◐ | A1 (archetypes) |
-| Generic customisable components (block, cube, flat, billboard) | — | ✗ | A1 |
+| Generic customisable components (block, cube, flat, billboard) | `cloud:generic-block` / `-cube` / `-flat` / `billboard` in `@holodeck/library-cloud` (per-part `colors`, placement `color`); the billboard's upright logo waits on E2 honouring the `logo` empty's rotation | ◐ | A1 |
 | Line groups: polyline between objects or free anchors, colour, width, dash, arrow tips | `connector` part: object / port / free anchors, waypoints, A* routing, colour, width, dash, tips | ✓ | — |
 | Line labels, animated flow along lines | connector `label` caption and `flow` dots | ✓ | — |
 | Areas: fill, outline, dash, shadow level, walled "VPN" area, label | `area` params: fill, outline, outline style, shadow 0..3, walled (label: a `label` part) | ✓ | — |

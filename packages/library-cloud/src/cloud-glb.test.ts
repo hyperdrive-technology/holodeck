@@ -120,7 +120,10 @@ describe.each(CLOUD_PART_DEFINITIONS)('$id GLB', (part) => {
       expect(position.y + scale.x / 2).toBeLessThan(bounds.max.y);
       expect(position.z).toBeGreaterThan(0);
       expect(position.z).toBeLessThanOrEqual(bounds.max.z + EPS);
+      // Image top is the empty's local -Z for every slot; upright it must point at the sky.
+      expect(new Vector3(0, 0, -1).transformDirection(logo.matrixWorld).distanceTo(new Vector3(0, 1, 0))).toBeLessThan(EPS);
     } else {
+      expect(new Vector3(0, 0, -1).transformDirection(logo.matrixWorld).distanceTo(new Vector3(0, 0, -1))).toBeLessThan(EPS);
       expect(position.z).toBeCloseTo(0, 4);
       expect(position.y).toBeCloseTo(bounds.max.y, 4);
     }
