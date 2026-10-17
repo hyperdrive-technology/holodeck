@@ -20,7 +20,7 @@ cache, queue and load balancer), each with brand logos and colours.
 | `@holodeck/editor-2.5d-react` (`holodeck.iso`) | Engine + built-in primitives + default theme | M2 (adopt the engine contract) |
 | `@holodeck/library-cloud` (`holodeck.cloud`) | 3D archetypes (Blender → GLB) + `arcentry-light` / `arcentry-dark` themes | M2 (new) |
 | `@holodeck/assets-aws` (`holodeck.aws`) | AWS services as data-only parts: archetype + AWS icon + colours | M2 (new) |
-| `@holodeck/provider-aws` (`holodeck.provider-aws`) | `aws.cloudwatch`: metrics, alarm states, history, resource discovery | M2 (new) |
+| `@holodeck/provider-aws` (`holodeck.provider-aws`) | `aws.cloudwatch`: metrics, alarm states, history, resource discovery | M2 (P1) |
 | `@holodeck/provider-http` (`holodeck.http`) | Generic JSON over HTTP polling / SSE / WebSocket; the "Arcentry API" equivalent | M2 (P2) |
 | `apps/studio` | Holodeck Studio: documents, library, inspector, connections, export | M2 (new) |
 | `@holodeck/editor-2d-react` (`holodeck.flow`) | Flow engine on xyflow | M3 |
@@ -78,10 +78,10 @@ Status: ✓ done · ◐ partial · ✗ missing · — out of scope (SaaS account
 
 | Arcentry | Holodeck today | Status | Lane |
 |---|---|---|---|
-| CloudWatch plugin: connect with a read-only IAM role, per-component metrics | — | ✗ | P1 |
-| Map component type → CloudWatch namespace | — | ✗ | A2, P1 |
+| CloudWatch plugin: connect with a read-only IAM role, per-component metrics | `aws.cloudwatch` provider (`@holodeck/provider-aws`): batched GetMetricData polled at each source's period, alarm states, browse, discover; static / temporary keys, assumed read-only role, Cognito identity pool or host credentials via secrets | ✓ | — |
+| Map component type → CloudWatch namespace | `discover` suggests a `partHint` and a default metric binding per resource kind (`DEFAULT_PART_HINTS`; A2's map plugs in via `partHints`) | ◐ | A2 |
 | Metrics plane on a component (current value) | — | ✗ | E2 (bindings → `format` label) |
-| Chart widget (time series) | — | ✗ | E2 follow-up (chart part) + P1 (`history`) |
+| Chart widget (time series) | provider `history` (CloudWatch metric series, alarm state changes) | ◐ | E2 follow-up (chart part) |
 | Scale group: scale components by a metric | animators drive params; no generic scale | ◐ | E1 (`scale` transform) |
 | Alarm colouring | animators + `threshold`/`map` transforms (SDK) | ◐ | E1 |
 | API: external systems set object state | `holodeck.http` provider (`@holodeck/provider-http`): poll / SSE / WebSocket JSON, pointer or JSONPath-lite sources, HTTP writes | ◐ | S2 (embed API) |

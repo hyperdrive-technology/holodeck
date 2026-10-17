@@ -49,6 +49,7 @@ pnpm parts
 | [packages/viewer-3d-react](packages/viewer-3d-react) | `@holodeck/viewer-3d-react`: read-only 3D scenes using React Three Fiber |
 | [packages/flow-runtime](packages/flow-runtime) | `@holodeck/flow-runtime`: flow block contract, cyclic dataflow runtime and the `holodeck.flow.local` provider (no React) |
 | [packages/provider-http](packages/provider-http) | `@holodeck/provider-http`: the `holodeck.http` provider, live JSON over HTTP polling, SSE or WebSocket with pointer / JSONPath-lite sources and HTTP writes (no React) |
+| [packages/provider-aws](packages/provider-aws) | `@holodeck/provider-aws`: the `aws.cloudwatch` provider, live CloudWatch metrics and alarm states, history, metric browsing and resource discovery on the AWS SDK v3 modular clients (no React; browser and Node) |
 | [packages/cli](packages/cli) | `@holodeck/cli`: incomplete command-line tooling |
 | [blender](blender/README.md) | Python scripts that build fixed-shape equipment as GLB models |
 | [docs](docs) | Design notes and dated audits |
