@@ -218,6 +218,15 @@ useEffect(() => {
 <ProcessEditor scene={scene} onChange={setScene} mode="run" registry={host.registry} metrics={useHubMetrics(hub)} />;
 ```
 
+## Scene objects
+
+Beyond process parts the engine has the Arcentry-style objects: data-only components (GLB or block +
+brand logo + colours, no React code), connectors (anchored to objects, ports or free points; routed
+with the pipe router; colour, width, dash, arrow tips, caption, animated flow), styled areas and
+labels, icons, images, a metadata plane, and per-placement opacity / z-order. Reference and JSON
+examples: [`docs/objects.md`](docs/objects.md). JSON Schema of the scene body:
+[`schema/holodeck-iso-scene.v1.schema.json`](schema/holodeck-iso-scene.v1.schema.json).
+
 ## Checks
 
 ```sh
