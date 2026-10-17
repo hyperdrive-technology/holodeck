@@ -52,7 +52,9 @@ A part definition needs no React `component`. Without one it renders through `Da
   **Logo-plane contract (Blender archetypes, lane A1):** if the GLB has an empty named `logo`, the
   plane sits at that empty facing up and its X/Z scale is the edge length (a unit empty = 1 world
   unit; `logo.size` overrides). Without one the plane sits on the model's bounding-box top, 60% of the
-  short side.
+  short side. The empty's rotation is ignored today; `@holodeck/library-cloud`'s `cloud:billboard`
+  authors its empty on the sign's front face (local +Y = face normal, local −Z = image top) and
+  needs `logoAnchorFromModel` to honour that orientation before its logo stands upright (holodeck#138).
 - `floor: true` makes a pack part a floor annotation (never a routing obstacle); `extent(placement)`
   tells fit-to-view about anything beyond the footprint.
 

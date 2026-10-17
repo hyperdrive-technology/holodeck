@@ -2,7 +2,7 @@
   "schemaVersion": "holodeck.package.v1",
   "id": "holodeck.cloud",
   "name": "Cloud archetypes",
-  "description": "Vendor-neutral low-poly cloud components with top-face logo slots, plus Arcentry light and dark themes.",
+  "description": "Twenty-six vendor-neutral low-poly cloud archetypes with logo slots, including a vertical billboard, plus Arcentry light and dark themes.",
   "version": "0.1.0",
   "license": "MIT",
   "contributes": ["holodeck.iso.part", "holodeck.iso.theme"],
