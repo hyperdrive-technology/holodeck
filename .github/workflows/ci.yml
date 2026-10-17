@@ -26,7 +26,7 @@ jobs:
       # SDK must be checked out as a sibling of this repo. Actions can only check
       # out inside $GITHUB_WORKSPACE, so both repos go into subfolders of it.
       - name: Checkout holodeck
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: holodeck
 
@@ -55,7 +55,7 @@ jobs:
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       - name: Checkout holodeck-sdk (${{ steps.sdk.outputs.ref }})
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: hyperdrive-technology/holodeck-sdk
           ref: ${{ steps.sdk.outputs.ref }}
@@ -178,7 +178,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout holodeck
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: holodeck
 
@@ -202,7 +202,7 @@ jobs:
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       - name: Checkout holodeck-sdk (${{ steps.sdk.outputs.ref }})
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: hyperdrive-technology/holodeck-sdk
           ref: ${{ steps.sdk.outputs.ref }}
