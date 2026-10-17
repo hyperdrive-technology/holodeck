@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "holodeck.package.v1",
+  "id": "holodeck.cloud",
+  "name": "Cloud archetypes",
+  "description": "Vendor-neutral low-poly cloud components with top-face logo slots, plus Arcentry light and dark themes.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "contributes": ["holodeck.iso.part", "holodeck.iso.theme"],
+  "engines": { "holodeck.iso": "^1.0" },
+  "entry": "dist/holodeck-package.js",
+  "assets": "assets",
+  "homepage": "https://github.com/hyperdrive-technology/holodeck/tree/main/packages/library-cloud#readme",
+  "repository": "github:hyperdrive-technology/holodeck",
+  "keywords": ["cloud", "library", "isometric", "arcentry", "theme"]
+}
