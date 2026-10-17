@@ -22,6 +22,7 @@ import {
 import { GetResourcesCommand, type ResourceGroupsTaggingAPIClient } from '@aws-sdk/client-resource-groups-tagging-api';
 import type { HistoryRange, Sample, SignalValue } from '@holodeck/sdk';
 import { isValidPeriod } from './config';
+import { AwsProviderError } from './errors';
 import type { Dimension, MetricSource } from './source';
 
 /** CloudWatch GetMetricData limits. */
@@ -189,14 +190,17 @@ export function ceilPeriod(seconds: number): number {
 export function historyPeriod(range: HistoryRange, sourcePeriodS: number, now: number): number {
   const stepS = range.stepMs !== undefined && range.stepMs > 0 ? range.stepMs / 1000 : 0;
   let p = Math.max(sourcePeriodS, stepS);
-  const ageS = (now - range.from) / 1000;
-  if (ageS > 63 * 86_400) p = Math.max(p, 3600);
-  else if (ageS > 15 * 86_400) p = Math.max(p, 300);
-  else if (ageS > 3 * 3600) p = Math.max(p, 60);
   const spanS = Math.max(0, (range.to - range.from) / 1000);
   p = Math.max(p, spanS / MAX_HISTORY_SAMPLES);
-  const out = ceilPeriod(p);
-  return isValidPeriod(out) ? out : ceilPeriod(Math.min(out, 30 * 86_400));
+  // CloudWatch only answers with periods that are a multiple of the retention
+  // tier of the data's age (holodeck#146): otherwise it returns no datapoints.
+  const ageS = (now - range.from) / 1000;
+  const tier = ageS > 63 * 86_400 ? 3600 : ageS > 15 * 86_400 ? 300 : ageS > 3 * 3600 ? 60 : 1;
+  let out = tier === 1 ? ceilPeriod(p) : Math.ceil(p / tier) * tier;
+  // Periods above 30 days are not useful; stay on the tier grid below the cap.
+  const max = Math.floor((30 * 86_400) / Math.max(tier, 60)) * Math.max(tier, 60);
+  if (out > max) out = max;
+  return isValidPeriod(out) ? out : ceilPeriod(out);
 }
 
 /** Metric samples in [from, to], oldest first. */
@@ -217,6 +221,16 @@ export async function fetchMetricHistory(client: CloudWatchClient, m: MetricSour
     );
     for (const r of res.MetricDataResults ?? []) {
       if (r.Id !== 'h0') continue;
+      // A 200 response can still fail per metric (holodeck#148): surface it,
+      // so a chart can tell "no access / AWS error" from "no data".
+      if (r.StatusCode === 'Forbidden' || r.StatusCode === 'InternalError') {
+        const detail = [...(r.Messages ?? []), ...(res.Messages ?? [])].map((msg) => `${msg.Code ?? ''} ${msg.Value ?? ''}`.trim()).filter(Boolean)[0];
+        throw new AwsProviderError(
+          `metric ${m.namespace}/${m.metricName}: ${r.StatusCode}${detail ? ` (${detail})` : ''}`,
+          r.StatusCode === 'Forbidden' ? 'auth' : 'aws',
+          r.StatusCode,
+        );
+      }
       const ts = r.Timestamps ?? [];
       const vs = r.Values ?? [];
       for (let i = 0; i < Math.min(ts.length, vs.length); i++) {

@@ -59,6 +59,14 @@ import {
 
 export const AWS_PROVIDER_ID = 'aws.cloudwatch';
 
+/**
+ * Largest delay `setTimeout` honours: browsers and Node store it as a signed
+ * 32-bit integer and treat anything larger as 1 ms (holodeck#145).
+ */
+export const MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
+/** Longest poll interval: a metric with a longer period is still re-read daily. */
+export const MAX_POLL_INTERVAL_MS = 86_400_000;
+
 /** Most cached "current values" kept for initial deliveries. */
 const MAX_CACHED_VALUES = 10_000;
 
@@ -235,7 +243,9 @@ async function openSession(
   const groupFor = (p: ParsedSource): { key: string; kind: PollGroup['kind']; intervalMs: number } => {
     if (p.kind === 'alarm') return { key: `alarm|${p.region}|${config.alarmPollIntervalMs}`, kind: 'alarm', intervalMs: config.alarmPollIntervalMs };
     // "Poll period from the source": a metric is polled once per period, never faster than the floor.
-    const intervalMs = Math.max(p.periodS * 1000, config.minPollIntervalMs);
+    // Capped at a day (holodeck#145): a 30-day period would otherwise exceed the
+    // setTimeout limit and poll every millisecond.
+    const intervalMs = Math.min(MAX_POLL_INTERVAL_MS, Math.max(p.periodS * 1000, config.minPollIntervalMs));
     return { key: `metric|${p.region}|${intervalMs}`, kind: 'metric', intervalMs };
   };
 
@@ -289,10 +299,12 @@ async function openSession(
   const schedule = (group: PollGroup, delayMs: number) => {
     if (closed || groups.get(group.key) !== group) return;
     if (group.timer !== undefined) clearTimer(group.timer);
+    // Belt and braces: no delay (interval, backoff) may exceed what setTimeout honours.
+    const safe = Math.min(MAX_TIMER_DELAY_MS, Math.max(0, Number.isFinite(delayMs) ? delayMs : MAX_POLL_INTERVAL_MS));
     group.timer = setTimer(() => {
       group.timer = undefined;
       void poll(group);
-    }, delayMs);
+    }, safe);
   };
 
   const poll = async (group: PollGroup): Promise<void> => {
