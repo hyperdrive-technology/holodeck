@@ -9,7 +9,7 @@ import type { ProcessEditorProps } from '@holodeck/editor-2.5d-react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { IDBFactory } from 'fake-indexeddb';
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openStudioDb } from '../documents/db';
 import { createIsoDocument } from '../documents/new-document';
 import { DocumentStore } from '../documents/store';
@@ -17,6 +17,7 @@ import { createStudioHost, hostDocumentProblems } from '../host/studio-host';
 import { StudioProvider } from '../studio-context';
 import { NO_CHANNEL, withPart } from '../test-support';
 import { EmbedRoute } from './EmbedRoute';
+import type { FrameContext } from './origins';
 import { EMBED_PROTOCOL } from './protocol';
 
 const editor = vi.hoisted(() => ({ props: null as ProcessEditorProps | null, mounts: 0 }));
@@ -57,12 +58,12 @@ function plant(id = 'plant-1', name = 'Plant') {
   return doc;
 }
 
-function renderEmbed(docId: string, embedParent: typeof parent | null = parent) {
+function renderEmbed(docId: string, embedParent: typeof parent | null = parent, frameContext?: FrameContext) {
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
   return render(
     <StudioProvider services={{ host, store, channel: NO_CHANNEL }}>
       <QueryClientProvider client={client}>
-        <EmbedRoute docId={docId} embedParent={embedParent} />
+        <EmbedRoute docId={docId} embedParent={embedParent} frameContext={frameContext} />
       </QueryClientProvider>
     </StudioProvider>,
   );
@@ -196,5 +197,55 @@ describe('/embed/$docId', () => {
     renderEmbed('plant-1', null);
     await screen.findByTestId('process-editor');
     expect(screen.getByTestId('embed')).toHaveAttribute('data-embed-api', 'off');
+  });
+
+  describe('framed by a URL-granted (untrusted) parent (holodeck#151)', () => {
+    const SIBLING = 'https://sibling.example';
+    const sibling: FrameContext = { framed: true, ancestorOrigins: [SIBLING], referrer: `${SIBLING}/`, parentIsTop: true };
+    beforeEach(() => window.history.replaceState(null, '', `/embed/plant-1?parentOrigin=${encodeURIComponent(SIBLING)}`));
+    afterEach(() => window.history.replaceState(null, '', '/'));
+
+    it('never shows, announces or describes the stored document', async () => {
+      await store.create(plant());
+      const get = vi.spyOn(store, 'get');
+      const getCamera = vi.spyOn(store, 'getCamera');
+      renderEmbed('plant-1', parent, sibling);
+      expect(await screen.findByText('Waiting for the embedding page to send a document.')).toBeInTheDocument();
+      expect(screen.getByTestId('embed')).toHaveAttribute('data-stored-documents', 'hidden');
+      expect(screen.queryByTestId('process-editor')).toBeNull();
+      expect(get).not.toHaveBeenCalled();
+      expect(getCamera).not.toHaveBeenCalled();
+      await waitFor(() => expect(posted()).toContainEqual({ message: { protocol: EMBED_PROTOCOL, type: 'ready', documentId: null }, target: SIBLING }));
+      deliver({ protocol: EMBED_PROTOCOL, type: 'getInfo', requestId: 'i' }, { origin: SIBLING });
+      expect(posted()).toContainEqual({
+        message: { protocol: EMBED_PROTOCOL, type: 'info', requestId: 'i', documentId: null, name: null, objects: [] },
+        target: SIBLING,
+      });
+      deliver({ protocol: EMBED_PROTOCOL, type: 'setObjectState', requestId: 's', objectId: 'tank-1', state: { level: 1 } }, { origin: SIBLING });
+      expect(posted()).toContainEqual({ message: expect.objectContaining({ requestId: 's', ok: false, error: 'no document is loaded' }), target: SIBLING });
+      // Nothing it posted carries the stored name or objects.
+      expect(JSON.stringify(posted())).not.toContain('Plant');
+      expect(JSON.stringify(posted())).not.toContain('tank-1"');
+    });
+
+    it('still shows a document the parent sends', async () => {
+      await store.create(plant());
+      renderEmbed('plant-1', parent, sibling);
+      await screen.findByText('Waiting for the embedding page to send a document.');
+      deliver({ protocol: EMBED_PROTOCOL, type: 'loadDocument', requestId: 'l', document: JSON.parse(JSON.stringify(plant('mine', 'Mine'))) }, { origin: SIBLING });
+      await screen.findByTestId('process-editor');
+      expect(editor.props?.scene.id).toBe('mine');
+      await waitFor(() => expect(posted()).toContainEqual({ message: { protocol: EMBED_PROTOCOL, type: 'ready', documentId: 'mine' }, target: SIBLING }));
+    });
+
+    it('shows the stored document to a same-origin parent', async () => {
+      await store.create(plant());
+      renderEmbed('plant-1', parent, { framed: true, ancestorOrigins: [ORIGIN], referrer: `${ORIGIN}/`, parentIsTop: true });
+      await screen.findByTestId('process-editor');
+      expect(screen.getByTestId('embed')).toHaveAttribute('data-stored-documents', 'shown');
+      // ...but its id is still announced to the URL-granted origin as null.
+      await waitFor(() => expect(posted()).toContainEqual({ message: { protocol: EMBED_PROTOCOL, type: 'ready', documentId: 'plant-1' }, target: ORIGIN }));
+      expect(posted()).toContainEqual({ message: { protocol: EMBED_PROTOCOL, type: 'ready', documentId: null }, target: SIBLING });
+    });
   });
 });

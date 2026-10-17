@@ -94,4 +94,16 @@ describe('handleEmbedMessage', () => {
       error: expect.stringMatching(/larger than/),
     });
   });
+
+  it('answers an untrusted sender about a stored document as if nothing were loaded (holodeck#151)', () => {
+    const stored = { document: doc, documentIsStored: true, senderTrusted: false, host };
+    expect(handleEmbedMessage({ type: 'getInfo', requestId: 'i' }, stored).reply).toMatchObject({ documentId: null, name: null, objects: [] });
+    expect(handleEmbedMessage({ type: 'setObjectState', requestId: 's', objectId: 'tank-1', state: { a: 1 } }, stored)).toEqual({
+      action: { kind: 'none' },
+      reply: result('s', false, 'no document is loaded'),
+    });
+    // Trusted sender, or a document the parent sent: answered normally.
+    expect(handleEmbedMessage({ type: 'getInfo', requestId: 'i' }, { ...stored, senderTrusted: true }).reply).toMatchObject({ documentId: 'plant-1' });
+    expect(handleEmbedMessage({ type: 'getInfo', requestId: 'i' }, { ...stored, documentIsStored: false }).reply).toMatchObject({ documentId: 'plant-1' });
+  });
 });

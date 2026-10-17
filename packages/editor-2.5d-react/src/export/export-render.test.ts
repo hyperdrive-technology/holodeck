@@ -187,4 +187,20 @@ describe.skipIf(!CHROMIUM)('ProcessEditor.exportImage (tiled PNG)', () => {
       await page.close();
     }
   }, 120_000);
+
+  it('settles every queued export when the editor unmounts (holodeck#154)', async () => {
+    const { page } = await open();
+    try {
+      const results = await page.evaluate(() => (window as any).__export.queueThenUnmount(3) as Promise<string[]>);
+      expect(results).toHaveLength(3);
+      // The first may have finished or been rejected by the unmount; the queued ones never start.
+      expect(results[0]).toMatch(/^(ok|ImageExportError: )/);
+      expect(results.slice(1)).toEqual([
+        'ImageExportError: the editor was unmounted before this image export started',
+        'ImageExportError: the editor was unmounted before this image export started',
+      ]);
+    } finally {
+      await page.close();
+    }
+  }, 120_000);
 });

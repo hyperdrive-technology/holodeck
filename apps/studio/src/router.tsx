@@ -12,12 +12,24 @@ import { createRootRoute, createRoute, createRouter, Outlet, type RouterHistory 
 import { EmbedRoute } from './embed/EmbedRoute';
 import { AppShell } from './features/AppShell';
 import { DocumentRoute } from './features/DocumentWorkspace';
+import { FrameGuard } from './features/FrameGuard';
 import { Welcome } from './features/Welcome';
 
 const rootRoute = createRootRoute({ component: Outlet });
 
 /** Everything with the studio chrome. Pathless: adds no URL segment. */
-const shellRoute = createRoute({ getParentRoute: () => rootRoute, id: 'shell', component: AppShell });
+const shellRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  id: 'shell',
+  // Never inside a frame (holodeck#152): only /embed/* is embeddable.
+  component: function Shell() {
+    return (
+      <FrameGuard>
+        <AppShell />
+      </FrameGuard>
+    );
+  },
+});
 
 const indexRoute = createRoute({ getParentRoute: () => shellRoute, path: '/', component: Welcome });
 

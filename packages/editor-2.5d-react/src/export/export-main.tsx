@@ -57,6 +57,17 @@ function Harness() {
         return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       }
     },
+    /**
+     * holodeck#154: queue `n` exports, let the first one start waiting for its
+     * frame (one task), then unmount the editor. Resolves with how each settled.
+     */
+    async queueThenUnmount(n: number) {
+      const exports = Array.from({ length: n }, () => editorRef.current!.exportImage({ scale: 1 }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      root.unmount();
+      const settled = await Promise.allSettled(exports);
+      return settled.map((r) => (r.status === 'fulfilled' ? 'ok' : `${(r.reason as Error).name}: ${(r.reason as Error).message}`));
+    },
     select(id: string | null) {
       editorRef.current!.dispatch({ type: 'select', id });
     },
@@ -73,4 +84,5 @@ function Harness() {
   );
 }
 
-createRoot(document.getElementById('pane')!).render(<Harness />);
+const root = createRoot(document.getElementById('pane')!);
+root.render(<Harness />);

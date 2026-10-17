@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { acceptMessage, embedOriginPolicy, parseOrigin } from './origins';
+import { acceptMessage, currentFrameContext, embedOriginPolicy, parseOrigin, storedDocumentsVisible, type FrameContext } from './origins';
 
 const SELF = 'https://studio.example';
 
@@ -43,10 +43,11 @@ describe('embedOriginPolicy', () => {
     expect(policy.rejected).toEqual(['*', 'https://c.example/x']);
   });
 
-  it('narrows parentOrigin to the configured list when there is one', () => {
+  it('narrows parentOrigin to the configured list when there is one (configured origins are allowed and trusted)', () => {
     const search = new URLSearchParams('parentOrigin=https://a.example&parentOrigin=https://evil.example');
     const policy = embedOriginPolicy(SELF, search, ' https://a.example , https://b.example ');
-    expect([...policy.allowed].sort()).toEqual([SELF, 'https://a.example'].sort());
+    expect([...policy.allowed].sort()).toEqual([SELF, 'https://a.example', 'https://b.example'].sort());
+    expect([...policy.trusted].sort()).toEqual([SELF, 'https://a.example', 'https://b.example'].sort());
     expect(policy.rejected).toEqual(['https://evil.example']);
   });
 
@@ -73,5 +74,55 @@ describe('acceptMessage', () => {
     expect(acceptMessage({ origin: 'null', source: parent }, policy, parent, self)).toBe(false);
     expect(acceptMessage({ origin: SELF, source: parent }, policy, null, self)).toBe(false);
     expect(acceptMessage({ origin: SELF, source: self as unknown as MessageEventSource }, policy, self as unknown as MessageEventSource, self)).toBe(false);
+  });
+});
+
+describe('trusted vs allowed (holodeck#151)', () => {
+  it('a URL grant allows messages but never trust', () => {
+    const policy = embedOriginPolicy(SELF, new URLSearchParams('parentOrigin=https://sibling.studio.example'));
+    expect(policy.allowed.has('https://sibling.studio.example')).toBe(true);
+    expect([...policy.trusted]).toEqual([SELF]);
+  });
+
+  it('the configured list is trusted even without a URL grant', () => {
+    const policy = embedOriginPolicy(SELF, new URLSearchParams(), 'https://app.example, nonsense');
+    expect([...policy.trusted].sort()).toEqual([SELF, 'https://app.example'].sort());
+    expect(policy.allowed.has('https://app.example')).toBe(true);
+    expect(policy.trusted.has('nonsense')).toBe(false);
+  });
+});
+
+describe('storedDocumentsVisible', () => {
+  const policy = embedOriginPolicy(SELF, new URLSearchParams('parentOrigin=https://sibling.studio.example'), '');
+  const configured = embedOriginPolicy(SELF, new URLSearchParams(), 'https://app.example');
+  const frame = (f: Partial<FrameContext>): FrameContext => ({ framed: true, ancestorOrigins: null, referrer: '', parentIsTop: true, ...f });
+
+  it('shows stored documents when not framed', () => {
+    expect(storedDocumentsVisible(policy, frame({ framed: false }))).toBe(true);
+  });
+
+  it('uses the ancestor chain: every ancestor must be trusted', () => {
+    expect(storedDocumentsVisible(policy, frame({ ancestorOrigins: [SELF] }))).toBe(true);
+    expect(storedDocumentsVisible(configured, frame({ ancestorOrigins: ['https://app.example'] }))).toBe(true);
+    expect(storedDocumentsVisible(configured, frame({ ancestorOrigins: ['https://app.example', 'https://evil.example'] }))).toBe(false);
+    expect(storedDocumentsVisible(policy, frame({ ancestorOrigins: [SELF, 'https://evil.example'] }))).toBe(false);
+    expect(storedDocumentsVisible(policy, frame({ ancestorOrigins: [] }))).toBe(false);
+  });
+
+  it('never trusts a URL-granted parent, even same-site', () => {
+    expect(storedDocumentsVisible(policy, frame({ ancestorOrigins: ['https://sibling.studio.example'] }))).toBe(false);
+    expect(storedDocumentsVisible(policy, frame({ referrer: 'https://sibling.studio.example/page' }))).toBe(false);
+  });
+
+  it('falls back to the referrer for one level of framing when the browser has no ancestorOrigins', () => {
+    expect(storedDocumentsVisible(policy, frame({ referrer: `${SELF}/some/page` }))).toBe(true);
+    expect(storedDocumentsVisible(configured, frame({ referrer: 'https://app.example/' }))).toBe(true);
+    expect(storedDocumentsVisible(policy, frame({ referrer: `${SELF}/x`, parentIsTop: false }))).toBe(false);
+    expect(storedDocumentsVisible(policy, frame({ referrer: '' }))).toBe(false);
+    expect(storedDocumentsVisible(policy, frame({ referrer: 'not a url' }))).toBe(false);
+  });
+
+  it('reads the current window (jsdom: not framed)', () => {
+    expect(currentFrameContext()).toMatchObject({ framed: false });
   });
 });

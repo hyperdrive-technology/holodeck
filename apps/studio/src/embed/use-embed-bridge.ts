@@ -20,17 +20,23 @@ export interface EmbedParent {
 
 export interface EmbedBridgeOptions {
   policy: EmbedOriginPolicy;
-  /** Current document id, announced in `ready` (re-announced when it changes). */
-  documentId: string | null;
-  /** Handle one validated message; returns the action already applied and the reply. */
-  onMessage: (message: EmbedInbound) => EmbedOutcome;
+  /**
+   * The document id to announce in `ready` to `origin` (null: none). Re-announced
+   * when `readyKey` changes. Lets the route withhold a stored document's id from
+   * untrusted origins (holodeck#151).
+   */
+  documentIdFor: (origin: string) => string | null;
+  /** Changes whenever what `documentIdFor` returns may have changed. */
+  readyKey: string;
+  /** Handle one validated message from `origin`; returns the action already applied and the reply. */
+  onMessage: (message: EmbedInbound, origin: string) => EmbedOutcome;
   /** Default: `window.parent`, or null when not framed (the API is then off). */
   parent?: EmbedParent | null;
   /** The window that receives messages. Default: `window`. */
   target?: Window;
 }
 
-export function useEmbedBridge({ policy, documentId, onMessage, parent: parentOption, target: targetOption }: EmbedBridgeOptions): { enabled: boolean } {
+export function useEmbedBridge({ policy, documentIdFor, readyKey, onMessage, parent: parentOption, target: targetOption }: EmbedBridgeOptions): { enabled: boolean } {
   const target = targetOption ?? window;
   const parent = parentOption !== undefined ? parentOption : target.parent !== target ? target.parent : null;
   const onMessageRef = useRef(onMessage);
@@ -57,7 +63,7 @@ export function useEmbedBridge({ policy, documentId, onMessage, parent: parentOp
       }
       let outcome: EmbedOutcome;
       try {
-        outcome = onMessageRef.current(parsed.message);
+        outcome = onMessageRef.current(parsed.message, event.origin);
       } catch (error) {
         console.error('holodeck embed: message handler failed', error);
         const requestId = parsed.message.requestId;
@@ -71,16 +77,19 @@ export function useEmbedBridge({ policy, documentId, onMessage, parent: parentOp
   }, [parent, policy, target]);
 
   // `ready`: once listening, and again whenever the shown document changes.
+  const documentIdForRef = useRef(documentIdFor);
+  documentIdForRef.current = documentIdFor;
   useEffect(() => {
     if (!parent) return;
     for (const origin of policy.allowed) {
       try {
+        const documentId = documentIdForRef.current(origin);
         parent.postMessage({ protocol: EMBED_PROTOCOL, type: 'ready', documentId } satisfies EmbedOutbound, origin);
       } catch (error) {
         console.error('holodeck embed: could not post ready', error);
       }
     }
-  }, [parent, policy, documentId]);
+  }, [parent, policy, readyKey]);
 
   return { enabled: parent !== null };
 }

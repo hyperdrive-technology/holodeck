@@ -1,12 +1,34 @@
 /// <reference types="vitest/config" />
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig, type Connect, type Plugin } from 'vite';
 
 const EDITOR = '@holodeck/editor-2.5d-react';
 
+/**
+ * Anti-framing headers (holodeck#152) for `vite dev` and `vite preview`
+ * (what the e2e suite runs): every path except `/embed/*` may not be framed.
+ * Production deployments must send the same headers (README, "Deploying");
+ * FrameGuard in the app is only a backstop.
+ */
+export function frameHeaders(): Plugin {
+  const middleware: Connect.NextHandleFunction = (req, res, next) => {
+    const path = (req.url ?? '/').split('?')[0]!;
+    if (!path.startsWith('/embed/')) {
+      res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+      res.setHeader('X-Frame-Options', 'DENY');
+    }
+    next();
+  };
+  return {
+    name: 'holodeck-studio-frame-headers',
+    configureServer: (server) => void server.middlewares.use(middleware),
+    configurePreviewServer: (server) => void server.middlewares.use(middleware),
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), frameHeaders()],
   resolve: {
     alias: { '@': decodeURIComponent(new URL('./src', import.meta.url).pathname) },
     // The editor and the SDK are `file:` dependencies with their own

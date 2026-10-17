@@ -112,6 +112,12 @@ test('/embed/:doc for an unknown id says so', async ({ page }) => {
  */
 let parentServer: Server;
 let PARENT = '';
+/**
+ * The same parent server reached as `localhost`: SAME SITE as the studio
+ * (http://localhost:4174; a site ignores the port) but another origin, so it
+ * shares the studio's storage partition (holodeck#151).
+ */
+let SIBLING = '';
 /** The HTML the parent server returns for the next request (set per test). */
 let parentHtml = '';
 
@@ -120,8 +126,11 @@ test.beforeAll(async () => {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(parentHtml);
   });
-  await new Promise<void>((resolve) => parentServer.listen(0, '127.0.0.1', resolve));
-  PARENT = `http://127.0.0.1:${(parentServer.address() as AddressInfo).port}`;
+  // All interfaces (dual-stack), so both 127.0.0.1 and localhost reach it.
+  await new Promise<void>((resolve) => parentServer.listen(0, resolve));
+  const { port } = parentServer.address() as AddressInfo;
+  PARENT = `http://127.0.0.1:${port}`;
+  SIBLING = `http://localhost:${port}`;
 });
 
 test.afterAll(async () => {
@@ -135,10 +144,10 @@ interface Received {
 }
 
 /** Opens a parent page on PARENT with one iframe per src; it records every message from its frames. */
-async function openParent(page: Page, baseURL: string | undefined, iframeSrcs: (parent: string) => string[]): Promise<void> {
+async function openParent(page: Page, baseURL: string | undefined, iframeSrcs: (parent: string) => string[], parent = PARENT): Promise<void> {
   if (!baseURL) throw new Error('baseURL is not configured (playwright.config.ts)');
   const studio = new URL(baseURL).origin;
-  const frames = iframeSrcs(PARENT)
+  const frames = iframeSrcs(parent)
     .map((src, i) => `<iframe name="f${i}" src="${studio}${src}" style="width:640px;height:400px;border:0"></iframe>`)
     .join('');
   parentHtml = `<!doctype html><html><body><script>
@@ -149,7 +158,7 @@ async function openParent(page: Page, baseURL: string | undefined, iframeSrcs: (
     });
     window.__send = (frame, data) => document.querySelectorAll('iframe')[frame].contentWindow.postMessage(data, ${JSON.stringify(studio)});
   </script>${frames}</body></html>`;
-  await page.goto(`${PARENT}/`);
+  await page.goto(`${parent}/`);
 }
 
 const messages = (page: Page) => page.evaluate(() => (window as unknown as { __messages: Received[] }).__messages);
@@ -165,8 +174,9 @@ test('postMessage: an allowed parent loads a document and sets object state', as
   const frame = page.frameLocator('iframe[name="f0"]');
   const embed = frame.getByTestId('embed');
   await expect(embed).toHaveAttribute('data-embed-api', 'on');
-  // Partitioned storage: the cross-site frame has no stored documents.
-  await expect(embed.getByRole('status')).toHaveText('This document is not available here.');
+  // A URL-granted parent never gets stored documents (holodeck#151): the embed waits for one.
+  await expect(embed).toHaveAttribute('data-stored-documents', 'hidden');
+  await expect(embed.getByRole('status')).toHaveText('Waiting for the embedding page to send a document.');
 
   // ready reached the parent, addressed to its origin.
   await expect.poll(async () => (await messages(page)).map((m) => m.data.type)).toContain('ready');
@@ -232,6 +242,76 @@ test('postMessage: a parent that is not allowed gets nothing and changes nothing
   await reply(page, 0, 'allowed-info');
 
   expect((await messages(page)).filter((m) => m.frame === 1)).toEqual([]); // not even `ready`
-  await expect(denied.getByRole('status')).toHaveText('This document is not available here.');
+  await expect(denied.getByRole('status')).toHaveText('Waiting for the embedding page to send a document.');
   await expect(denied.getByTestId('process-editor')).toHaveCount(0);
 });
+
+// holodeck#151: a URL grant is not trust. A same-site sibling shares the
+// studio's storage, so it must never get the stored document through the embed.
+test('postMessage: a same-site, URL-granted parent never sees the stored document', async ({ page, baseURL }) => {
+  await seedEmbedDocument(page);
+  await openParent(page, baseURL, (parent) => [`/embed/e2e-embed?parentOrigin=${encodeURIComponent(parent)}`], SIBLING);
+  const embed = page.frameLocator('iframe[name="f0"]').getByTestId('embed');
+  await expect(embed).toHaveAttribute('data-embed-api', 'on');
+  await expect(embed).toHaveAttribute('data-stored-documents', 'hidden');
+  await expect(embed.getByRole('status')).toHaveText('Waiting for the embedding page to send a document.');
+  await expect(embed.getByTestId('process-editor')).toHaveCount(0);
+
+  await expect.poll(async () => (await messages(page)).map((m) => m.data.type)).toContain('ready');
+  await send(page, 0, { protocol: 'holodeck.embed.v1', type: 'getInfo', requestId: 'info' });
+  expect((await reply(page, 0, 'info')).data).toEqual({
+    protocol: 'holodeck.embed.v1',
+    type: 'info',
+    requestId: 'info',
+    documentId: null,
+    name: null,
+    objects: [],
+  });
+  await send(page, 0, { protocol: 'holodeck.embed.v1', type: 'setObjectState', requestId: 'set', objectId: 'tank-1', state: { level: 1 } });
+  expect((await reply(page, 0, 'set')).data).toMatchObject({ ok: false, error: 'no document is loaded' });
+  const all = await messages(page);
+  expect(all.find((m) => m.data.type === 'ready')!.data.documentId).toBeNull();
+  // Nothing that reached the parent mentions the stored document.
+  expect(JSON.stringify(all)).not.toContain('Embed Plant');
+  expect(JSON.stringify(all)).not.toContain('valve-1');
+
+  // It can still show its own documents.
+  await send(page, 0, { protocol: 'holodeck.embed.v1', type: 'loadDocument', requestId: 'load', document: { ...EMBED_SCENE, id: 'theirs', name: 'Theirs' } });
+  expect((await reply(page, 0, 'load')).data.ok).toBe(true);
+  await expect(embed.getByTestId('process-editor')).toHaveAttribute('data-object-count', '2');
+  await expect(embed).toHaveAttribute('data-document-id', 'theirs');
+});
+
+test('a same-origin parent gets the stored document', async ({ page }) => {
+  await seedEmbedDocument(page);
+  await page.evaluate(() => {
+    const frame = document.createElement('iframe');
+    frame.name = 'same';
+    frame.src = '/embed/e2e-embed';
+    frame.style.cssText = 'position:fixed;inset:0;width:640px;height:400px;z-index:1000';
+    document.body.append(frame);
+  });
+  const embed = page.frameLocator('iframe[name="same"]').getByTestId('embed');
+  await expect(embed).toHaveAttribute('data-stored-documents', 'shown');
+  await expect(embed.getByTestId('process-editor')).toHaveAttribute('data-object-count', '2');
+  await expect(embed).toHaveAttribute('data-document-id', 'e2e-embed');
+});
+
+// holodeck#152: only /embed/* may be framed.
+test('studio routes send anti-framing headers and are not rendered in a frame; /embed is frameable', async ({ page, request, baseURL }) => {
+  for (const path of ['/', '/d/e2e-embed']) {
+    const res = await request.get(path);
+    expect(res.headers()['content-security-policy']).toBe("frame-ancestors 'none'");
+    expect(res.headers()['x-frame-options']).toBe('DENY');
+  }
+  const embedRes = await request.get('/embed/e2e-embed');
+  expect(embedRes.headers()['content-security-policy']).toBeUndefined();
+  expect(embedRes.headers()['x-frame-options']).toBeUndefined();
+
+  await openParent(page, baseURL, () => ['/', '/embed/none']);
+  // The embed frame renders; the studio frame does not (blocked by the header).
+  await expect(page.frameLocator('iframe[name="f1"]').getByTestId('embed')).toBeVisible();
+  await expect(page.frameLocator('iframe[name="f0"]').getByTestId('welcome')).toHaveCount(0);
+  await expect(page.frameLocator('iframe[name="f0"]').getByText('Holodeck Studio')).toHaveCount(0);
+});
+

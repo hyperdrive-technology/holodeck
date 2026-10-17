@@ -20,7 +20,8 @@ export function useDocumentList() {
   return useQuery({ queryKey: documentKeys.list(), queryFn: () => store.list() });
 }
 
-export function useDocument(id: string) {
+/** `enabled: false` never reads the store (the embed for an untrusted parent, holodeck#151). */
+export function useDocument(id: string, { enabled = true }: { enabled?: boolean } = {}) {
   const { store } = useStudio();
   // `null` (not undefined) for a missing document: Query treats undefined as an error.
   // Always re-read on mount: a cached copy may predate another tab's save (or
@@ -30,16 +31,18 @@ export function useDocument(id: string) {
     queryKey: documentKeys.detail(id),
     queryFn: async () => (await store.get(id)) ?? null,
     refetchOnMount: 'always',
+    enabled,
   });
 }
 
 /** The camera stored for a document (`null`: none yet, the editor fits the scene). */
-export function useDocumentCamera(id: string) {
+export function useDocumentCamera(id: string, { enabled = true }: { enabled?: boolean } = {}) {
   const { store } = useStudio();
   return useQuery({
     queryKey: documentKeys.camera(id),
     queryFn: async () => (await store.getCamera(id)) ?? null,
     refetchOnMount: 'always',
+    enabled,
   });
 }
 

@@ -377,17 +377,23 @@ export function ProcessEditor({
     renderWaiters.current = renderWaiters.current.filter((w) => w.captureId !== captureId);
     for (const w of ready) w.resolve();
   }, [captureId, revision, renderedRevision, webgpu]);
-  useEffect(
-    () => () => {
+  // Mounted flag for queued exports (holodeck#154): an export that starts
+  // after unmount (it was queued behind one that the cleanup rejected) must
+  // fail at once, not register a waiter nobody will ever settle.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
       const waiting = renderWaiters.current.splice(0);
       for (const w of waiting) w.reject(new ImageExportError('the editor was unmounted during an image export'));
-    },
-    [],
-  );
+    };
+  }, []);
   const exportImage = useCallback((options: ImageExportOptions = {}): Promise<ExportedImage> => {
     const run = async (): Promise<ExportedImage> => {
       const { signal } = options;
       if (signal?.aborted) throw signal.reason ?? new DOMException('image export aborted', 'AbortError');
+      if (!mounted.current) throw new ImageExportError('the editor was unmounted before this image export started');
       if (webgpuRef.current === 'missing') throw new ImageExportError('image export needs WebGPU, which this browser does not provide');
       const id = nextCaptureId.current++;
       try {
@@ -410,7 +416,7 @@ export function ProcessEditor({
           setCaptureId(id);
         });
         const capture = captureRef.current;
-        if (!capture) throw new ImageExportError('the canvas is not mounted');
+        if (!mounted.current || !capture) throw new ImageExportError('the canvas is not mounted');
         return await capture.capture(options);
       } finally {
         setCaptureId((current) => (current === id ? null : current));

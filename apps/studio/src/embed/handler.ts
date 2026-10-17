@@ -34,7 +34,17 @@ function jsonSize(value: unknown): number | null {
   }
 }
 
-export function handleEmbedMessage(message: EmbedInbound, context: { document: IsoDocument | null; host: HolodeckHost }): EmbedOutcome {
+export interface EmbedContext {
+  /** What the embed shows now, or null. */
+  document: IsoDocument | null;
+  /** `document` was read from the studio's store (not sent with `loadDocument`). */
+  documentIsStored?: boolean;
+  /** The sender's origin is trusted (origins.ts): only then may it learn about or act on a stored document. */
+  senderTrusted?: boolean;
+  host: HolodeckHost;
+}
+
+export function handleEmbedMessage(message: EmbedInbound, context: EmbedContext): EmbedOutcome {
   const { requestId } = message;
   const ok = (action: EmbedAction): EmbedOutcome => ({
     action,
@@ -44,7 +54,10 @@ export function handleEmbedMessage(message: EmbedInbound, context: { document: I
     action: NONE,
     ...(requestId ? { reply: { protocol: EMBED_PROTOCOL, type: 'result', requestId, ok: false, error } } : {}),
   });
-  const doc = context.document;
+  // Defence in depth for holodeck#151: EmbedRoute never loads a stored
+  // document for an untrusted parent, but if one is shown, an untrusted
+  // sender is still answered as if nothing were loaded.
+  const doc = context.documentIsStored && !context.senderTrusted ? null : context.document;
   switch (message.type) {
     case 'getInfo':
       if (!requestId) return { action: NONE };
