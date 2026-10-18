@@ -222,3 +222,53 @@ describe('review of #188: cap and stale delivery', () => {
     expect(a.latest('/v')?.value).toBe('read');
   });
 });
+
+describe('review of #188 (round 2)', () => {
+  it('browse is sequenced by request start: a slow older browse does not beat a newer read', async () => {
+    let calls = 0;
+    server.route('GET', '/s', async (_req, res) => {
+      const n = ++calls;
+      if (n === 1) await sleep(250); // the browse: slow, older data
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ v: n === 1 ? 'old' : 'new' }));
+    });
+    const h = await open({ url: `${server.url}/s`, intervalMs: 60_000 });
+    const browsing = h.session.browse!('');
+    await sleep(30);
+    expect((await h.session.read!(['/v']))[0]?.value).toBe('new');
+    await browsing;
+    const c = collector();
+    h.session.subscribe(['/v'], c.onSamples);
+    await waitFor(() => c.count() > 0);
+    expect(c.batches[0]?.[0]?.value).toBe('new');
+  });
+
+  it.each(['sse', 'websocket'] as const)('%s endpoint outside pathPrefix is refused at subscribe', async (mode) => {
+    server.sse('/other-events');
+    server.ws('/other-ws');
+    const base = mode === 'sse' ? `${server.url}/api/events` : `${server.wsUrl}/api/ws`;
+    if (mode === 'sse') server.sse('/api/events');
+    else server.ws('/api/ws');
+    const h = await open({ url: base, mode }, { options: { pathPrefix: '/api' } });
+    const c = collector();
+    h.session.subscribe([mode === 'sse' ? '/other-events#/v' : '/other-ws#/v'], c.onSamples);
+    await waitFor(() => c.count() > 0);
+    expect(c.batches[0]?.[0]).toMatchObject({ value: null, quality: 'bad' });
+    expect(server.requestsTo('/other-events')).toHaveLength(0);
+    expect(server.requestsTo('/other-ws')).toHaveLength(0);
+  });
+
+  it('home -> other origin -> out-of-prefix home path is refused (no request to it)', async () => {
+    const other = await startTestServer();
+    try {
+      server.route('GET', '/api/start', (_req, res) => void res.writeHead(302, { location: `${other.url}/hop` }).end());
+      other.route('GET', '/hop', (_req, res) => void res.writeHead(302, { location: `${server.url}/secret` }).end());
+      server.json('/secret', { v: 'leak' });
+      const h = await open({ url: `${server.url}/api/start`, followRedirects: true }, { options: { pathPrefix: '/api' } });
+      expect((await h.session.read!(['/v']))[0]).toMatchObject({ quality: 'bad' });
+      expect(server.requestsTo('/secret')).toHaveLength(0);
+      expect(other.requestsTo('/hop')).toHaveLength(1);
+    } finally {
+      await other.close();
+    }
+  });
+});

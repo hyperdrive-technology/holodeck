@@ -595,8 +595,9 @@ async function openSession(
         json = payloads.get(url.href)?.json;
         if (json === undefined) return [];
       } else {
+        const requestSeq = ++seq; // before the request starts, like read() (#97)
         json = await fetchJson(requestDeps(), url);
-        storePayload(url.href, json, ctx.now());
+        storePayload(url.href, json, ctx.now(), requestSeq);
       }
       const hit = lookup(json, parsed.tokens);
       if (!hit.found || hit.value === null || typeof hit.value !== 'object') return [];

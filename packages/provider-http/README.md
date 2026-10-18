@@ -94,6 +94,8 @@ reject with `HTTP <status>`; the response body is never read into errors or logs
   is resolved; paths with encoded slashes or backslashes (`%2f`, `%5c`) are refused. Enforced for the initial URL and every
   same-origin redirect hop of subscribe, read, browse and write alike; a rejected target sends no request. The connection
   URL must be inside it. Host-level on purpose: a scope the document sets itself is no boundary.
+- Redirect targets on another origin are not path-scoped (`pathPrefix` applies to the connection origin); `origins` is the
+  control for those. A redirect that comes back to the connection origin is checked again.
 - `browser`: overrides browser detection (`followRedirects` is refused in browsers). Electron renderers with
   `nodeIntegration` look like Node to the detector only if `process.versions.node` is set; pass `browser: true` there,
   since the renderer's fetch still cannot inspect manual redirects.
