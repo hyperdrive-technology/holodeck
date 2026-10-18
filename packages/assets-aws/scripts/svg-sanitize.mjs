@@ -100,7 +100,7 @@ const ELEMENTS = new Map(Object.entries({
 }));
 
 const XML_DECLARATION =
-  /^\uFEFF?\s*<\?xml\s+version\s*=\s*(["'])1\.[01]\1(?:\s+encoding\s*=\s*(["'])[A-Za-z][A-Za-z0-9._-]*\2)?(?:\s+standalone\s*=\s*(["'])(?:yes|no)\3)?\s*\?>/;
+  /^\uFEFF?[ \t\r\n]*<\?xml[ \t\r\n]+version[ \t\r\n]*=[ \t\r\n]*(["'])1\.[01]\1(?:[ \t\r\n]+encoding[ \t\r\n]*=[ \t\r\n]*(["'])[A-Za-z][A-Za-z0-9._-]*\2)?(?:[ \t\r\n]+standalone[ \t\r\n]*=[ \t\r\n]*(["'])(?:yes|no)\3)?[ \t\r\n]*\?>/;
 
 function parseSvg(text) {
   if (Buffer.byteLength(text) > MAX_ICON_BYTES) throw new Error(`larger than ${MAX_ICON_BYTES} bytes`);

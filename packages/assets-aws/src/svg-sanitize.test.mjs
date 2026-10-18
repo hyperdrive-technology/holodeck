@@ -34,6 +34,7 @@ const rejected = [
   ['uppercase <?XML declaration', `<?XML version="1.0"?>${svg('')}`],
   ['BOM + declaration + PI', `\uFEFF<?xml version="1.0"?><?pi x?>${svg('')}`],
   ["'>' inside the declaration", `<?xml version="1.0" encoding="a>b"?>${svg('')}`],
+  ['non-XML whitespace (NBSP) in the declaration', `<?xml\u00a0version="1.0"?>${svg('')}`],
   ['empty declaration', `<?xml?>${svg('')}`],
   ['declaration without version', `<?xml encoding="UTF-8"?>${svg('')}`],
   ['encoding before version', `<?xml encoding="UTF-8" version="1.0"?>${svg('')}`],

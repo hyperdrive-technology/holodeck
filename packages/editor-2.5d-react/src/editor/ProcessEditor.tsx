@@ -404,6 +404,12 @@ export function ProcessEditor({
       // tiles; capture() then throws SceneChangedError and we start again with a
       // fresh id (so the wait below really waits for the new frame), up to a limit (holodeck#159).
       for (let attempt = 1; ; attempt++) {
+        // Every attempt re-checks: the editor may have unmounted (or the caller
+        // cancelled) while the previous attempt's readback was in flight. A
+        // waiter registered on an unmounted editor would never settle and would
+        // block every queued export behind it.
+        if (signal?.aborted) throw signal.reason ?? new DOMException('image export aborted', 'AbortError');
+        if (!mounted.current) throw new ImageExportError('the editor was unmounted during this image export');
         const id = nextCaptureId.current++;
         try {
           await new Promise<void>((resolve, reject) => {
@@ -428,7 +434,8 @@ export function ProcessEditor({
           if (!mounted.current || !capture) throw new ImageExportError('the canvas is not mounted');
           return await capture.capture({ ...options, revision: () => revisionRef.current });
         } catch (error) {
-          if (error instanceof SceneChangedError && attempt < EXPORT_ATTEMPTS && !options.signal?.aborted) continue;
+          if (error instanceof SceneChangedError && !mounted.current) throw new ImageExportError('the editor was unmounted during this image export');
+          if (error instanceof SceneChangedError && attempt < EXPORT_ATTEMPTS && !signal?.aborted && mounted.current) continue;
           throw error;
         } finally {
           setCaptureId((current) => (current === id ? null : current));

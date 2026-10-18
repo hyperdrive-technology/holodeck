@@ -71,7 +71,7 @@ export class ImageExportError extends Error {
 /** The live scene changed (data update, edit, resize) while tiles were being captured. Retryable. */
 export class SceneChangedError extends ImageExportError {
   constructor() {
-    super('the scene changed while the image was being captured');
+    super('the scene changed while the image was being captured; pause live data or lower the scale, then try again');
     this.name = 'SceneChangedError';
   }
 }

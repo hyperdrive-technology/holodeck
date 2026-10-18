@@ -68,6 +68,40 @@ function Harness() {
       const settled = await Promise.allSettled(exports);
       return settled.map((r) => (r.status === 'fulfilled' ? 'ok' : `${(r.reason as Error).name}: ${(r.reason as Error).message}`));
     },
+    /**
+     * Two queued exports; the first export's first GPU readback is held while the
+     * scene changes (a selection) and the editor unmounts, then released: the
+     * capture sees a changed revision and would retry on an unmounted editor.
+     * Resolves with how each settled, or 'hang' if they do not settle in time.
+     */
+    async changeAndUnmountDuringReadback() {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const proto = (window as any).GPUBuffer.prototype;
+      const original = proto.mapAsync;
+      let held = false;
+      proto.mapAsync = function (this: unknown, ...args: unknown[]) {
+        if (held) return original.apply(this, args);
+        held = true;
+        editorRef.current!.dispatch({ type: 'select', id: 'pump-1' });
+        // Let the selection render (revision changes), finish the real map, and
+        // unmount before the capture code resumes from its readback.
+        return new Promise<void>((resolve) => setTimeout(resolve, 100))
+          .then(() => original.apply(this, args))
+          .then((value: unknown) => {
+            root.unmount();
+            return value;
+          });
+      };
+      try {
+        const exports = [editorRef.current!.exportImage({ scale: 1 }), editorRef.current!.exportImage({ scale: 1 })];
+        const timeout = new Promise<string[]>((resolve) => setTimeout(() => resolve(['hang']), 5000));
+        const settled = Promise.allSettled(exports).then((rs) => rs.map((r) => (r.status === 'fulfilled' ? 'ok' : `${(r.reason as Error).name}: ${(r.reason as Error).message}`)));
+        const results = await Promise.race([settled, timeout]);
+        return { held, results };
+      } finally {
+        proto.mapAsync = original;
+      }
+    },
     select(id: string | null) {
       editorRef.current!.dispatch({ type: 'select', id });
     },
