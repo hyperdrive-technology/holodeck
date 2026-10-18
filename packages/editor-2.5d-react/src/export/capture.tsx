@@ -44,10 +44,20 @@ export interface ExportedImage {
   blob: Blob;
 }
 
+/** Internal: `ImageExportOptions` plus the scene-revision probe that `ProcessEditor.exportImage` passes (holodeck#159). */
+export interface CaptureOptions extends ImageExportOptions {
+  /**
+   * Current render revision of the live scene. Read before the first tile and
+   * after every readback; a change means the tiles would show different live
+   * data (seams), so the capture fails with `SceneChangedError`.
+   */
+  revision?: () => number;
+}
+
 /** What `IsoCanvas` exposes through `captureRef`. */
 export interface IsoCanvasCapture {
   /** Draw the current scene to a PNG. Call only once the rendered signal reports the current revision. */
-  capture(options?: ImageExportOptions): Promise<ExportedImage>;
+  capture(options?: CaptureOptions): Promise<ExportedImage>;
 }
 
 /** Export failed for a reason other than bad options (`ExportSizeError`), e.g. no 2D canvas or PNG encoding refused. */
@@ -55,6 +65,14 @@ export class ImageExportError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'ImageExportError';
+  }
+}
+
+/** The live scene changed (data update, edit, resize) while tiles were being captured. Retryable. */
+export class SceneChangedError extends ImageExportError {
+  constructor() {
+    super('the scene changed while the image was being captured; pause live data or lower the scale, then try again');
+    this.name = 'SceneChangedError';
   }
 }
 
@@ -92,7 +110,7 @@ export async function renderTiledPng(
   scene: Scene,
   camera: Camera,
   plan: TilePlan,
-  { lineScale = 1, signal }: { lineScale?: number; signal?: AbortSignal } = {},
+  { lineScale = 1, signal, revision }: { lineScale?: number; signal?: AbortSignal; revision?: () => number } = {},
 ): Promise<ExportedImage> {
   const out = document.createElement('canvas');
   out.width = plan.width;
@@ -105,11 +123,17 @@ export async function renderTiledPng(
   const view = camera.clone() as OrthographicCamera;
   view.updateMatrixWorld(true);
   // Linear in, sRGB out: see the module comment. 4x MSAA like the canvas (antialias: true).
+  // One frozen view of the live data: every tile must be drawn at this revision.
+  const baseline = revision?.();
+  const assertUnchanged = () => {
+    if (revision && revision() !== baseline) throw new SceneChangedError();
+  };
   const target = new RenderTarget(plan.tileSize, plan.tileSize, { samples: 4 });
   const lines = lineScale === 1 ? [] : lineMaterials(scene);
   try {
     for (const tile of plan.tiles) {
       if (signal?.aborted) throw abortReason(signal);
+      assertUnchanged();
       // Synchronous from here to the readback call: no frame of the live
       // loop can run in between and see the scaled line widths or our target.
       const widths = lines.map((m) => m.linewidth);
@@ -134,6 +158,9 @@ export async function renderTiledPng(
         });
       }
       const raw = (await readback) as Uint8Array;
+      // Data may have changed while the readback was in flight (this tile is then
+      // a mix of old and new); drop the capture rather than stitch a seam.
+      assertUnchanged();
       const pixels = unpadRows(raw, plan.tileSize, plan.tileSize);
       // putImageData with a dirty rect crops the part of an edge tile that lies outside the picture.
       ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels), plan.tileSize, plan.tileSize), tile.x, tile.y, 0, 0, tile.width, tile.height);
@@ -143,6 +170,8 @@ export async function renderTiledPng(
   }
   if (signal?.aborted) throw abortReason(signal);
   const blob = await canvasToPng(out);
+  // Cancelling while the PNG was encoding must not resolve: the caller downloads on resolve (holodeck#160).
+  if (signal?.aborted) throw abortReason(signal);
   return { width: plan.width, height: plan.height, tiles: plan.tiles.length, blob };
 }
 
@@ -152,13 +181,14 @@ export function SceneCapture({ captureRef }: { captureRef: Ref<IsoCanvasCapture 
   useImperativeHandle(
     captureRef,
     () => ({
-      capture: ({ scale = DEFAULT_EXPORT_SCALE, tileSize = DEFAULT_EXPORT_TILE_SIZE, signal } = {}) => {
+      capture: ({ scale = DEFAULT_EXPORT_SCALE, tileSize = DEFAULT_EXPORT_TILE_SIZE, signal, revision } = {}) => {
         // Latest state at call time (size / camera / dpr can change after mount).
         const state = get();
         const plan = planExportTiles({ viewWidth: state.size.width, viewHeight: state.size.height, scale, tileSize });
         return renderTiledPng(state.gl as unknown as WebGPURenderer, state.scene, state.camera, plan, {
           lineScale: exportLineScale(scale, state.viewport.dpr),
           signal,
+          revision,
         });
       },
     }),

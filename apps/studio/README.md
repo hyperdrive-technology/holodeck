@@ -181,6 +181,17 @@ allow. As a backstop the studio routes refuse to render inside a frame
 (`src/features/FrameGuard.tsx`). Set `VITE_HOLODECK_EMBED_ORIGINS` at build
 time to the origins that may embed stored documents.
 
+Firefox has no `location.ancestorOrigins`, so there the embed trusts
+`document.referrer` (single-level framing only). That is the origin of the page
+that *initiated* the iframe navigation, so it equals the parent only while no
+studio page navigates a named or attacker-chosen frame. **Rule: no studio page
+may use `window.open(url, name)`, a `target=` link or form fed by untrusted
+input, or an open redirect** (documented beside `storedDocumentsVisible` in
+`src/embed/origins.ts`; drop the fallback once Firefox ships ancestorOrigins).
+A configured partner that sends `Referrer-Policy: no-referrer` therefore gets no
+stored documents on Firefox (fail closed; the embed says why): it must send the
+document with `loadDocument` or use `strict-origin-when-cross-origin`.
+
 ## Develop
 
 The studio consumes the **built** editor and SDK (`file:` dependencies are

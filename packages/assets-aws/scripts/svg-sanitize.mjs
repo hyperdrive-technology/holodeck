@@ -99,6 +99,9 @@ const ELEMENTS = new Map(Object.entries({
   use: attributes(presentation, region, { href: (value) => fragmentOnly.test(value) }),
 }));
 
+const XML_DECLARATION =
+  /^\uFEFF?[ \t\r\n]*<\?xml[ \t\r\n]+version[ \t\r\n]*=[ \t\r\n]*(["'])1\.[01]\1(?:[ \t\r\n]+encoding[ \t\r\n]*=[ \t\r\n]*(["'])[A-Za-z][A-Za-z0-9._-]*\2)?(?:[ \t\r\n]+standalone[ \t\r\n]*=[ \t\r\n]*(["'])(?:yes|no)\3)?[ \t\r\n]*\?>/;
+
 function parseSvg(text) {
   if (Buffer.byteLength(text) > MAX_ICON_BYTES) throw new Error(`larger than ${MAX_ICON_BYTES} bytes`);
   // xmldom drops empty CDATA and accepts bare '&' without a diagnostic (covered
@@ -109,7 +112,9 @@ function parseSvg(text) {
   // AWS's own icon files) is allowed and dropped; every other `<?` / `<!` (PIs,
   // DOCTYPE, entities, CDATA) is still rejected (GPT review of #182). The parser
   // sees the text without it, so the node walk below still rejects every PI.
-  const withoutDecl = text.replace(/^\uFEFF?\s*<\?xml(?:\s+(?:version|encoding|standalone)\s*=\s*(?:"[^"<>]*"|'[^'<>]*'))*\s*\?>/, '');
+  // Grammar (XML 1.0 XMLDecl): version is required and first, then optional
+  // encoding, then optional standalone, each in matching quotes (backrefs \1-\3).
+  const withoutDecl = text.replace(XML_DECLARATION, '');
   const withoutComments = withoutDecl.replace(/<!--[\s\S]*?-->/g, '');
   if (/<[!?]/.test(withoutComments)) throw new Error('DOCTYPE, entity, processing instruction or CDATA is not allowed');
   if (/&(?!(?:amp|lt|gt|apos|quot|#\d+|#x[\da-fA-F]+);)/.test(withoutComments)) {

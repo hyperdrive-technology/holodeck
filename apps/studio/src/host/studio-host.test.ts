@@ -4,7 +4,7 @@ import { withPart } from '../test-support';
 import { describe, expect, it } from 'vitest';
 import { usedIsoContributions } from '../documents/iso-scene';
 import { createIsoDocument } from '../documents/new-document';
-import { createStudioHost, documentRequires, hostDocumentProblems, requiresFor } from './studio-host';
+import { createStudioHost, documentRequires, mergeRequires, hostDocumentProblems, requiresFor } from './studio-host';
 
 describe('studio host', () => {
   it('registers the iso engine and installs its package through the manifest', async () => {
@@ -76,5 +76,16 @@ describe('studio host', () => {
     });
     expect(documentRequires(host, createIsoDocument().body, [{ provider: 'aws.cloudwatch' }])).toEqual({ 'holodeck.provider-aws': '^0.1' });
     expect(documentRequires(host, scene)).toEqual({ 'holodeck.iso': '^1.0' });
+  });
+
+  it('mergeRequires keeps previous entries for packages not installed on this host (holodeck#187)', async () => {
+    const host = await createStudioHost();
+    expect(mergeRequires(host, { 'acme.pumps': '^2.1', 'holodeck.sim': '^1.0' }, { 'holodeck.iso': '^1.0' })).toEqual({
+      'acme.pumps': '^2.1',
+      'holodeck.iso': '^1.0',
+    });
+    expect(mergeRequires(host, undefined, {})).toEqual({});
+    // computed wins for an installed package
+    expect(mergeRequires(host, { 'holodeck.iso': '^0.9' }, { 'holodeck.iso': '^1.0' })).toEqual({ 'holodeck.iso': '^1.0' });
   });
 });

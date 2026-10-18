@@ -55,7 +55,7 @@ import {
 import { InspectorPanel } from './InspectorPanel';
 import { Palette } from './Palette';
 import { ProcessSceneView, sceneTarget } from './ProcessSceneView';
-import { ImageExportError, type ExportedImage, type ImageExportOptions, type IsoCanvasCapture } from '../export/capture';
+import { ImageExportError, SceneChangedError, type ExportedImage, type ImageExportOptions, type IsoCanvasCapture } from '../export/capture';
 
 /** Which built-in panels `ProcessEditor` draws in edit mode (holodeck#100). All default to true. */
 export interface ProcessEditorChrome {
@@ -170,6 +170,9 @@ export interface ProcessEditorProps {
    */
   keyboard?: boolean;
 }
+
+/** How many times `exportImage` restarts a capture that live data changed under (holodeck#159). */
+const EXPORT_ATTEMPTS = 3;
 
 export function ProcessEditor({
   scene,
@@ -348,6 +351,8 @@ export function ProcessEditor({
   // for a frame drawn with the editor overlays hidden, even two back to back.
   const [captureId, setCaptureId] = useState<number | null>(null);
   const revision = useRevision([scene, state, metrics, registry, registryVersion, readOnly, zoom, target, pose, view, holdRender, captureId]);
+  const revisionRef = useRef(revision);
+  revisionRef.current = revision;
   const [renderedRevision, setRenderedRevision] = useState<number | null>(null);
   const onRenderedRef = useRef(onRendered);
   onRenderedRef.current = onRendered;
@@ -395,31 +400,46 @@ export function ProcessEditor({
       if (signal?.aborted) throw signal.reason ?? new DOMException('image export aborted', 'AbortError');
       if (!mounted.current) throw new ImageExportError('the editor was unmounted before this image export started');
       if (webgpuRef.current === 'missing') throw new ImageExportError('image export needs WebGPU, which this browser does not provide');
-      const id = nextCaptureId.current++;
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const onAbort = () => {
-            renderWaiters.current = renderWaiters.current.filter((w) => w !== waiter);
-            reject(signal?.reason ?? new DOMException('image export aborted', 'AbortError'));
-          };
-          const settle = (fn: () => void) => {
-            signal?.removeEventListener('abort', onAbort);
-            fn();
-          };
-          const waiter: RenderWaiter = {
-            captureId: id,
-            resolve: () => settle(resolve),
-            reject: (reason) => settle(() => reject(reason)),
-          };
-          renderWaiters.current.push(waiter);
-          signal?.addEventListener('abort', onAbort, { once: true });
-          setCaptureId(id);
-        });
-        const capture = captureRef.current;
-        if (!mounted.current || !capture) throw new ImageExportError('the canvas is not mounted');
-        return await capture.capture(options);
-      } finally {
-        setCaptureId((current) => (current === id ? null : current));
+      // A live-data change mid-capture would put different revisions in different
+      // tiles; capture() then throws SceneChangedError and we start again with a
+      // fresh id (so the wait below really waits for the new frame), up to a limit (holodeck#159).
+      for (let attempt = 1; ; attempt++) {
+        // Every attempt re-checks: the editor may have unmounted (or the caller
+        // cancelled) while the previous attempt's readback was in flight. A
+        // waiter registered on an unmounted editor would never settle and would
+        // block every queued export behind it.
+        if (signal?.aborted) throw signal.reason ?? new DOMException('image export aborted', 'AbortError');
+        if (!mounted.current) throw new ImageExportError('the editor was unmounted during this image export');
+        const id = nextCaptureId.current++;
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const onAbort = () => {
+              renderWaiters.current = renderWaiters.current.filter((w) => w !== waiter);
+              reject(signal?.reason ?? new DOMException('image export aborted', 'AbortError'));
+            };
+            const settle = (fn: () => void) => {
+              signal?.removeEventListener('abort', onAbort);
+              fn();
+            };
+            const waiter: RenderWaiter = {
+              captureId: id,
+              resolve: () => settle(resolve),
+              reject: (reason) => settle(() => reject(reason)),
+            };
+            renderWaiters.current.push(waiter);
+            signal?.addEventListener('abort', onAbort, { once: true });
+            setCaptureId(id);
+          });
+          const capture = captureRef.current;
+          if (!mounted.current || !capture) throw new ImageExportError('the canvas is not mounted');
+          return await capture.capture({ ...options, revision: () => revisionRef.current });
+        } catch (error) {
+          if (error instanceof SceneChangedError && !mounted.current) throw new ImageExportError('the editor was unmounted during this image export');
+          if (error instanceof SceneChangedError && attempt < EXPORT_ATTEMPTS && !signal?.aborted && mounted.current) continue;
+          throw error;
+        } finally {
+          setCaptureId((current) => (current === id ? null : current));
+        }
       }
     };
     const result = exportChain.current.then(run, run);

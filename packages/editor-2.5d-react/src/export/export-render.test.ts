@@ -188,6 +188,18 @@ describe.skipIf(!CHROMIUM)('ProcessEditor.exportImage (tiled PNG)', () => {
     }
   }, 120_000);
 
+  it('does not retry on an unmounted editor: a scene change during readback then unmount settles every export (holodeck#189)', async () => {
+    const { page } = await open();
+    try {
+      const out = await page.evaluate(() => (window as any).__export.changeAndUnmountDuringReadback() as Promise<{ held: boolean; results: string[] }>);
+      expect(out.held).toBe(true);
+      expect(out.results).toHaveLength(2);
+      for (const r of out.results) expect(r).toMatch(/^ImageExportError: /);
+    } finally {
+      await page.close();
+    }
+  }, 120_000);
+
   it('settles every queued export when the editor unmounts (holodeck#154)', async () => {
     const { page } = await open();
     try {

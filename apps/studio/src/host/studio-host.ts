@@ -151,6 +151,22 @@ export function documentRequires(
   return requiresFor(host, used);
 }
 
+/**
+ * The `requires` to store after an edit: `computed` (what the body uses, from
+ * packages this host has) plus every `previous` entry whose package is NOT
+ * installed here. An imported document may need packages this host lacks;
+ * the host cannot tell whether the body still uses them, so dropping the
+ * entry on first edit would silently lose the install hint (holodeck#187).
+ * Installed packages are fully recomputed, so a no-longer-used one is dropped.
+ */
+export function mergeRequires(host: HolodeckHost, previous: Readonly<Record<string, string>> | undefined, computed: Record<string, string>): Record<string, string> {
+  const merged = { ...computed };
+  for (const [id, range] of Object.entries(previous ?? {})) {
+    if (!host.package(id) && !(id in merged)) merged[id] = range;
+  }
+  return Object.fromEntries(Object.entries(merged).sort(([a], [b]) => a.localeCompare(b)));
+}
+
 /** Credential-looking binding sources in an iso body (`objects[].bindings[param].source`). */
 export function bindingSourceProblems(body: unknown): string[] {
   const objects = body && typeof body === 'object' && Array.isArray((body as { objects?: unknown }).objects) ? (body as { objects: unknown[] }).objects : [];

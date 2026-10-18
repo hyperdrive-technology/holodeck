@@ -173,6 +173,21 @@ describe('/embed/$docId', () => {
     expect((await store.get('plant-1'))?.revision).toBe(1);
   });
 
+  it('a second loadDocument with the same id re-announces ready and remounts the viewer (holodeck#158)', async () => {
+    renderEmbed('elsewhere');
+    await screen.findByText('This document is not available here.');
+    const load = (name: string) => deliver({ protocol: EMBED_PROTOCOL, type: 'loadDocument', document: JSON.parse(JSON.stringify(plant('same-id', name))) });
+    const readies = () => posted().filter((p) => (p.message as { type?: string }).type === 'ready' && p.target === ORIGIN && (p.message as { documentId?: string }).documentId === 'same-id');
+    const mountsBefore = editor.mounts;
+    load('One');
+    await waitFor(() => expect(readies()).toHaveLength(1));
+    const afterFirst = editor.mounts;
+    expect(afterFirst).toBeGreaterThan(mountsBefore);
+    load('Two');
+    await waitFor(() => expect(readies()).toHaveLength(2));
+    expect(editor.mounts).toBeGreaterThan(afterFirst); // new view key: the camera is not kept
+  });
+
   it('getInfo lists the objects', async () => {
     await store.create(plant());
     renderEmbed('plant-1');
@@ -198,6 +213,15 @@ describe('/embed/$docId', () => {
     renderEmbed('plant-1', null);
     await screen.findByTestId('process-editor');
     expect(screen.getByTestId('embed')).toHaveAttribute('data-embed-api', 'off');
+  });
+
+  it('a Firefox-style frame with the referrer withheld fails closed with a clear message (holodeck#157)', async () => {
+    await store.create(plant());
+    const get = vi.spyOn(store, 'get');
+    renderEmbed('plant-1', parent, { framed: true, ancestorOrigins: null, referrer: '', parentIsTop: true });
+    expect(await screen.findByText(/referrer was withheld/)).toBeInTheDocument();
+    expect(screen.getByTestId('embed')).toHaveAttribute('data-stored-documents', 'hidden');
+    expect(get).not.toHaveBeenCalled();
   });
 
   describe('framed by a URL-granted (untrusted) parent (holodeck#151)', () => {
