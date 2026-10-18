@@ -105,14 +105,19 @@ function parseSvg(text) {
   // by regression tests). Check these lexical constraints before parsing, while
   // leaving actual comments to the parser to validate. This is not a cleanup:
   // parse the original bytes so rejected constructs cannot disappear first.
-  const withoutComments = text.replace(/<!--[\s\S]*?-->/g, '');
+  // One leading XML declaration (`<?xml version="1.0" encoding="UTF-8"?>`, as in
+  // AWS's own icon files) is allowed and dropped; every other `<?` / `<!` (PIs,
+  // DOCTYPE, entities, CDATA) is still rejected (GPT review of #182). The parser
+  // sees the text without it, so the node walk below still rejects every PI.
+  const withoutDecl = text.replace(/^\uFEFF?\s*<\?xml(?:\s+(?:version|encoding|standalone)\s*=\s*(?:"[^"<>]*"|'[^'<>]*'))*\s*\?>/, '');
+  const withoutComments = withoutDecl.replace(/<!--[\s\S]*?-->/g, '');
   if (/<[!?]/.test(withoutComments)) throw new Error('DOCTYPE, entity, processing instruction or CDATA is not allowed');
   if (/&(?!(?:amp|lt|gt|apos|quot|#\d+|#x[\da-fA-F]+);)/.test(withoutComments)) {
     throw new Error('invalid XML character/entity reference');
   }
   const doc = new DOMParser({
     onError: (_level, message) => { throw new Error(`invalid XML: ${message}`); },
-  }).parseFromString(text, 'application/xml');
+  }).parseFromString(withoutDecl, 'application/xml');
   if (doc.documentElement?.localName !== 'svg') throw new Error('root element must be <svg>');
   return doc;
 }

@@ -26,6 +26,11 @@ const rejected = [
   ['prefixed allowed element', svg(`<s:path xmlns:s="${SVG}" d="M0 0"/>`)],
   ['unbound prefix', svg('<s:path/>')],
   ['CDATA', svg('<![CDATA[<script>alert(1)</script>]]>')],
+  ['xml-stylesheet PI after the declaration', `<?xml version="1.0"?><?xml-stylesheet href="https://evil.test/x.css"?>${svg('')}`],
+  ['second XML declaration inside the document', svg('<?xml version="1.0"?>')],
+  ['XML declaration not at the start', ` x<?xml version="1.0"?>${svg('')}`],
+  ['XML declaration with an unknown pseudo-attribute', `<?xml version="1.0" href="javascript:alert(1)"?>${svg('')}`],
+  ['DOCTYPE after the declaration', `<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY x "y">]>${svg('')}`],
   ['empty CDATA', svg('<![CDATA[]]>')],
   ['CDATA inside title', svg('<title><![CDATA[x]]></title>')],
   ['DOCTYPE', `<!DOCTYPE svg><svg xmlns="${SVG}"/>`],
@@ -36,7 +41,6 @@ const rejected = [
   ['XML stylesheet PI', `<?xml-stylesheet type="text/css" href="//evil.test/a.css"?>${svg('')}`],
   ['PI inside SVG', svg('<?xml-stylesheet href="//evil.test/a.css"?>')],
   ['arbitrary PI', `${svg('')}<?anything x?>`],
-  ['XML prolog', `<?xml version="1.0"?>${svg('')}`],
   ['double-quoted external href', use('href="https://evil.test/a.svg#x"')],
   ['single-quoted external href', use("href='https://evil.test/a.svg#x'")],
   ['unquoted external href', use('href=https://evil.test/a.svg#x')],
@@ -168,6 +172,18 @@ const drawing = (doc) => Array.from(doc.getElementsByTagNameNS(SVG, '*')).map((e
   name: el.localName,
   attributes: Object.fromEntries(Array.from(el.attributes).filter((attr) => !attr.name.startsWith('xmlns')).map((attr) => [attr.name, attr.value]).sort()),
 }));
+
+describe('upstream AWS icon shape', () => {
+  // AWS's own icon files start with an XML declaration; refreshing from the
+  // official package must work (GPT review of #182: 53/54 were rejected).
+  it('accepts a leading XML declaration (with BOM / whitespace) and drops it', () => {
+    const body = readFileSync(fileURLToPath(new URL('../assets/aws-icons/ec2.svg', import.meta.url)), 'utf8');
+    for (const prefix of ['<?xml version="1.0" encoding="UTF-8"?>\n', '\uFEFF<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n', "  <?xml version='1.0'?>"]) {
+      expect(svgProblems(prefix + body)).toEqual([]);
+      expect(sanitizeSvg(prefix + body)).toBe(sanitizeSvg(body));
+    }
+  });
+});
 
 describe('shipped AWS icons', () => {
   it.each(icons)('%s stays accepted and preserves drawing data', (name) => {
