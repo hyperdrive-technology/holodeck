@@ -138,3 +138,6 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .pnpm-store/
+
+# Local git worktrees (see hyperdrive AGENTS.md "Git worktrees")
+.worktrees/
