@@ -15,6 +15,11 @@ test.afterEach(() => {
   expect(pageErrors.map((e) => e.message)).toEqual([]);
 });
 
+// Small viewport + 1x export: the hosted Linux runner renders WebGPU with
+// SwiftShader, which couldn't export this scene at 2x / 1280x800 in minutes
+// (holodeck#175). ~8x fewer pixels keeps the full check on CI.
+test.use({ viewport: { width: 1080, height: 520 } });
+
 test('sample visual baseline and PNG download', async ({ page }, testInfo) => {
   const failedAssets: string[] = [];
   page.on('response', (response) => {
@@ -33,34 +38,30 @@ test('sample visual baseline and PNG download', async ({ page }, testInfo) => {
   const bounds = await canvas.boundingBox();
   expect(bounds).not.toBeNull();
   expect(failedAssets).toEqual([]);
-  // Up to here (WebGPU render reaches ready, every GLB/SVG loads, bound labels
-  // live) runs everywhere, CI included. holodeck#175: the hosted Linux runner's
-  // SwiftShader can't export or screenshot this scene within minutes, so the
-  // 2x export and visual baseline below run on real-GPU machines until #175.
-  if (process.env.CI) return;
 
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   const dialog = page.getByTestId('export-dialog');
-  await expect(dialog.getByRole('radio', { name: '2×' })).toHaveAttribute('aria-checked', 'true');
+  await dialog.getByRole('radio', { name: '1×' }).click();
+  await expect(dialog.getByRole('radio', { name: '1×' })).toHaveAttribute('aria-checked', 'true');
   const downloadPromise = page.waitForEvent('download', { timeout: 120_000 });
   await dialog.getByTestId('export-png').click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe('three-tier-web-app@2x.png');
-  const file = testInfo.outputPath('sample@2x.png');
+  expect(download.suggestedFilename()).toBe('three-tier-web-app@1x.png');
+  const file = testInfo.outputPath('sample.png');
   await download.saveAs(file);
   const bytes = await readFile(file);
   expect([...bytes.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   expect(bytes.subarray(12, 16).toString('ascii')).toBe('IHDR');
-  expect(bytes.readUInt32BE(16)).toBe(Math.round(bounds!.width * 2));
-  expect(bytes.readUInt32BE(20)).toBe(Math.round(bounds!.height * 2));
+  expect(bytes.readUInt32BE(16)).toBe(Math.round(bounds!.width));
+  expect(bytes.readUInt32BE(20)).toBe(Math.round(bounds!.height));
   await expect(dialog).toHaveCount(0);
 
-  // Visual baseline from the engine's own PNG export (deterministic offscreen
+  // Visual baseline from the engine's own 1x PNG export (deterministic offscreen
   // render), not a browser screenshot: on the CI runner SwiftShader can't
   // produce compositor screenshots of this scene within minutes, while the
   // export path renders fine. Playwright image-compares PNG snapshots with the
   // tolerances below. Update per platform with --update-snapshots (README).
-  expect(bytes).toMatchSnapshot('three-tier-web-app@2x.png', { threshold: 0.2, maxDiffPixelRatio: 0.01 });
+  expect(bytes).toMatchSnapshot('three-tier-web-app@1x.png', { threshold: 0.2, maxDiffPixelRatio: 0.01 });
   expect(failedAssets).toEqual([]);
 
 });

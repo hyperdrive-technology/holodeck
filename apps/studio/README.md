@@ -215,20 +215,20 @@ server on 127.0.0.1 (Chrome's Local Network Access blocks route-fulfilled
 
 ### Sample e2e and visual baseline
 
-> The sample's WebGPU baseline is skipped on CI until holodeck#175 (the hosted
-> runner's SwiftShader can't render this scene in time); run it locally.
+> The sample baseline runs at a 1080×520 viewport with a 1× export so the hosted
+> runner's SwiftShader can finish it (2× at 1280×800 timed out, holodeck#175).
 
 `e2e/sample.spec.ts` uses the existing `withoutWebGPU` helper and checks sample
 creation/import, placements and connector anchors in downloaded JSON, changing
 formatted text, threshold colours, scaled readings, JSON/CSV downloads,
 persistence and read-only live embed behaviour. `e2e/sample.webgpu.spec.ts`
-checks the sample's 2× PNG download and image-compares that exported PNG
+checks the sample's 1× PNG download and image-compares that exported PNG
 to a Playwright PNG snapshot (`toMatchSnapshot`). It uses the same local WebGPU skip / required-on-CI rule as
 `export-png.webgpu.spec.ts`.
 
 The baseline fixes `Date.now` at `2026-01-01T00:00:02Z` (CPU 25%, traffic
 300 req/s), keeps normal timers/frames running, waits for the engine's
-`data-render-state="ready"` signal, and compares the engine's own 2× export
+`data-render-state="ready"` signal, and compares the engine's own 1× export
 (an offscreen render of the canvas at the WebGPU project's 1280×800 viewport).
 A browser screenshot is not used: on the Linux CI runner SwiftShader cannot
 produce compositor screenshots of this scene in time, while the export path
@@ -249,7 +249,7 @@ pnpm exec playwright test sample.webgpu.spec.ts --project=webgpu --update-snapsh
 ```
 
 Playwright stores the reference under
-`e2e/sample.webgpu.spec.ts-snapshots/three-tier-web-app-2x-webgpu-<platform>.png`.
+`e2e/sample.webgpu.spec.ts-snapshots/three-tier-web-app-1x-webgpu-<platform>.png`.
 Capture/review on the same platform and adapter as the comparison run (Linux
 CI uses SwiftShader); include each required platform's PNG in the change.
 A missing reference fails the comparison and writes an initial candidate;
