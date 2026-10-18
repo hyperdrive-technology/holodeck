@@ -33,17 +33,6 @@ test('sample visual baseline and PNG download', async ({ page }, testInfo) => {
   const bounds = await canvas.boundingBox();
   expect(bounds).not.toBeNull();
 
-  // Taken before the export: its toast overlays the canvas region. Canvas only: exclude timestamped Studio chrome. The editor's ready signal
-  // includes pending GLBs/textures; Playwright also waits for stable screenshots.
-  // See README for first capture and updates on the same platform/adapter.
-  await expect(editor).toHaveAttribute('data-render-state', 'ready', { timeout: 120_000 });
-  // Page screenshot clipped to the canvas, not an element screenshot: the
-  // element path waits for "stable" bounding boxes across animation frames,
-  // which SwiftShader on the CI runner renders too slowly to reach in 30 s.
-  await expect(page).toHaveScreenshot('three-tier-web-app.png', {
-    clip: bounds!, animations: 'disabled', threshold: 0.2, maxDiffPixelRatio: 0.01, timeout: 120_000,
-  });
-
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   const dialog = page.getByTestId('export-dialog');
   await expect(dialog.getByRole('radio', { name: '2×' })).toHaveAttribute('aria-checked', 'true');
@@ -59,6 +48,13 @@ test('sample visual baseline and PNG download', async ({ page }, testInfo) => {
   expect(bytes.readUInt32BE(16)).toBe(Math.round(bounds!.width * 2));
   expect(bytes.readUInt32BE(20)).toBe(Math.round(bounds!.height * 2));
   await expect(dialog).toHaveCount(0);
+
+  // Visual baseline from the engine's own PNG export (deterministic offscreen
+  // render), not a browser screenshot: on the CI runner SwiftShader can't
+  // produce compositor screenshots of this scene within minutes, while the
+  // export path renders fine. Playwright image-compares PNG snapshots with the
+  // tolerances below. Update per platform with --update-snapshots (README).
+  expect(bytes).toMatchSnapshot('three-tier-web-app@2x.png', { threshold: 0.2, maxDiffPixelRatio: 0.01 });
   expect(failedAssets).toEqual([]);
 
 });

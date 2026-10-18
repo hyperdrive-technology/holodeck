@@ -219,17 +219,21 @@ server on 127.0.0.1 (Chrome's Local Network Access blocks route-fulfilled
 creation/import, placements and connector anchors in downloaded JSON, changing
 formatted text, threshold colours, scaled readings, JSON/CSV downloads,
 persistence and read-only live embed behaviour. `e2e/sample.webgpu.spec.ts`
-checks the sample's 2× PNG download and compares the canvas to a Playwright
-PNG snapshot. It uses the same local WebGPU skip / required-on-CI rule as
+checks the sample's 2× PNG download and image-compares that exported PNG
+to a Playwright PNG snapshot (`toMatchSnapshot`). It uses the same local WebGPU skip / required-on-CI rule as
 `export-png.webgpu.spec.ts`.
 
-The screenshot fixes `Date.now` at `2026-01-01T00:00:02Z` (CPU 25%, traffic
+The baseline fixes `Date.now` at `2026-01-01T00:00:02Z` (CPU 25%, traffic
 300 req/s), keeps normal timers/frames running, waits for the engine's
-`data-render-state="ready"` signal, and captures only the canvas at the
-WebGPU project's 1280×800 viewport / device scale 1. There is no animated
+`data-render-state="ready"` signal, and compares the engine's own 2× export
+(an offscreen render of the canvas at the WebGPU project's 1280×800 viewport).
+A browser screenshot is not used: on the Linux CI runner SwiftShader cannot
+produce compositor screenshots of this scene in time, while the export path
+renders fine. There is no animated
 connector flow. Comparison allows a per-pixel threshold of 0.2 and at most
 1% different pixels for text/edge antialiasing. No pre-existing Studio
-snapshot mechanism was present; this uses Playwright's `toHaveScreenshot`.
+snapshot mechanism was present; this uses Playwright's `toMatchSnapshot` on
+the exported PNG bytes.
 
 Run from `apps/studio`, after building the dependencies above:
 
@@ -242,7 +246,7 @@ pnpm exec playwright test sample.webgpu.spec.ts --project=webgpu --update-snapsh
 ```
 
 Playwright stores the reference under
-`e2e/sample.webgpu.spec.ts-snapshots/three-tier-web-app-webgpu-<platform>.png`.
+`e2e/sample.webgpu.spec.ts-snapshots/three-tier-web-app-2x-webgpu-<platform>.png`.
 Capture/review on the same platform and adapter as the comparison run (Linux
 CI uses SwiftShader); include each required platform's PNG in the change.
 A missing reference fails the comparison and writes an initial candidate;
