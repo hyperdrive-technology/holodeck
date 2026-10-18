@@ -96,7 +96,7 @@ Status: ✓ done · ◐ partial · ✗ missing · — out of scope (SaaS account
 | Export JSON | `holodeck.document.v1` envelope (Studio Export dialog, `.holodeck.json`) | ✓ | S2 |
 | CSV export of components | `isoComponentsCsv`: one row per placement, `meta:<key>` columns, formula-injection safe; Studio Export dialog | ✓ | S2 |
 | Embed / live embed (read-only viewer with live data) | Studio `/embed/:doc`: run mode, no chrome, provider hub + `postMessage` API (`setObjectState`, `clearObjectState`, `loadDocument`, `getInfo`) | ✓ | S2 |
-| Three-tier sample and production e2e | Studio **New from sample** / import: `samples/three-tier-web-app.holodeck.json`, cloud archetypes + Arcentry light, VPC/subnets, labelled arrows, sim threshold/format/scale bindings; `e2e/sample.spec.ts` covers live data, JSON/CSV and read-only embed; `sample.webgpu.spec.ts` covers PNG + deterministic screenshot (0.2 threshold / 1% tolerance; first reference capture still required on a browser-capable runner, see Studio README) | ◐ (sample and tests implemented; visual reference capture pending) | S3 (#43) |
+| Three-tier sample and production e2e | Studio **New from sample** / import: `samples/three-tier-web-app.holodeck.json`, cloud archetypes + Arcentry light, VPC/subnets, labelled arrows, sim threshold/format/scale bindings; `e2e/sample.spec.ts` covers live data, JSON/CSV and read-only embed; `sample.webgpu.spec.ts` covers PNG + deterministic screenshot (engine 1x PNG export compared with committed darwin + linux baselines; 0.2 threshold / 25-pixel budget) | ✓ (sample, tests and visual baselines committed) | S3 (#43) |
 | Collaboration, access control, accounts, billing, notifications | — | — | — |
 
 ## M3 — flow engine (Node-RED-style)

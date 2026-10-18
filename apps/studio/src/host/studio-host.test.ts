@@ -4,7 +4,7 @@ import { withPart } from '../test-support';
 import { describe, expect, it } from 'vitest';
 import { usedIsoContributions } from '../documents/iso-scene';
 import { createIsoDocument } from '../documents/new-document';
-import { createStudioHost, hostDocumentProblems, requiresFor } from './studio-host';
+import { createStudioHost, documentRequires, hostDocumentProblems, requiresFor } from './studio-host';
 
 describe('studio host', () => {
   it('registers the iso engine and installs its package through the manifest', async () => {
@@ -64,5 +64,17 @@ describe('studio host', () => {
     scene = withPart(scene, host.registry, 'valve').scene;
     expect(requiresFor(host, usedIsoContributions(scene))).toEqual({ 'holodeck.iso': '^1.0' });
     expect(requiresFor(host, [[HOLODECK_KINDS.isoPart, 'not-installed']])).toEqual({});
+  });
+
+  it('documentRequires adds the packages of the connections providers (holodeck#172)', async () => {
+    const host = await createStudioHost();
+    const scene = withPart(createIsoDocument().body, host.registry, 'tank').scene;
+    expect(documentRequires(host, scene, [{ provider: 'aws.cloudwatch' }, { provider: 'aws.cloudwatch' }, { provider: 'holodeck.sim' }, { provider: 'nope' }])).toEqual({
+      'holodeck.iso': '^1.0',
+      'holodeck.provider-aws': '^0.1',
+      'holodeck.sim': '^1.0',
+    });
+    expect(documentRequires(host, createIsoDocument().body, [{ provider: 'aws.cloudwatch' }])).toEqual({ 'holodeck.provider-aws': '^0.1' });
+    expect(documentRequires(host, scene)).toEqual({ 'holodeck.iso': '^1.0' });
   });
 });

@@ -61,7 +61,17 @@ test('sample visual baseline and PNG download', async ({ page }, testInfo) => {
   // produce compositor screenshots of this scene within minutes, while the
   // export path renders fine. Playwright image-compares PNG snapshots with the
   // tolerances below. Update per platform with --update-snapshots (README).
-  expect(bytes).toMatchSnapshot('three-tier-web-app@1x.png', { threshold: 0.2, maxDiffPixelRatio: 0.01 });
+  //
+  // Tolerance (holodeck#176): at most 25 differing pixels (~0.01% of the
+  // 508x476 export) instead of the old 1% ratio (~2.4k pixels), which could
+  // hide a lost threshold tint or a missing part. Measured: the offscreen
+  // export is deterministic; three consecutive local darwin runs matched the
+  // baseline with maxDiffPixels 0 (threshold 0.2 already absorbs per-pixel
+  // antialiasing drift). The small non-zero budget only covers GPU/driver
+  // rounding on the SwiftShader linux CI; a real regression changes hundreds
+  // of pixels. If linux CI flakes, raise this number (not the ratio) and
+  // record the observed diff count here.
+  expect(bytes).toMatchSnapshot('three-tier-web-app@1x.png', { threshold: 0.2, maxDiffPixels: 25 });
   expect(failedAssets).toEqual([]);
 
 });

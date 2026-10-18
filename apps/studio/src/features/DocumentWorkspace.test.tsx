@@ -316,6 +316,22 @@ describe('connections and undo', () => {
   });
 });
 
+// holodeck#172: requires covers connection providers, not just placed parts.
+describe('requires from connections', () => {
+  it('keeps the provider package on a canvas edit and drops it when the connection is removed', async () => {
+    const doc = tankDoc();
+    doc.connections = [{ id: 'plant', provider: 'holodeck.sim' }];
+    await store.create(doc);
+    await openWorkspace(doc);
+    act(() => editor.props!.onChange({ ...editor.props!.scene }));
+    await waitFor(async () => expect((await store.get('p'))?.document.requires).toEqual({ 'holodeck.iso': '^1.0', 'holodeck.sim': '^1.0' }));
+
+    fireEvent.click(screen.getByRole('tab', { name: /Connections/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove connection plant' }));
+    await waitFor(async () => expect((await store.get('p'))?.document.requires).toEqual({ 'holodeck.iso': '^1.0' }));
+  });
+});
+
 describe('export commands (holodeck#42)', () => {
   /** Captures `downloadBlob` (object URL + anchor click) without a real download. */
   function captureDownloads() {

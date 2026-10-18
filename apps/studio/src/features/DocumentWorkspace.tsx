@@ -1,11 +1,11 @@
-import { HOLODECK_KINDS, type HolodeckDocument, type ProviderConnection } from '@holodeck/sdk';
+import { HOLODECK_KINDS, type HolodeckDocument, type HolodeckHost, type ProviderConnection } from '@holodeck/sdk';
 import { ISO_ENGINE_ID, ProcessEditor, type IsoSceneFile, type ProcessEditorHandle } from '@holodeck/editor-2.5d-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useBlocker, useNavigate } from '@tanstack/react-router';
 import { useSelector } from '@tanstack/react-store';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { StudioCamera } from '../documents/db';
-import { libraryDropPoint, usedIsoContributions } from '../documents/iso-scene';
+import { libraryDropPoint } from '../documents/iso-scene';
 import { documentKeys, useDocument, useDocumentCamera, useSaveCamera } from '../documents/queries';
 import { withDocumentName } from '../documents/document-ops';
 import type { VersionedDocument } from '../documents/store';
@@ -13,7 +13,7 @@ import { DocumentWriter } from '../documents/writer';
 import { INSPECTOR_BOUNDS, INSPECTOR_WIDTH_KEY } from '../layout/panel-width.logic';
 import { SidePanel } from '../layout/SidePanel';
 import { notify, panelStore } from '../layout/ui-state';
-import { requiresFor } from '../host/studio-host';
+import { documentRequires } from '../host/studio-host';
 import { useStudio } from '../studio-context';
 import { LiveValues } from './LiveValues';
 import { activeDocumentStore } from './active-document';
@@ -32,6 +32,13 @@ import { describeSaveStatus } from './save-status';
 import { useStudioActions } from './use-studio-actions';
 
 type IsoDoc = HolodeckDocument<IsoSceneFile>;
+
+/** Recompute `requires` (parts + connection providers, holodeck#172) on a draft document, in place. */
+function withRequires(doc: IsoDoc, host: HolodeckHost): void {
+  const requires = documentRequires(host, doc.body, doc.connections);
+  if (Object.keys(requires).length) doc.requires = requires;
+  else delete doc.requires;
+}
 
 /** Route component for `/d/$docId`: loads the document, then hands it to the editor. */
 export function DocumentRoute({ docId }: { docId: string }) {
@@ -179,10 +186,7 @@ function DocumentWorkspace({
 
   const commitScene = useCallback(
     (scene: IsoSceneFile) => {
-      const requires = requiresFor(host, usedIsoContributions(scene));
       const next: IsoDoc = { ...docRef.current, body: scene };
-      if (Object.keys(requires).length) next.requires = requires;
-      else delete next.requires;
       const reconciled = reconcileConnections(scene, next.connections ?? [], removedConnections.current);
       if (reconciled.restored.length) {
         next.connections = reconciled.connections;
@@ -193,6 +197,7 @@ function DocumentWorkspace({
           details: ['Undo brought back bindings that use it. Its secrets were cleared when it was removed: enter them again if it needs any.'],
         });
       }
+      withRequires(next, host);
       docRef.current = next;
       setDoc(next);
       saveWorkingCopy();
@@ -312,6 +317,7 @@ function DocumentWorkspace({
       // not carried over (they would be ignored anyway, holodeck#166).
       if (previous && connectionFingerprint(previous) !== fingerprint) secrets.clear(docRef.current.id, connection.id);
       const next: IsoDoc = { ...docRef.current, connections };
+      withRequires(next, host);
       docRef.current = next;
       setDoc(next);
       saveWorkingCopy();
@@ -322,7 +328,7 @@ function DocumentWorkspace({
       }
       if (Object.keys(secretUpdates).length || (previous && connectionFingerprint(previous) !== fingerprint)) live.reconnect(connection.id);
     },
-    [live, saveWorkingCopy, secrets],
+    [host, live, saveWorkingCopy, secrets],
   );
 
   const removeConnection = useCallback(
@@ -332,12 +338,13 @@ function DocumentWorkspace({
       const connections = (docRef.current.connections ?? []).filter((c) => c.id !== id);
       const next: IsoDoc = { ...docRef.current, connections };
       if (!connections.length) delete next.connections;
+      withRequires(next, host);
       docRef.current = next;
       setDoc(next);
       saveWorkingCopy();
       secrets.clear(next.id, id);
     },
-    [saveWorkingCopy, secrets],
+    [host, saveWorkingCopy, secrets],
   );
 
   const onRename = useCallback(
