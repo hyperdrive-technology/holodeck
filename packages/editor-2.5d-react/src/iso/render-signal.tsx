@@ -18,9 +18,11 @@
  * minimum that guarantees a presented frame contains the revision.
  *
  * Holds are counted, not flagged, so any number of loaders can overlap.
- * HolodeckModel registers its suspended loader promise before rethrowing it,
- * so even a host's `Suspense fallback={null}` waits for GLBs. A fallback that
- * mounts `<PendingAsset />` additionally holds until its boundary commits.
+ * HolodeckModel wraps its suspending body in its own boundary and holds from
+ * its own (committed) mount until the body mounts, so even a host's
+ * `Suspense fallback={null}` waits for GLBs, and removing the model while it
+ * loads releases the hold. A fallback that mounts `<PendingAsset />` holds until
+ * its boundary commits.
  */
 import { useFrame, useThree } from '@react-three/fiber';
 import { createContext, useContext, useLayoutEffect, useRef, useState } from 'react';
@@ -58,20 +60,14 @@ export const RenderTrackerContext = createContext<RenderTracker | null>(null);
 // the cached loader promise instead, and deduplicate React retries and models
 // sharing that promise separately for each canvas.
 const pendingAssets = new WeakMap<RenderTracker, WeakSet<PromiseLike<unknown>>>();
-// Holds whose load succeeded but whose model has not mounted yet, by mount key.
-const awaitingMount = new WeakMap<RenderTracker, Map<string, () => void>>();
-/** Safety net: a model abandoned between load and mount must not hold forever. */
-export const MOUNT_HANDOFF_TIMEOUT_MS = 2000;
 
 /**
- * Holds `tracker` until `promise` settles. With `mountKey`, a successful load
- * keeps the hold until `confirmAssetMounted(tracker, mountKey)` (or the safety
- * timeout): the promise settles BEFORE React retries and commits the suspended
- * model, so releasing on settle lets the two-frame gate report a frame that
- * does not contain the model yet (seen in embed-render.test.ts, "null Suspense
- * fallback"). Failures release immediately; nothing will mount.
+ * Holds `tracker` until `promise` settles (success or failure). This covers
+ * the REQUEST only. It does not know whether anything will mount afterwards,
+ * so callers that can be removed or retried must pair it with a committed
+ * component hold: a `PendingAsset` fallback, or `useMountHold` (HolodeckModel).
  */
-export function holdPendingAsset(tracker: RenderTracker, promise: PromiseLike<unknown>, mountKey?: string): void {
+export function holdPendingAsset(tracker: RenderTracker, promise: PromiseLike<unknown>): void {
   let assets = pendingAssets.get(tracker);
   if (!assets) {
     assets = new WeakSet();
@@ -80,26 +76,48 @@ export function holdPendingAsset(tracker: RenderTracker, promise: PromiseLike<un
   if (assets.has(promise)) return;
   assets.add(promise);
   const release = tracker.hold();
-  if (mountKey === undefined) {
-    Promise.resolve(promise).then(release, release);
-    return;
-  }
-  Promise.resolve(promise).then(() => {
-    let waiting = awaitingMount.get(tracker);
-    if (!waiting) awaitingMount.set(tracker, (waiting = new Map()));
-    const previous = waiting.get(mountKey);
-    waiting.set(mountKey, () => { previous?.(); release(); });
-    setTimeout(() => confirmAssetMounted(tracker, mountKey), MOUNT_HANDOFF_TIMEOUT_MS);
-  }, release);
+  Promise.resolve(promise).then(release, release);
 }
 
-/** The model for `mountKey` is committed: release holds waiting on its mount. */
-export function confirmAssetMounted(tracker: RenderTracker, mountKey: string): void {
-  const waiting = awaitingMount.get(tracker);
-  const release = waiting?.get(mountKey);
-  if (!release) return;
-  waiting!.delete(mountKey);
-  release();
+/**
+ * How long a mounted-but-not-yet-loaded model may hold before we warn. It is a
+ * diagnostic only: the hold is NOT released (holodeck#63) because reporting
+ * ready without the model would be a lie. A model that is removed or fails
+ * releases through its own unmount instead (holodeck#58).
+ */
+export const MOUNT_WARN_MS = 15_000;
+
+/**
+ * Holds `tracker` until the returned function is called, warning once if that
+ * takes longer than `MOUNT_WARN_MS`. Idempotent. Plain function (no React) so
+ * the timing is unit-tested; `useMountHold` ties it to a component lifecycle.
+ */
+export function holdUntilMounted(tracker: RenderTracker, label: string, warn: (message: string) => void = console.warn): () => void {
+  const release = tracker.hold();
+  const timer = setTimeout(
+    () => warn(`holodeck: ${label} is still not mounted after ${MOUNT_WARN_MS / 1000}s; the canvas stays not-ready until it loads or is removed`),
+    MOUNT_WARN_MS,
+  );
+  return () => {
+    clearTimeout(timer);
+    release();
+  };
+}
+
+/**
+ * Holds the rendered signal from the commit of the calling component until
+ * `mountedKey === key` (its content committed) or the component unmounts.
+ * The caller must itself sit OUTSIDE the Suspense boundary it waits on: a
+ * component whose child suspends commits its own effects at once, while a
+ * suspending component never does. That is what lets removal during a load
+ * (or a failed load, which unmounts through the error boundary) release.
+ */
+export function useMountHold(key: string, mountedKey: string | null): void {
+  const tracker = useContext(RenderTrackerContext);
+  useLayoutEffect(
+    () => (tracker && mountedKey !== key ? holdUntilMounted(tracker, key) : undefined),
+    [tracker, key, mountedKey],
+  );
 }
 
 /** Holds the rendered signal while `active` (inside an IsoCanvas). */

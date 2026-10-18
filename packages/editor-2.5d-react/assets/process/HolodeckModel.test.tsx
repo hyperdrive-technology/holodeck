@@ -2,8 +2,8 @@ import { Suspense } from 'react';
 import { renderToString } from 'react-dom/server';
 import { Group } from 'three';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { confirmAssetMounted, createRenderTracker, RenderTrackerContext, type RenderTracker } from '../../src/iso/render-signal';
-import { HolodeckModel } from './HolodeckModel';
+import { createRenderTracker, RenderTrackerContext, type RenderTracker } from '../../src/iso/render-signal';
+import { HolodeckModel, useTrackedGLTF } from './HolodeckModel';
 
 const { load } = vi.hoisted(() => ({ load: vi.fn() }));
 vi.mock('@react-three/fiber', () => ({ useLoader: load }));
@@ -19,7 +19,25 @@ function renderModel(tracker: RenderTracker | null) {
   );
 }
 
-describe('HolodeckModel loading holds', () => {
+function Reader({ holdRequest }: { holdRequest?: boolean }) {
+  useTrackedGLTF('/slow.glb', holdRequest === undefined ? {} : { holdRequest });
+  return null;
+}
+
+function renderReader(tracker: RenderTracker, holdRequest?: boolean) {
+  return renderToString(
+    <RenderTrackerContext.Provider value={tracker}>
+      <Suspense fallback={null}>
+        <Reader holdRequest={holdRequest} />
+      </Suspense>
+    </RenderTrackerContext.Provider>,
+  );
+}
+
+// HolodeckModel's own hold (a committed wrapper, released on unmount) needs
+// real effects, so it is covered in a browser: embed-render.test.ts
+// (holodeck#58 removal during load, null-fallback wait).
+describe('useTrackedGLTF request holds', () => {
   it('registers before suspension even when no component effects can mount', async () => {
     const tracker = createRenderTracker();
     let finish!: () => void;
@@ -27,18 +45,26 @@ describe('HolodeckModel loading holds', () => {
     load.mockImplementation(() => { throw pending; });
     // Server rendering commits no effects: the hold must be registered by the
     // load hook itself, before a null fallback can be returned.
-    renderModel(tracker);
+    renderReader(tracker);
     expect(tracker.pending).toBe(1);
-    renderModel(tracker);
+    renderReader(tracker);
     expect(tracker.pending).toBe(1);
     finish();
     await pending;
-    // Loaded but not committed yet: the hold survives until the model mounts.
-    expect(tracker.pending).toBe(1);
-    confirmAssetMounted(tracker, '/slow.glb');
     expect(tracker.pending).toBe(0);
   });
 
+  it('holdRequest: false leaves the hold to a committed component (holodeck#58)', async () => {
+    const tracker = createRenderTracker();
+    const pending = Promise.resolve();
+    load.mockImplementation(() => { throw pending; });
+    renderReader(tracker, false);
+    expect(tracker.pending).toBe(0);
+    await pending;
+  });
+});
+
+describe('HolodeckModel loading holds', () => {
   it('keeps normal Suspense behavior outside IsoCanvas', async () => {
     const pending = Promise.resolve();
     load.mockImplementation(() => { throw pending; });

@@ -1,6 +1,6 @@
-import { Component, useContext, useLayoutEffect, type ReactNode } from 'react';
+import { Component, useContext, type ReactNode } from 'react';
 import { SRGBColorSpace, TextureLoader, type Texture } from 'three';
-import { confirmAssetMounted, holdPendingAsset, RenderTrackerContext } from '../iso/render-signal';
+import { holdPendingAsset, RenderTrackerContext } from '../iso/render-signal';
 import { assetUrlProblem } from './validate';
 
 type TextureEntry =
@@ -64,10 +64,6 @@ export function resetTextureCache(): void {
  */
 export function useTrackedTexture(url: string): Texture | null {
   const tracker = useContext(RenderTrackerContext);
-  // Runs only once a render commits, i.e. after the load settled: releases the hold below.
-  useLayoutEffect(() => {
-    if (tracker) confirmAssetMounted(tracker, `texture:${url}`);
-  }, [tracker, url]);
   // One choke point for every image URL, including ones that never went
   // through parseSceneFile (inspector edits, host metrics, pack definitions
   // built in code): a disallowed URL is never fetched (holodeck#96).
@@ -81,7 +77,7 @@ export function useTrackedTexture(url: string): Texture | null {
   }
   const entry = textureEntry(url);
   if (entry.status === 'pending') {
-    if (tracker) holdPendingAsset(tracker, entry.promise, `texture:${url}`);
+    if (tracker) holdPendingAsset(tracker, entry.promise); // the <PendingAsset/> fallback holds until the logo mounts
     throw entry.promise;
   }
   return entry.status === 'ready' ? entry.texture : null;

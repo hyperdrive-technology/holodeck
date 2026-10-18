@@ -13,6 +13,8 @@
  *   latePack     leave the pump unresolved until __embed.installPump()
  *   canvas       mount a standalone IsoCanvas for host-resize checks
  *   directModel  with canvas, load the public HolodeckModel in a null fallback
+ *   directModel=removable  as above; __embed.removeModel() unmounts the model
+ *                (holodeck#58: a removed model's load must not hold the signal)
  *   selected=id  show the inspector for this placement
  *
  * Exposes window.__embed.rendered: every revision `onRendered` reported.
@@ -60,18 +62,21 @@ const embed = {
   modelReady: false,
   renderedBeforeModel: false,
   installPump,
+  removeModel: () => {},
 };
 (window as unknown as { __embed: typeof embed }).__embed = embed;
 
 function Editor() {
   const [scene, setScene] = useState(initial);
+  const [modelShown, setModelShown] = useState(true);
+  embed.removeModel = () => setModelShown(false);
   if (params.has('canvas')) {
     return (
       <IsoCanvas registry={registry} showControls={false} onRendered={(revision) => {
         embed.rendered.push(revision);
         if (params.has('directModel') && !embed.modelReady) embed.renderedBeforeModel = true;
       }}>
-        {params.has('directModel') ? (
+        {params.has('directModel') && modelShown ? (
           <Suspense fallback={null}>
             <HolodeckModel url={pumpUrl} onReady={() => { embed.modelReady = true; }} />
           </Suspense>

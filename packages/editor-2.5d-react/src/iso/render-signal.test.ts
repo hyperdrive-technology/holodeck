@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { confirmAssetMounted, createRenderTracker, holdPendingAsset, MOUNT_HANDOFF_TIMEOUT_MS, nextRevision, RenderGate, renderState } from './render-signal';
+import { createRenderTracker, holdPendingAsset, holdUntilMounted, MOUNT_WARN_MS, nextRevision, RenderGate, renderState } from './render-signal';
 
 describe('createRenderTracker', () => {
   it('counts overlapping holds and releases each once', () => {
@@ -62,39 +62,45 @@ describe('holdPendingAsset', () => {
   });
 });
 
-describe('holdPendingAsset mount handoff', () => {
-  it('keeps the hold after a successful load until the model mounts', async () => {
+describe('holdUntilMounted (holodeck#58, #63)', () => {
+  it('holds until released, once, and releasing twice is a no-op', () => {
     const tracker = createRenderTracker();
-    const load = Promise.resolve();
-    holdPendingAsset(tracker, load, 'a.glb');
-    await load;
+    const release = holdUntilMounted(tracker, 'a.glb', () => {});
     expect(tracker.pending).toBe(1);
-    confirmAssetMounted(tracker, 'other.glb');
-    expect(tracker.pending).toBe(1);
-    confirmAssetMounted(tracker, 'a.glb');
-    expect(tracker.pending).toBe(0);
-    confirmAssetMounted(tracker, 'a.glb'); // idempotent
+    release();
+    release();
     expect(tracker.pending).toBe(0);
   });
 
-  it('releases a failed load immediately', async () => {
-    const tracker = createRenderTracker();
-    const load = Promise.reject(new Error('GLB failed'));
-    holdPendingAsset(tracker, load, 'a.glb');
-    await load.catch(() => undefined);
-    expect(tracker.pending).toBe(0);
-  });
-
-  it('releases an abandoned mount after the safety timeout', async () => {
+  it('never reports ready on its own: past the timeout it warns and keeps holding', () => {
     vi.useFakeTimers();
     try {
       const tracker = createRenderTracker();
-      const load = Promise.resolve();
-      holdPendingAsset(tracker, load, 'a.glb');
-      await load;
+      const warn = vi.fn();
+      const release = holdUntilMounted(tracker, 'a.glb', warn);
+      vi.advanceTimersByTime(MOUNT_WARN_MS - 1);
+      expect(warn).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]![0]).toContain('a.glb');
       expect(tracker.pending).toBe(1);
-      vi.advanceTimersByTime(MOUNT_HANDOFF_TIMEOUT_MS);
+      vi.advanceTimersByTime(MOUNT_WARN_MS * 10);
+      expect(tracker.pending).toBe(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      release(); // removal / mount still releases a long-held model
       expect(tracker.pending).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('release cancels the pending warning', () => {
+    vi.useFakeTimers();
+    try {
+      const warn = vi.fn();
+      holdUntilMounted(createRenderTracker(), 'a.glb', warn)();
+      vi.advanceTimersByTime(MOUNT_WARN_MS * 2);
+      expect(warn).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

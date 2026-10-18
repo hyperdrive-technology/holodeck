@@ -69,7 +69,7 @@ function DataModel({
   accent: string | undefined;
   animation: IsoPartProps['placement']['animation'];
 }) {
-  const gltf = useTrackedGLTF(def.model!);
+  const gltf = useTrackedGLTF(def.model!, { holdRequest: false }); // the <PendingAsset/> fallback holds
   const scale = partScale(def);
   // Measured on the cached, never-rendered source scene: placement-independent.
   const anchor = useMemo(() => logoAnchorFromModel(gltf.scene), [gltf]);
