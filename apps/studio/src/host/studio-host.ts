@@ -24,7 +24,9 @@ import {
   isoEngine,
   isoPackage,
   loadIsoDocument,
+  type IsoSceneFile,
 } from '@holodeck/editor-2.5d-react';
+import { usedIsoContributions } from '../documents/iso-scene';
 import { connectionConfigProblems, credentialInText } from '../connections/credentials';
 import { PROVIDER_PACKAGES } from './provider-packages';
 import { CLOUD_PACKAGE } from './cloud-package';
@@ -130,6 +132,23 @@ export function requiresFor(host: HolodeckHost, usedContributions: Iterable<read
     if (version) requires[pkg.manifest.id] = `^${version.major}.${version.minor}`;
   }
   return Object.fromEntries(Object.entries(requires).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+/**
+ * `requires` for a whole document: the parts its body places AND the
+ * providers its connections use (holodeck#172), so another host can
+ * install / version-check e.g. `holodeck.provider-aws` for an AWS connection.
+ */
+export function documentRequires(
+  host: HolodeckHost,
+  scene: IsoSceneFile,
+  connections: readonly { provider: string }[] = [],
+): Record<string, string> {
+  const used = [
+    ...usedIsoContributions(scene),
+    ...[...new Set(connections.map((c) => c.provider))].map((id) => [HOLODECK_KINDS.provider, id] as const),
+  ];
+  return requiresFor(host, used);
 }
 
 /** Credential-looking binding sources in an iso body (`objects[].bindings[param].source`). */

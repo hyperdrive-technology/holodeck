@@ -1,5 +1,5 @@
 import type { ConnectionState, HolodeckHost, HolodeckProvider, ProviderHub, SignalBinding } from '@holodeck/sdk';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { connectionFingerprint } from '../../connections/fingerprint';
 import { SessionSecretStore } from '../../connections/secrets';
@@ -275,6 +275,28 @@ describe('<BindingDialog />', () => {
     expect(onSave).toHaveBeenCalledWith({ connection: 'api', source: '/pumps/0/rpm' });
     expect(browse).toHaveBeenCalledWith(undefined);
     expect(browse).toHaveBeenCalledWith('/pumps');
+  });
+
+  // holodeck#173: a slow response must not overwrite newer navigation.
+  it('ignores a stale browse response that arrives after the user navigated elsewhere', async () => {
+    let releaseSlow: (nodes: Array<{ path: string; label: string; source?: string }>) => void = () => undefined;
+    const browse = vi.fn((path?: string) => {
+      if (path === '/pumps/slow') return new Promise<never>((resolve) => (releaseSlow = resolve as never));
+      if (path === '/pumps') return Promise.resolve([{ path: '/pumps/slow', label: 'slow', hasChildren: true }]);
+      return Promise.resolve([{ path: '/pumps', label: 'pumps', hasChildren: true }]);
+    });
+    open(undefined, { session: () => ({ browse }) } as unknown as ProviderHub);
+    pick('Connection', 'api');
+    fireEvent.click(screen.getByRole('button', { name: /Browse/ }));
+    fireEvent.click(await screen.findByText('pumps'));
+    fireEvent.click(await screen.findByText('slow'));
+    // While /pumps/slow is in flight, go Up to the root listing.
+    fireEvent.click(screen.getByRole('button', { name: /Up/ }));
+    await screen.findByText('pumps');
+    await act(async () => releaseSlow([{ path: '/pumps/slow/x', label: 'stale-node', source: '/x' }]));
+    expect(screen.queryByText('stale-node')).toBeNull();
+    expect(screen.getByText('pumps')).toBeInTheDocument();
+    expect(within(screen.getByTestId('source-browser')).queryByText('/pumps/slow')).toBeNull();
   });
 
   it('removes an existing binding', () => {

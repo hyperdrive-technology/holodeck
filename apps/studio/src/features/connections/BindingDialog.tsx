@@ -1,6 +1,6 @@
 import { type HolodeckProvider, type ProviderConnection, type ProviderHub, type SignalBinding, type SignalNode } from '@holodeck/sdk';
 import { ChevronLeftIcon, ChevronRightIcon, FolderSearchIcon } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -134,21 +134,30 @@ function SourceBrowser({ hub, connectionId, onPick }: { hub: ProviderHub | undef
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Only the newest request may apply its result (holodeck#173): a slow
+  // response that lands after the user navigated elsewhere is dropped.
+  const latest = useRef(0);
+  useEffect(() => () => void (latest.current = -1), []); // unmount: drop anything in flight
+
   const load = async (stack: string[]) => {
+    const request = ++latest.current;
     const session = hub?.session(connectionId);
     if (!session?.browse) {
       setError('The connection is not open yet (check its status and secrets).');
+      setLoading(false);
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      setNodes(await session.browse(stack.at(-1)));
+      const result = await session.browse(stack.at(-1));
+      if (request !== latest.current) return;
+      setNodes(result);
       setPath(stack);
     } catch (e) {
-      setError(messageOf(e));
+      if (request === latest.current) setError(messageOf(e));
     } finally {
-      setLoading(false);
+      if (request === latest.current) setLoading(false);
     }
   };
 
