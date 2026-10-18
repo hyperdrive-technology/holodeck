@@ -326,7 +326,7 @@ answer of a timed-out write, because timing out does not cancel it and it may ha
 (a write in flight when that answer arrives is not trusted either). The same goes for a write of a replaced (or
 closed) deployment that answers after a new deployment's `signal.out` to the same target, on the same bridge, has
 acknowledged its value: the new one re-asserts its value. The fault clears only on an acknowledged write.
-A timed-out write that never answers cannot be reconciled: that would need remote sequencing. One bridge subscription serves every `signal.in` that reads the same signal. Without a
+A timed-out write that never answers cannot be detected without remote sequencing, so the writer does one best-effort repair: it re-sends the desired value once, `writeTimeoutMs` after the timeout (unless a write started after that point was already acknowledged). That fixes an orphan that lands inside the window; one that lands later still can leave a stale value with no fault (residual limit, holodeck#75). One bridge subscription serves every `signal.in` that reads the same signal. Without a
 bridge, `signal.in` reads `null`/`bad`, `signal.out` is faulted, and deploy warns `NO_SIGNAL_BRIDGE`.
 
 The bridge depends on a document's hub, but the provider is installed per host, so a host passes a factory. The

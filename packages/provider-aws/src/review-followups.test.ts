@@ -50,12 +50,31 @@ describe('#145 long periods never overflow the timer', () => {
     const c = collector();
     h.session.subscribe([`${CPU}&period=2592000`], c.onSamples);
     await waitFor(() => c.latest(`${CPU}&period=2592000`) !== undefined);
-    await new Promise((r) => setTimeout(r, 200));
+    // No real-time sleep here: the "no tight loop" behaviour is asserted over a
+    // virtual 30 days in the fake-clock test below (#156).
     expect(h.fake.callsTo('GetMetricData').length).toBe(1);
     expect(delays.length).toBeGreaterThan(0);
     expect(delays.every((d) => d <= MAX_TIMER_DELAY_MS)).toBe(true);
     // The poll interval is capped at a day.
     expect(delays).toContain(MAX_POLL_INTERVAL_MS);
+  });
+
+  it('a 30-day period polls once per capped day over a 30-day virtual window, never in a tight loop (fake clock)', async () => {
+    const h = await open();
+    const source = `${CPU}&period=2592000`;
+    h.session.subscribe([source], () => {});
+    await waitFor(() => h.fake.callsTo('GetMetricData').length === 1);
+    // Nothing else is due without the clock moving: a tight loop would show up here.
+    await Promise.resolve();
+    expect(h.timers.pending()).toEqual([MAX_POLL_INTERVAL_MS]);
+    const days = 30;
+    for (let day = 1; day <= days; day += 1) {
+      await h.timers.advance(MAX_POLL_INTERVAL_MS);
+      await waitFor(() => h.fake.callsTo('GetMetricData').length === day + 1);
+      // Exactly one timer re-armed, never shorter than the capped interval.
+      expect(h.timers.pending()).toEqual([MAX_POLL_INTERVAL_MS]);
+    }
+    expect(h.fake.callsTo('GetMetricData').length).toBe(days + 1);
   });
 
   it('every scheduled delay is within the setTimeout limit, at the boundary periods', async () => {
