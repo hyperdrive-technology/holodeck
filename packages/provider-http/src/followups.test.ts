@@ -272,3 +272,31 @@ describe('review of #188 (round 2)', () => {
     }
   });
 });
+
+describe('#192 payload eviction does not defeat request ordering', () => {
+  it('a slow older poll is still dropped after 64+ other endpoints evicted the newer payload', async () => {
+    let calls = 0;
+    let releasePoll!: () => void;
+    const pollHeld = new Promise<void>((resolve) => (releasePoll = resolve));
+    server.route('GET', '/s', async (_req, res) => {
+      const n = ++calls;
+      if (n === 1) await pollHeld; // the poll: held until the cache has churned
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ v: n === 1 ? 'poll' : 'read' }));
+    });
+    server.route('GET', '/e/*', (_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ v: 'x' }));
+    });
+    const h = await open({ url: `${server.url}/s`, intervalMs: 60_000 });
+    const a = collector();
+    h.session.subscribe(['/v'], a.onSamples);
+    await sleep(30); // poll request is on the wire
+    expect((await h.session.read!(['/v']))[0]?.value).toBe('read'); // newer, completed
+    // 70 other endpoints push /s out of the 64-entry payload cache.
+    for (let i = 0; i < 70; i += 1) await h.session.read!([`/e/${i}#/v`]);
+    releasePoll(); // the old poll answers now
+    await sleep(300);
+    expect(a.batches.flat().map((s) => s.value)).not.toContain('poll');
+    expect(a.count()).toBe(0); // the stale poll is dropped: nothing newer to hand back, nothing reverted
+    expect((await h.session.read!(['/v']))[0]?.value).toBe('read');
+  });
+});

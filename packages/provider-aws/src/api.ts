@@ -98,6 +98,9 @@ export function packBatches(metrics: readonly MetricSource[], configuredLookback
  * Newest datapoint of every metric (keyed by `MetricSource.key`). A metric
  * with no datapoint in its window is `null` / `uncertain` (no data is normal
  * for idle resources); a per-metric `Forbidden` / `InternalError` is `bad`.
+ * (Deliberate asymmetry, holodeck#155: `fetchHistory` below THROWS for the same
+ * per-metric statuses, since a series cannot carry per-sample quality and an
+ * empty one would read as "no data". See the README.)
  */
 export async function fetchLatest(
   client: CloudWatchClient,

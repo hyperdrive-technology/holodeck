@@ -309,6 +309,11 @@ async function openSession(
   // (subscription, read, browse) brought it in (holodeck#89 review).
   const payloads = new Map<string, { json: unknown; ts: number; seq: number }>();
   const sampleCache = new Map<string, { sample: Sample; seq: number }>();
+  // Newest request sequence accepted per endpoint. Unlike `payloads` this
+  // holds only a number, so it can outlive payload eviction (#192): without
+  // it, 64 other endpoints could evict a URL's newest payload and a slow
+  // older response would then be accepted and revert subscribers.
+  const highWater = new Map<string, number>();
   let seq = 0;
   const subscriptions = new Set<() => void>();
   let status: ProviderStatus = { state: 'live', message: 'idle', since: ctx.now() };
@@ -368,9 +373,16 @@ async function openSession(
     // lands late must not displace a newer payload (#97).
     const record = { json, ts, seq: requestSeq ?? ++seq };
     const existing = payloads.get(href);
-    if (!existing || existing.seq <= record.seq) setBounded(payloads, href, record, MAX_CACHED_PAYLOADS);
-    // Stale: hand back the newer payload so subscribers still get the current state.
-    return existing !== undefined && existing.seq > record.seq ? existing : record;
+    const newest = Math.max(existing?.seq ?? 0, highWater.get(href) ?? 0);
+    if (record.seq < newest) {
+      // Stale: hand back the newer payload so subscribers still get the
+      // current state. If it was evicted there is nothing to hand back
+      // (undefined): callers drop the response / fall back to the sample cache.
+      return existing !== undefined && existing.seq > record.seq ? existing : undefined;
+    }
+    setBounded(highWater, href, record.seq, MAX_CACHED_SAMPLES);
+    setBounded(payloads, href, record, MAX_CACHED_PAYLOADS);
+    return record;
   };
 
   /**
@@ -394,7 +406,9 @@ async function openSession(
   const onPayload = (href: string, json: unknown, receivedAt: number, requestSeq?: number) => {
     if (closed) return;
     // If a newer request already answered, this returns that payload, not this one.
-    const { json: current, ts, seq: from } = storePayload(href, json, receivedAt, requestSeq);
+    const stored = storePayload(href, json, receivedAt, requestSeq);
+    if (!stored) return; // older than a newer payload that has since been evicted (#192)
+    const { json: current, ts, seq: from } = stored;
     const entry = channels.get(href);
     if (!entry) return;
     for (const sub of [...entry.subs]) {
@@ -549,6 +563,13 @@ async function openSession(
             const json = await fetchJson(requestDeps(), new URL(href));
             // Same sample builder as subscriptions: `timestamp` selector, sequence number.
             const record = storePayload(href, json, ctx.now(), requestSeq);
+            if (!record) {
+              // A newer payload was already accepted and evicted: answer from the sample cache (#192).
+              for (const parsed of list) {
+                out.push(currentSample(parsed, href, false) ?? { source: parsed.source, value: null, ts: ctx.now(), quality: 'uncertain' });
+              }
+              return;
+            }
             const samples = list.map((parsed) => sampleFor(parsed, record.json, record.ts, false) as Sample);
             remember(samples, record.seq);
             out.push(...samples);

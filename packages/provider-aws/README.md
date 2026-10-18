@@ -65,6 +65,10 @@ alarm:<region>/<AlarmName>
 - A metric with no datapoint in the look-back window gives `{ value: null, quality: 'uncertain' }` (idle resources
   often publish nothing). A per-metric `Forbidden`, an alarm that does not exist, or an unparsable source gives
   `quality: 'bad'`.
+- **Live reads and history differ on per-metric errors, on purpose.** A live read/subscription turns a per-metric
+  `Forbidden` or `InternalError` result into a `bad` sample for that source only (other sources in the batch still
+  deliver). `history` has no per-sample quality to carry the failure, so it rejects with an error
+  (`auth` for `Forbidden`, `aws` for `InternalError`) rather than return an empty series that looks like "no data".
 
 ## Polling, batching and rate limits
 

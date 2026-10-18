@@ -209,9 +209,19 @@ interface Deployment {
  */
 const liveWriters = new WeakMap<SignalBridge, Map<string, Set<SignalWriter>>>();
 
-function writersOf(bridge: SignalBridge, key: string): Set<SignalWriter> {
+/** Test hook (#83): how many targets of `bridge` still have a registry entry. */
+export function liveWriterTargetCount(bridge: SignalBridge): number {
+  return liveWriters.get(bridge)?.size ?? 0;
+}
+
+function registryOf(bridge: SignalBridge): Map<string, Set<SignalWriter>> {
   let targets = liveWriters.get(bridge);
   if (!targets) liveWriters.set(bridge, (targets = new Map()));
+  return targets;
+}
+
+function writersOf(bridge: SignalBridge, key: string): Set<SignalWriter> {
+  const targets = registryOf(bridge);
   let writers = targets.get(key);
   if (!writers) targets.set(key, (writers = new Set()));
   return writers;
@@ -234,8 +244,14 @@ function writersOf(bridge: SignalBridge, key: string): Set<SignalWriter> {
  *   last acknowledged write and re-asserts the current value; a write that
  *   was in flight while an orphan answered is not remembered either (review
  *   P2: "reverse completion order"). An orphan that never answers cannot be
- *   reconciled from here — that would need remote sequencing/cancellation,
- *   which the `SignalBridge` contract does not offer;
+ *   detected from here — that would need remote sequencing/cancellation,
+ *   which the `SignalBridge` contract does not offer. Best effort instead
+ *   (issue #75): once a write has timed out, the desired value is re-sent
+ *   ONCE, no sooner than `timeoutMs` after the timeout (`orphanedAt`), unless a
+ *   write that started after that point was already acknowledged. This
+ *   corrects an orphan that lands within that window; one that lands even
+ *   later (or after the re-assert) can still leave a stale value — the
+ *   residual limit, documented in the README;
  * - `hold()` (the run's input reading stopped being `good`) drops the pending
  *   value, so nothing computed from data that is now in doubt is retried, and
  *   forgets the last acknowledged write, so the value is sent again once the
@@ -263,9 +279,15 @@ class SignalWriter {
    */
   private epoch = 0;
   private failedAt: number | undefined;
+  /** When the latest write timed out without an answer; cleared once a write started `timeoutMs` later is acknowledged, or the orphan answers (#75). */
+  private orphanedAt: number | undefined;
+  /** When the acknowledged `written` write started. */
+  private writtenStartedAt = 0;
   private retired = false;
   /** The live writers of this writer's target (shared with every deployment using `bridge`). */
   private readonly peers: Set<SignalWriter>;
+  private readonly key: string;
+  private readonly registry: Map<string, Set<SignalWriter>>;
 
   constructor(
     private readonly ref: FlowSignalRef,
@@ -276,7 +298,9 @@ class SignalWriter {
     private readonly timeoutMs: number,
     private readonly log: ProviderContext['log'],
   ) {
-    this.peers = writersOf(bridge, pairKey(ref.connection, ref.source));
+    this.key = pairKey(ref.connection, ref.source);
+    this.registry = registryOf(bridge);
+    this.peers = writersOf(bridge, this.key);
     this.peers.add(this);
   }
 
@@ -297,7 +321,18 @@ class SignalWriter {
     if (this.attempt) {
       if (this.now() - this.attempt.startedAt < this.timeoutMs) return;
       this.attempt = undefined;
+      this.orphanedAt = this.now();
       this.fail(new Error(`no answer within ${this.timeoutMs} ms`));
+    }
+    // One best-effort re-assert after a never-answered write (#75): the acknowledged
+    // write started before the orphan's window closed, so the orphan may have landed after it.
+    if (
+      this.orphanedAt !== undefined &&
+      this.written !== undefined &&
+      this.now() - this.orphanedAt >= this.timeoutMs &&
+      this.writtenStartedAt < this.orphanedAt + this.timeoutMs
+    ) {
+      this.forget();
     }
     if (this.written !== undefined && Object.is(this.desired, this.written)) {
       this.clearFault();
@@ -325,6 +360,10 @@ class SignalWriter {
   retire(): void {
     this.retired = true;
     this.peers.delete(this);
+    // Prune the now-empty per-target set, or a long-lived shared bridge grows
+    // one registry entry per distinct target ever written (#83). `Map.get`
+    // returns undefined (Go: the zero value + ok=false) when already pruned.
+    if (this.peers.size === 0 && this.registry.get(this.key) === this.peers) this.registry.delete(this.key);
   }
 
   /** Another (retired) writer's write to our target just answered: what the target holds is unknown again. */
@@ -339,7 +378,9 @@ class SignalWriter {
       // Our deployment is gone, so our own state no longer matters — but this
       // write may have landed after a live writer's acknowledged one (either
       // answer is ambiguous). Copy the set: invalidate() may write synchronously.
-      for (const peer of [...this.peers]) peer.invalidate();
+      // Look the set up now, not via `this.peers`: retire() prunes an empty set
+      // from the registry, and a writer created after that lives in a new one (#83).
+      for (const peer of [...(this.registry.get(this.key) ?? [])]) peer.invalidate();
       return;
     }
     if (this.attempt?.token !== token) {
@@ -347,17 +388,23 @@ class SignalWriter {
       // acknowledged since. Whatever the answer, it may just have landed on
       // top of that newer value, so the target is unknown again: forget and
       // re-assert the current value (subject to the retry wait, if faulted).
+      this.orphanedAt = undefined; // it answered: no longer "never answers" (#75)
       this.forget();
       this.pump();
       return;
     }
     const stale = this.attempt.epoch !== this.epoch;
+    const startedAt = this.attempt.startedAt;
     this.attempt = undefined;
     if (error !== undefined) {
       this.fail(error);
       return;
     }
-    if (!stale) this.written = value;
+    if (!stale) {
+      this.written = value;
+      this.writtenStartedAt = startedAt;
+      if (this.orphanedAt !== undefined && startedAt >= this.orphanedAt + this.timeoutMs) this.orphanedAt = undefined;
+    }
     this.clearFault();
     this.pump();
   }

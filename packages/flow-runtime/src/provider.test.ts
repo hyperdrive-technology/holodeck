@@ -11,7 +11,7 @@ import {
 } from '@holodeck/sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMemorySignalBridge, type SignalBridge } from './bridge';
-import { createLocalFlowProvider, LOCAL_FLOW_PROVIDER_ID, type LocalFlowProviderOptions } from './provider';
+import { createLocalFlowProvider, liveWriterTargetCount, LOCAL_FLOW_PROVIDER_ID, type LocalFlowProviderOptions } from './provider';
 import type { FlowBlockDefinition } from './block';
 import { clock, flowDoc, graph, node, registryWith, TEST_BLOCKS, wire } from './test-helpers';
 import type { FlowValue } from './values';
@@ -569,6 +569,69 @@ describe('writes', () => {
     manual.tick();
     manual.tick();
     expect(pending).toHaveLength(3); // settled: nothing more
+  });
+
+  it('a write that never answers but lands late is re-asserted once after the timeout window (issue #75)', async () => {
+    let remote: FlowValue = null;
+    const pending: Array<{ value: FlowValue; resolve: () => void; land: () => void }> = [];
+    const bridge = createMemorySignalBridge({
+      write: (_c, _s, value) =>
+        new Promise<void>((resolve) =>
+          pending.push({
+            value,
+            land: () => {
+              remote = value; // applied remotely without ever answering
+            },
+            resolve: () => {
+              remote = value;
+              resolve();
+            },
+          }),
+        ),
+    });
+    const { session, manual, time } = await connect({ signals: bridge, writeTimeoutMs: 1000, writeRetryMs: 0 });
+    const doc = flowDoc(
+      graph([node('i', 'signal.in', { connection: 'plc', source: 'a' }), node('o', 'signal.out', { connection: 'plc', source: 'b' })], [wire('w', 'i.value', 'o.value')]),
+      [plc],
+    );
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    bridge.set('plc', 'a', 1);
+    await session.deploy!(doc);
+    time.advance(1000);
+    bridge.set('plc', 'a', 2);
+    manual.tick(); // 1 times out (never answers); 2 is sent
+    pending[1]!.resolve();
+    await settle();
+    pending[0]!.land(); // the orphan lands on top of 2, silently
+    expect(remote).toBe(1);
+    manual.tick();
+    expect(pending.map((p) => p.value)).toEqual([1, 2]); // inside the window: nothing yet
+    time.advance(1000);
+    manual.tick(); // window over: 2 is re-asserted, once
+    expect(pending.map((p) => p.value)).toEqual([1, 2, 2]);
+    pending[2]!.resolve();
+    await settle();
+    expect(remote).toBe(2);
+    for (let i = 0; i < 4; i++) {
+      time.advance(1000);
+      manual.tick();
+      await settle();
+    }
+    expect(pending).toHaveLength(3); // only once
+  });
+
+  it('the signal.out registry for a bridge is empty after its sessions close (issue #83)', async () => {
+    const bridge = createMemorySignalBridge();
+    bridge.set('plc', 'a', true);
+    const { session } = await connect({ signals: bridge });
+    await session.deploy!(flowDoc(signalBody(), [plc]));
+    expect(liveWriterTargetCount(bridge)).toBe(1);
+    await session.deploy!(flowDoc(graph([node('one', 'flow.const', { value: 1 })], []), [plc])); // replaced: target gone
+    expect(liveWriterTargetCount(bridge)).toBe(0);
+    await session.deploy!(flowDoc(signalBody(), [plc]));
+    expect(liveWriterTargetCount(bridge)).toBe(1);
+    await session.close();
+    expect(liveWriterTargetCount(bridge)).toBe(0);
   });
 
   it('a timed-out write landing after a newer acknowledged one is corrected (GPT review P2: reverse completion order)', async () => {
