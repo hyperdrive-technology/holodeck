@@ -1,4 +1,4 @@
-import { withPart } from '../test-support';
+import { CREDENTIAL_CASES, withPart } from '../test-support';
 import { HOLODECK_DOCUMENT_FORMAT, type HolodeckHost } from '@holodeck/sdk';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createStudioHost } from '../host/studio-host';
@@ -58,6 +58,61 @@ describe('import / export', () => {
   it('accepts valid metadata timestamps', () => {
     const doc = { ...createIsoDocument('A', 'a'), metadata: { created: '2026-10-17T00:00:00.000Z', updated: '2026-10-17' } };
     expect(parseDocumentText(JSON.stringify(doc), host).ok).toBe(true);
+  });
+
+  // holodeck#101: secrets never travel in documents.
+  it('refuses a connection config that carries a provider secret', () => {
+    const doc = {
+      ...createIsoDocument('A', 'a'),
+      connections: [{ id: 'api', provider: 'holodeck.http', config: { url: 'http://localhost:1/x', token: 'leak' } }],
+    };
+    expect(problemsOf(JSON.stringify(doc)).join('\n')).toMatch(/connections\.api\.config: .*token/);
+  });
+
+  it('accepts connections without credentials, also for providers it does not have', () => {
+    const doc = {
+      ...createIsoDocument('A', 'a'),
+      connections: [
+        { id: 'sim', provider: 'holodeck.sim' },
+        { id: 'aws', provider: 'aws.cloudwatch', config: { region: 'eu-west-1', credentials: { type: 'static' } } },
+        { id: 'other', provider: 'acme.custom', config: { endpoint: 'https://x.test/feed' } },
+      ],
+    };
+    expect(parseDocumentText(JSON.stringify(doc), host).ok).toBe(true);
+  });
+
+  // holodeck#163 review (P1): every credential case is refused on import, for HTTP, AWS and unknown providers.
+  it.each(CREDENTIAL_CASES.map((c) => [c.name, c] as const))('import refuses %s', (_name, c) => {
+    const doc = { ...createIsoDocument('A', 'a'), connections: [{ id: 'c', provider: c.provider, config: c.config }] };
+    const problems = problemsOf(JSON.stringify(doc));
+    expect(problems.join('\n')).toContain('connections.c.config');
+    expect(problems.join('\n')).not.toContain('SECRET');
+  });
+
+  // holodeck#167 / #170: binding sources and connection labels are free text and are scanned too.
+  it('refuses credentials in a binding source or a connection label', () => {
+    const doc = createIsoDocument('A', 'a');
+    const body = { ...doc.body, objects: [{ id: 't', object: 'tank', x: 0, y: 0, bindings: { level: { connection: 'api', source: '/v1?token=SECRET#/level' } } }] };
+    const withSource = { ...doc, body, connections: [{ id: 'api', provider: 'holodeck.http', config: { url: 'https://x.test/a' } }] };
+    expect(problemsOf(JSON.stringify(withSource)).join('\n')).toContain('t.level');
+    const withLabel = { ...doc, connections: [{ id: 'api', provider: 'holodeck.sim', label: 'https://admin:SECRET@x.test' }] };
+    const problems = problemsOf(JSON.stringify(withLabel)).join('\n');
+    expect(problems).toContain('connections.api.label');
+    expect(problems).not.toContain('SECRET');
+  });
+
+  // Review of #163 @ 51da21b: parseDocumentText never throws, even on a 6,000-level config.
+  it('refuses a deeply nested connection config without throwing', () => {
+    let config = '"leaf"';
+    for (let i = 0; i < 6000; i++) config = `{"a":${config}}`;
+    const doc = createIsoDocument('A', 'a');
+    const text = `{"format":"holodeck.document.v1","id":"a","name":"A","engine":"holodeck.iso","connections":[{"id":"c","provider":"holodeck.http","config":${config}}],"body":${JSON.stringify(doc.body)}}`;
+    let result: ReturnType<typeof parseDocumentText> | undefined;
+    expect(() => {
+      result = parseDocumentText(text, host);
+    }).not.toThrow();
+    expect(result?.ok).toBe(false);
+    expect(result && !result.ok && result.problems.join('\n')).toContain('nested more than');
   });
 
   it('reports invalid JSON', () => {

@@ -35,7 +35,7 @@ export function AppShell() {
   const active = useSelector(activeDocumentStore);
   const { newDocument, importFiles } = useStudioActions();
   const [dropping, setDropping] = useState(false);
-  const { channel } = useStudio();
+  const { channel, secrets } = useStudio();
   const client = useQueryClient();
   // Another tab created, saved or deleted a document: refresh the list (the
   // open document handles its own id in DocumentWorkspace).
@@ -46,8 +46,11 @@ export function AppShell() {
         // Detail too, on saves as well as deletes: an inactive cached copy
         // would otherwise reopen at a stale revision (holodeck#117).
         void client.invalidateQueries({ queryKey: documentKeys.detail(change.id) });
+        // Deleted in another tab: drop this tab's secrets for it, so a document
+        // imported later under the same id never inherits them (holodeck#166).
+        if (change.type === 'deleted') secrets.clear(change.id);
       }),
-    [channel, client],
+    [channel, client, secrets],
   );
 
   return (

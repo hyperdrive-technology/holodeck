@@ -1,13 +1,18 @@
 import type { HolodeckHost } from '@holodeck/sdk';
 import { createContext, useContext, type ReactNode } from 'react';
 import type { DocumentChannel } from './documents/changes';
+import type { SessionSecretStore } from './connections/secrets';
 import type { DocumentStore } from './documents/store';
 
-/** What every studio screen needs: the Holodeck host (engines + packages), the document store, cross-tab change notices. */
+/**
+ * What every studio screen needs: the Holodeck host (engines + packages), the
+ * document store, cross-tab change notices, and this tab's connection secrets.
+ */
 export interface StudioServices {
   host: HolodeckHost;
   store: DocumentStore;
   channel: DocumentChannel;
+  secrets: SessionSecretStore;
 }
 
 const StudioContext = createContext<StudioServices | null>(null);

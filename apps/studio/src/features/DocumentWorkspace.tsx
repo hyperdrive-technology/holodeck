@@ -1,4 +1,4 @@
-import { HOLODECK_KINDS, type HolodeckDocument } from '@holodeck/sdk';
+import { HOLODECK_KINDS, type HolodeckDocument, type ProviderConnection } from '@holodeck/sdk';
 import { ISO_ENGINE_ID, ProcessEditor, type IsoSceneFile, type ProcessEditorHandle } from '@holodeck/editor-2.5d-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useBlocker, useNavigate } from '@tanstack/react-router';
@@ -21,6 +21,11 @@ import { ConflictDialog } from './ConflictDialog';
 import { inspectorActions, libraryAddActions } from './editor-commands';
 import { downloadBlob, downloadComponentsCsv, downloadDocument } from './file-io';
 import { imageFileName } from '../documents/io';
+import { reconcileConnections } from '../connections/bindings';
+import { connectionFingerprint } from '../connections/fingerprint';
+import { useConnectionHub } from '../connections/use-connection-hub';
+import { ConnectionsPanel } from './connections/ConnectionsPanel';
+import type { ConnectionSubmit } from './connections/ConnectionDialog';
 import { Inspector, type InspectorEdit } from './Inspector';
 import { describeSaveStatus } from './save-status';
 import { useStudioActions } from './use-studio-actions';
@@ -91,7 +96,7 @@ function DocumentWorkspace({
   /** Let the route drop this workspace (nothing here needs keeping). */
   onReleased: () => void;
 }) {
-  const { host, store, channel } = useStudio();
+  const { host, store, channel, secrets } = useStudio();
   const client = useQueryClient();
   const [doc, setDoc] = useState<IsoDoc>(initial.document as IsoDoc);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -168,12 +173,25 @@ function DocumentWorkspace({
   }, [writer]);
 
   /** Apply a new body: recompute `requires`, update the working copy, persist. */
+  /** Connections removed in this session, so an undo that brings back their bindings can restore them (holodeck#164). */
+  const removedConnections = useRef(new Map<string, ProviderConnection>());
+
   const commitScene = useCallback(
     (scene: IsoSceneFile) => {
       const requires = requiresFor(host, usedIsoContributions(scene));
       const next: IsoDoc = { ...docRef.current, body: scene };
       if (Object.keys(requires).length) next.requires = requires;
       else delete next.requires;
+      const reconciled = reconcileConnections(scene, next.connections ?? [], removedConnections.current);
+      if (reconciled.restored.length) {
+        next.connections = reconciled.connections;
+        for (const id of reconciled.restored) removedConnections.current.delete(id);
+        notify({
+          tone: 'info',
+          title: `Restored connection ${reconciled.restored.map((id) => `“${id}”`).join(', ')}`,
+          details: ['Undo brought back bindings that use it. Its secrets were cleared when it was removed: enter them again if it needs any.'],
+        });
+      }
       docRef.current = next;
       setDoc(next);
       saveWorkingCopy();
@@ -274,6 +292,53 @@ function DocumentWorkspace({
   }, []);
   const onEdit = useCallback((id: string, edit: InspectorEdit) => runOnObject(id, edit), [runOnObject]);
   const onDeleteObject = useCallback((id: string) => runOnObject(id, { kind: 'delete' }), [runOnObject]);
+  // Live data: a hub on this document's connections + bindings, secrets from this tab (holodeck#101).
+  const live = useConnectionHub(host, doc, secrets);
+
+  /**
+   * Add or edit a connection. The connection (non-secret settings) goes into
+   * the document envelope and is saved; secrets go to this tab's
+   * sessionStorage only, then the connection reopens to pick them up.
+   * Envelope edits are not on the canvas undo stack (they are not body edits).
+   */
+  const saveConnection = useCallback(
+    ({ connection, secrets: secretUpdates }: ConnectionSubmit, isNew: boolean) => {
+      const current = docRef.current.connections ?? [];
+      const previous = current.find((c) => c.id === connection.id);
+      const connections = isNew ? [...current, connection] : current.map((c) => (c.id === connection.id ? connection : c));
+      const fingerprint = connectionFingerprint(connection);
+      // Pointed elsewhere: secrets entered for the old endpoint are dropped,
+      // not carried over (they would be ignored anyway, holodeck#166).
+      if (previous && connectionFingerprint(previous) !== fingerprint) secrets.clear(docRef.current.id, connection.id);
+      const next: IsoDoc = { ...docRef.current, connections };
+      docRef.current = next;
+      setDoc(next);
+      saveWorkingCopy();
+      try {
+        for (const [key, value] of Object.entries(secretUpdates)) secrets.set(next.id, connection.id, key, value, fingerprint);
+      } catch (error) {
+        notify({ tone: 'error', title: 'Could not keep the secrets in this tab', details: [error instanceof Error ? error.message : String(error)] });
+      }
+      if (Object.keys(secretUpdates).length || (previous && connectionFingerprint(previous) !== fingerprint)) live.reconnect(connection.id);
+    },
+    [live, saveWorkingCopy, secrets],
+  );
+
+  const removeConnection = useCallback(
+    (id: string) => {
+      const removed = docRef.current.connections?.find((c) => c.id === id);
+      if (removed) removedConnections.current.set(id, removed);
+      const connections = (docRef.current.connections ?? []).filter((c) => c.id !== id);
+      const next: IsoDoc = { ...docRef.current, connections };
+      if (!connections.length) delete next.connections;
+      docRef.current = next;
+      setDoc(next);
+      saveWorkingCopy();
+      secrets.clear(next.id, id);
+    },
+    [saveWorkingCopy, secrets],
+  );
+
   const onRename = useCallback(
     (name: string) => {
       // Optimistic in the working copy; the store applies it to the stored
@@ -328,6 +393,7 @@ function DocumentWorkspace({
             }}
             placing={placing}
             onPlacingChange={setPlacing}
+            metrics={live.metrics}
           />
         </CanvasErrorBoundary>
       </main>
@@ -341,7 +407,23 @@ function DocumentWorkspace({
             onDeleteObject={onDeleteObject}
             onDeleteDocument={() => {
               leaving.current = true;
+              secrets.clear(doc.id);
               void deleteDocument(doc.id, { navigateAway: true });
+            }}
+            live={{
+              metrics: live.metrics,
+              statuses: live.statuses,
+              hub: live.hub,
+              connectionsPanel: (
+                <ConnectionsPanel
+                  host={host}
+                  doc={doc}
+                  statuses={live.statuses}
+                  secrets={secrets}
+                  onSave={saveConnection}
+                  onRemove={removeConnection}
+                />
+              ),
             }}
           />
         </SidePanel>

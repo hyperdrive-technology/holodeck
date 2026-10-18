@@ -40,6 +40,7 @@ const WEBGPU_ARGS = [
       ]),
 ];
 const PORT = 4174;
+export const HTTP_FIXTURE_PORT = 4181;
 
 function chromiumPath(): string | undefined {
   const explicit = process.env.HOLODECK_CHROMIUM;
@@ -86,10 +87,20 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
-    command: `pnpm exec vite preview --port ${PORT} --strictPort`,
-    url: `http://localhost:${PORT}`,
-    reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
-  },
+  webServer: [
+    {
+      command: `pnpm exec vite preview --port ${PORT} --strictPort`,
+      url: `http://localhost:${PORT}`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+    {
+      // Local JSON for the holodeck.http connection tests (e2e/connections.spec.ts).
+      command: `node e2e/http-fixture-server.mjs`,
+      url: `http://127.0.0.1:${HTTP_FIXTURE_PORT}/health`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 30_000,
+      env: { HTTP_FIXTURE_PORT: String(HTTP_FIXTURE_PORT) },
+    },
+  ],
 });

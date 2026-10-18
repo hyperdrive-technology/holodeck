@@ -20,6 +20,7 @@ import { DocumentStore } from '../documents/store';
 import { createStudioHost, hostDocumentProblems } from '../host/studio-host';
 import { createStudioRouter } from '../router';
 import { documentKeys } from '../documents/queries';
+import { SessionSecretStore } from '../connections/secrets';
 import { StudioProvider } from '../studio-context';
 import { withPart } from '../test-support';
 import { activeDocumentStore } from './active-document';
@@ -88,7 +89,7 @@ async function openWorkspace(doc: HolodeckDocument) {
   const router = createStudioRouter(createMemoryHistory({ initialEntries: [`/d/${doc.id}`] }));
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
   render(
-    <StudioProvider services={{ host, store, channel }}>
+    <StudioProvider services={{ host, store, channel, secrets: new SessionSecretStore(null) }}>
       <QueryClientProvider client={client}>
         <RouterProvider router={router} />
       </QueryClientProvider>
@@ -219,7 +220,7 @@ describe('DocumentWorkspace <-> ProcessEditor', () => {
     const router = createStudioRouter(createMemoryHistory({ initialEntries: ['/d/p'] }));
     const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
     render(
-      <StudioProvider services={{ host, store, channel }}>
+      <StudioProvider services={{ host, store, channel, secrets: new SessionSecretStore(null) }}>
         <QueryClientProvider client={client}>
           <RouterProvider router={router} />
         </QueryClientProvider>
@@ -255,7 +256,7 @@ describe('DocumentWorkspace <-> ProcessEditor', () => {
     // This tab's cache still holds the camera from an earlier visit.
     client.setQueryData(documentKeys.camera('p'), { zoom: 12, target: [0, 0, 0] });
     render(
-      <StudioProvider services={{ host, store, channel }}>
+      <StudioProvider services={{ host, store, channel, secrets: new SessionSecretStore(null) }}>
         <QueryClientProvider client={client}>
           <RouterProvider router={router} />
         </QueryClientProvider>
@@ -275,6 +276,29 @@ describe('DocumentWorkspace <-> ProcessEditor', () => {
     vi.spyOn(store, 'getCamera').mockRejectedValue(new Error('idb down'));
     await openWorkspace(tankDoc());
     expect(editor.props?.camera).toBeUndefined();
+  });
+});
+
+// holodeck#164 / review of #163: an undo that brings back a binding to a connection
+// removed meanwhile must keep the document valid (and saving).
+describe('connections and undo', () => {
+  it('restores a removed connection when the canvas brings back its bindings, and the save succeeds', async () => {
+    const doc = tankDoc();
+    doc.connections = [{ id: 'plant', provider: 'holodeck.sim' }];
+    await store.create(doc);
+    await openWorkspace(doc);
+    fireEvent.click(screen.getByRole('tab', { name: /Connections/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove connection plant' }));
+    await waitFor(async () => expect((await store.get('p'))?.document.connections ?? []).toEqual([]));
+
+    // The editor reports an undo that restored a binding to "plant".
+    const scene = editor.props!.scene;
+    const undone = { ...scene, objects: scene.objects.map((o) => ({ ...o, bindings: { level: { connection: 'plant', source: 'const:0.5' } } })) };
+    act(() => editor.props!.onChange(undone));
+
+    await waitFor(async () => expect((await store.get('p'))?.document.connections).toEqual([{ id: 'plant', provider: 'holodeck.sim' }]));
+    expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved');
+    expect(screen.getByText(/Restored connection “plant”/)).toBeInTheDocument();
   });
 });
 

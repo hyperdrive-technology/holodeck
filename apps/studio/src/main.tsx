@@ -2,6 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { resolveSecretStorage, SessionSecretStore } from './connections/secrets';
+import { notify } from './layout/ui-state';
 import { createDocumentChannel } from './documents/changes';
 import { openStudioDb } from './documents/db';
 import { DocumentStore } from './documents/store';
@@ -17,7 +19,18 @@ async function boot(): Promise<StudioServices> {
     validate: (doc) => hostDocumentProblems(host, doc),
     onChange: (change) => channel.post(change),
   });
-  return { host, store, channel };
+  const secretStorage = resolveSecretStorage();
+  if (secretStorage.kind === 'memory') {
+    // Not fatal: secrets then last until this page reloads.
+    queueMicrotask(() =>
+      notify({
+        tone: 'info',
+        title: 'This browser blocks session storage',
+        details: ['Connection secrets are kept in memory for this page only and must be entered again after a reload.'],
+      }),
+    );
+  }
+  return { host, store, channel, secrets: new SessionSecretStore(secretStorage.storage) };
 }
 
 const root = createRoot(document.getElementById('root')!);

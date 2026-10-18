@@ -3,6 +3,8 @@ import type { IsoSceneFile } from '@holodeck/editor-2.5d-react';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { openStudioDb, STUDIO_DB_VERSION, type StudioDb } from './db';
+import { createStudioHost, hostDocumentProblems } from '../host/studio-host';
+import { CREDENTIAL_CASES } from '../test-support';
 import { withDocumentId } from './document-ops';
 import { createIsoDocument } from './new-document';
 import {
@@ -162,6 +164,21 @@ describe('DocumentStore', () => {
     }
     expect(unhandled).toEqual([]);
     expect((await store.get('a'))?.document.name).toBe('A');
+  });
+
+  // holodeck#163 review (P1): the store's host validator refuses credentials on every save.
+  describe('credentials in connection configs', () => {
+    it.each(CREDENTIAL_CASES.map((c) => [c.name, c] as const))('save refuses %s and writes nothing', async (_name, c) => {
+      const host = await createStudioHost();
+      const store = makeStore((doc) => hostDocumentProblems(host, doc));
+      const created = await store.create(createIsoDocument('A', 'a'));
+      const leaky = { ...created.document, connections: [{ id: 'c', provider: c.provider, config: c.config }] };
+      await expect(store.save(leaky, created.revision)).rejects.toBeInstanceOf(DocumentValidationError);
+      await expect(store.create({ ...leaky, id: 'b' })).rejects.toBeInstanceOf(DocumentValidationError);
+      const stored = JSON.stringify(await store.get('a'));
+      expect(stored).not.toContain('SECRET');
+      expect(await store.has('b')).toBe(false);
+    });
   });
 
   it('refuses a save that changes the id', async () => {

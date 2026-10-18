@@ -49,6 +49,9 @@ export function inspectorActions(selectedIds: readonly string[], id: string, edi
       return [...narrow, { type: 'rotate-selected', direction: edit.direction }];
     case 'param':
       return [...narrow, { type: 'set-param', param: edit.name, value: edit.value }];
+    case 'bindings':
+      // `patch-selected` is primary-only, and an undefined field is removed (no bindings left).
+      return [...narrow, { type: 'patch-selected', patch: { bindings: edit.bindings } }];
     case 'delete':
       return [...narrow, { type: 'delete' }];
   }

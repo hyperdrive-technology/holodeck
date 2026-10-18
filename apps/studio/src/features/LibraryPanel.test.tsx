@@ -4,6 +4,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { openStudioDb } from '../documents/db';
 import { DocumentStore } from '../documents/store';
 import { createStudioHost } from '../host/studio-host';
+import { SessionSecretStore } from '../connections/secrets';
 import { StudioProvider } from '../studio-context';
 import { NO_CHANNEL } from '../test-support';
 import { activeDocumentStore } from './active-document';
@@ -18,7 +19,7 @@ afterEach(() => activeDocumentStore.setState(() => null));
 function renderPanel() {
   const store = new DocumentStore(openStudioDb('library-panel-test'));
   return render(
-    <StudioProvider services={{ host, store, channel: NO_CHANNEL }}>
+    <StudioProvider services={{ host, store, channel: NO_CHANNEL, secrets: new SessionSecretStore(null) }}>
       <LibraryPanel />
     </StudioProvider>,
   );

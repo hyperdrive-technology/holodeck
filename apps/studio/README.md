@@ -41,6 +41,42 @@ PLC or Hyperdrive code: the studio is a plain Holodeck host.
 - **Embed** (`/embed/<docId>`, `src/embed/`): a read-only live view for
   iframes: run mode, no studio chrome, provider hub for live data, never
   writes. The Export dialog builds the URL and an `<iframe>` snippet.
+- **Connections and live data** (holodeck#101, `src/connections/`,
+  `src/features/connections/`): the inspector's Connections tab adds, edits
+  and removes the document's provider connections (`holodeck.sim`,
+  `holodeck.http`, `aws.cloudwatch`, installed as packages in
+  `src/host/provider-packages.ts`). Settings come from each provider's
+  `configSchema` (form + Ajv validation, `config-form.ts`). Each object
+  parameter can be bound to a signal (source typed or picked with the
+  provider's `browse`, optional scale / threshold / map / format transform,
+  validated by the SDK); binding edits are canvas edits (undoable). A
+  `ProviderHub` per open document streams live values into the canvas and
+  the inspector, with a status badge per connection.
+- **Secrets** (API tokens, passwords, AWS keys) live in this tab's
+  `sessionStorage` only (`connections/secrets.ts`): never in IndexedDB, a
+  document, an export or an embed, and never shown again once entered (the UI
+  only says whether one is set). Another tab, or the same document after the
+  tab closes, asks for them again; the browser's Duplicate tab copies them.
+  Each secret is bound to the endpoint it was entered for
+  (`connections/fingerprint.ts`: HTTP origin + auth scheme, AWS region + role /
+  pool, the whole config for other providers): point the connection elsewhere,
+  or import another document under the same id, and it is not sent. The
+  binding is per provider session (`connections/session-secrets.ts`): a
+  session only ever receives secrets for the endpoint it was opened with. If
+  the browser blocks sessionStorage, secrets are kept in memory for the page
+  (with a notice) instead of failing to start.
+- **Undo and connections**: removing a connection is an envelope edit, outside
+  the canvas undo history. If an undo brings back bindings to a connection
+  removed in this session, the connection is restored (with a notice) so the
+  document stays valid; a binding to an unknown connection is flagged
+  "missing" in the inspector and can always be removed.
+- **No credentials in documents** (`connections/credentials.ts`): connection
+  configs pass the provider's own validation (`parseHttpConfig`,
+  `parseAwsConfig`: no Authorization / Cookie headers, no `user:pass@` URLs,
+  no AWS key names) and a generic deep scan for credential-looking keys and
+  values, in the connection dialog, on every save and on import / embed load.
+  Connection labels and binding sources (which can carry an endpoint query)
+  are scanned too.
 - **Layout**: T3 Code idioms: resizable, persisted side panels
   (`src/layout/`), TanStack Store for UI state, TanStack Hotkeys for
   shortcuts (`Mod+/` lists them).
@@ -88,6 +124,17 @@ Rules (`src/embed/`):
   refused with a `result { ok: false, error }` when it carries a `requestId`.
   Replies go to the verified sender origin; `ready` goes to each allowed
   origin with that exact `targetOrigin`; nothing is posted with `'*'`.
+
+### Live data in embeds
+
+An embed connects the document's connections without any secrets: secret-free
+connections (`holodeck.sim`, a public `holodeck.http` endpoint, AWS through a
+Cognito identity pool) go live; a connection whose provider needs a secret
+(bearer token, AWS access keys) stays in `error`, because the embedding page
+has no way to hand credentials to the frame yet. Until a credentials channel
+exists (follow-up: holodeck#162), the host should expose such data
+through a secret-free endpoint or push values with `setObjectState`. The
+embed root reports connection states as `data-connections="id:state,..."`.
 
 ## Deploying
 

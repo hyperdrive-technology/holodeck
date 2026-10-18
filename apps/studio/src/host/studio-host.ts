@@ -8,7 +8,9 @@
  */
 
 import {
+  HOLODECK_KINDS,
   HolodeckHost,
+  type HolodeckProvider,
   parseVersion,
   satisfiesRange,
   type HolodeckDocument,
@@ -23,6 +25,8 @@ import {
   isoPackage,
   loadIsoDocument,
 } from '@holodeck/editor-2.5d-react';
+import { connectionConfigProblems, credentialInText } from '../connections/credentials';
+import { PROVIDER_PACKAGES } from './provider-packages';
 
 export const STUDIO_HOST_NAME = 'holodeck-studio';
 
@@ -32,7 +36,7 @@ export interface StudioPackage {
 }
 
 export const STUDIO_ENGINES: readonly HolodeckEngine[] = [isoEngine as HolodeckEngine];
-export const STUDIO_PACKAGES: readonly StudioPackage[] = [{ manifest: ISO_PACKAGE_MANIFEST, module: isoPackage }];
+export const STUDIO_PACKAGES: readonly StudioPackage[] = [{ manifest: ISO_PACKAGE_MANIFEST, module: isoPackage }, ...PROVIDER_PACKAGES];
 
 /** The engine new documents use. */
 export const DEFAULT_ENGINE_ID = ISO_ENGINE_ID;
@@ -73,6 +77,28 @@ export function checkHostDocument(host: HolodeckHost, doc: HolodeckDocument): { 
       problems.push(`requires: "${id}" ${range} is needed, ${installed.manifest.version} is installed`);
     }
   }
+  // Credentials never travel in a document (secrets stay in this tab's
+  // sessionStorage, connections/secrets.ts): refuse any config that carries
+  // one, by the provider's own rules and a generic scan (connections/credentials.ts).
+  // This runs on every save (the store's validator), import and embed load.
+  for (const connection of doc.connections ?? []) {
+    const provider = host.registry.get<HolodeckProvider>(HOLODECK_KINDS.provider, connection.provider);
+    let found: string[];
+    try {
+      found = connectionConfigProblems(connection, provider);
+    } catch (error) {
+      // Belt and braces for the never-throws contract (parseDocumentText):
+      // anything the checks cannot handle is refused, not thrown.
+      found = [`could not be checked (${messageOf(error)})`];
+    }
+    problems.push(...found.map((p) => `connections.${connection.id}.config: ${p}`));
+    // A label is free text too (holodeck#170).
+    const inLabel = typeof connection.label === 'string' ? credentialInText(connection.label) : null;
+    if (inLabel) problems.push(`connections.${connection.id}.label: looks like ${inLabel}; credentials go in the connection's secrets`);
+  }
+  // Binding sources are provider addresses, which can carry an endpoint
+  // query such as `/api?api_key=…` (holodeck#167).
+  problems.push(...bindingSourceProblems(doc.body));
   let document: HolodeckDocument = doc;
   try {
     if (doc.engine === ISO_ENGINE_ID) document = loadIsoDocument(doc, host.registry).document as HolodeckDocument;
@@ -103,4 +129,21 @@ export function requiresFor(host: HolodeckHost, usedContributions: Iterable<read
     if (version) requires[pkg.manifest.id] = `^${version.major}.${version.minor}`;
   }
   return Object.fromEntries(Object.entries(requires).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+/** Credential-looking binding sources in an iso body (`objects[].bindings[param].source`). */
+export function bindingSourceProblems(body: unknown): string[] {
+  const objects = body && typeof body === 'object' && Array.isArray((body as { objects?: unknown }).objects) ? (body as { objects: unknown[] }).objects : [];
+  const problems: string[] = [];
+  for (const o of objects) {
+    if (!o || typeof o !== 'object') continue;
+    const { id, bindings } = o as { id?: unknown; bindings?: unknown };
+    if (!bindings || typeof bindings !== 'object') continue;
+    for (const [param, b] of Object.entries(bindings as Record<string, unknown>)) {
+      const source = b && typeof b === 'object' ? (b as { source?: unknown }).source : undefined;
+      const found = typeof source === 'string' ? credentialInText(source) : null;
+      if (found) problems.push(`${String(id)}.${param}: the binding source looks like ${found}; credentials go in the connection's secrets`);
+    }
+  }
+  return problems;
 }

@@ -95,4 +95,16 @@ describe('inspectorActions on the real editor', () => {
     run(inspectorActions([], 'tank-1', { kind: 'delete' }));
     expect(objects()).toEqual([]);
   });
+
+  it('binding edits set and remove placement.bindings as one undoable step each (holodeck#101)', () => {
+    const { ref, run, objects } = mount(twoTanks());
+    const binding = { connection: 'plant', source: 'sine:10' };
+    run(inspectorActions([], 'tank-1', { kind: 'bindings', bindings: { level: binding } }));
+    expect(objects()[0]?.bindings).toEqual({ level: binding });
+    expect(objects()[1]?.bindings).toBeUndefined();
+    run(inspectorActions(ref.current!.getState().selectedIds, 'tank-1', { kind: 'bindings', bindings: undefined }));
+    expect(objects()[0]).not.toHaveProperty('bindings');
+    act(() => ref.current!.dispatch({ type: 'undo' }));
+    expect(objects()[0]?.bindings).toEqual({ level: binding });
+  });
 });
