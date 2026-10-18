@@ -137,8 +137,13 @@ export function ConnectionDialog({
                 {described.fields.map((f) => (
                   <ConfigInput key={f.key} field={f} value={state.values[f.key]} onChange={(v) => setValue(f.key, v)} />
                 ))}
-                {described.advancedKeys.length ? (
-                  <Row label="Advanced" htmlFor="connection-advanced" hint={`JSON object with any of: ${described.advancedKeys.join(', ')}`}>
+                {/* Also for schemaless / open schemas: otherwise their settings cannot be entered (review of #163). */}
+                {described.advancedKeys.length || described.allowsExtra || state.advanced.trim() ? (
+                  <Row
+                    label="Advanced"
+                    htmlFor="connection-advanced"
+                    hint={described.advancedKeys.length ? `JSON object with any of: ${described.advancedKeys.join(', ')}` : 'JSON object with the provider’s settings'}
+                  >
                     <textarea
                       id="connection-advanced"
                       className="min-h-16 w-full rounded-md border border-input bg-transparent p-2 font-mono text-xs"

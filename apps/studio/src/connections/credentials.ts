@@ -24,26 +24,31 @@ import { AwsConfigError, parseAwsConfig } from '@holodeck/provider-aws';
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /**
- * Provider config validators, by provider id. Each throws with `details` on
- * an invalid config (structure or credentials). Providers without an
- * exported validator get the generic scan only.
+ * Provider config validators, by provider id. Each returns the provider's
+ * normalised config (what the provider will actually use) or throws with
+ * `details` on an invalid one (structure or credentials). Providers without
+ * an exported validator get the generic scan only.
  */
-export const PROVIDER_CONFIG_VALIDATORS: Readonly<Record<string, (config: unknown) => void>> = {
+export const PROVIDER_CONFIG_VALIDATORS: Readonly<Record<string, (config: unknown) => unknown>> = {
   'holodeck.http': parseHttpConfig,
   'aws.cloudwatch': parseAwsConfig,
 };
 
 /** The provider's own verdict on `config`; empty = valid or no validator for that provider. */
 export function providerConfigProblems(providerId: string, config: unknown): string[] {
+  return checkWithProvider(providerId, config).problems;
+}
+
+/** The provider's verdict and, when valid, its normalised config (undefined: no validator). */
+function checkWithProvider(providerId: string, config: unknown): { problems: string[]; normalized?: unknown } {
   const validate = PROVIDER_CONFIG_VALIDATORS[providerId];
-  if (!validate) return [];
+  if (!validate) return { problems: [] };
   try {
-    validate(config ?? {});
-    return [];
+    return { problems: [], normalized: validate(config ?? {}) };
   } catch (error) {
-    if (error instanceof HttpConfigError || error instanceof AwsConfigError) return [...error.details];
+    if (error instanceof HttpConfigError || error instanceof AwsConfigError) return { problems: [...error.details] };
     const details = (error as { details?: unknown }).details;
-    return Array.isArray(details) ? details.map(String) : [error instanceof Error ? error.message : String(error)];
+    return { problems: Array.isArray(details) ? details.map(String) : [error instanceof Error ? error.message : String(error)] };
   }
 }
 
@@ -160,14 +165,17 @@ function params(text: string): Array<[string, string]> {
  * value) and a `name=value` fragment (OAuth `#access_token=`) are checked.
  */
 function urlCredential(value: string, base: string, extra: ReadonlySet<string>): string | null {
-  const text = value.trim();
-  if (!text || /\s/.test(text)) return null; // prose, not a URL
-  // Several readings, any of which may expose userinfo: resolved against the
-  // base (relative forms), on its own, and normalized (`https:/u:p@h` and
-  // `https:\\u:p@h` are relative to an https base, but a browser or a looser
-  // client may read them as authority).
-  const normalized = text.replace(/\\/g, '/').replace(/^([a-z][a-z0-9+.-]*):\/*/i, '$1://');
-  for (const candidate of [text, normalized]) {
+  // No pre-filtering by shape (review of #163 @ 51da21b): EVERY string goes
+  // to the WHATWG parser, which itself strips leading/trailing C0 controls
+  // and spaces, removes tabs and newlines and percent-encodes inner spaces,
+  // exactly as a provider's `new URL(...)` would. Prose parses as a harmless
+  // relative path. Several readings, any of which may expose a credential:
+  // as is, resolved against the base (relative forms), on its own, and
+  // normalised (`https:/u:p@h`, backslashes) for looser clients.
+  // `trim()` also drops Unicode spaces (U+2003 …), which the URL parser keeps.
+  const trimmed = value.trim();
+  const normalized = trimmed.replace(/\\/g, '/').replace(/^([a-z][a-z0-9+.-]*):\/*/i, '$1://');
+  for (const candidate of new Set([value, trimmed, normalized])) {
     for (const b of [base, undefined]) {
       const found = checkUrl(candidate, b, extra);
       if (found) return found;
@@ -230,28 +238,45 @@ export function credentialInText(value: string, base: string = DUMMY_BASE): stri
   return credentialValue(value, base, new Set());
 }
 
-/** Every credential-looking key or value in `config`, at any depth. Relative URLs resolve against `config.url`. */
+/** Deepest nesting the scan accepts; deeper configs are refused (they are not legitimate settings). */
+export const MAX_CONFIG_DEPTH = 64;
+/** Most values (keys + leaves) the scan visits in one config. */
+export const MAX_CONFIG_NODES = 50_000;
+
+/**
+ * Every credential-looking key or value in `config`, at any depth. Relative
+ * URLs resolve against `config.url`. Iterative with a depth and size bound,
+ * so hostile input (6,000 nested objects) is a problem, never a stack
+ * overflow (review of #163 @ 51da21b). Never throws.
+ */
 export function credentialProblems(config: unknown, provider?: Pick<HolodeckProvider, 'secrets'>): string[] {
   const extra = new Set((provider?.secrets ?? []).map((s) => normalizeKey(s.key)));
   const base = baseOf(config);
   const found: string[] = [];
-  const walk = (value: unknown, path: string, headers: boolean) => {
+  const stack: Array<{ value: unknown; path: string; depth: number; headers: boolean }> = [{ value: config, path: '', depth: 0, headers: false }];
+  let visited = 0;
+  while (stack.length) {
+    const { value, path, depth, headers } = stack.pop()!;
+    if (++visited > MAX_CONFIG_NODES) return [...found, `config: has more than ${MAX_CONFIG_NODES} values; refusing to store it`];
+    if (depth > MAX_CONFIG_DEPTH) return [...found, `${path || 'config'}: nested more than ${MAX_CONFIG_DEPTH} levels deep; refusing to store it`];
     if (typeof value === 'string') {
       const what = credentialValue(value, base, extra);
       if (what) found.push(`${path || 'config'}: looks like ${what}; credentials go in the connection's secrets, never in the document`);
-    } else if (Array.isArray(value)) value.forEach((v, i) => walk(v, `${path}[${i}]`, false));
-    else if (isObj(value)) {
-      for (const [k, v] of Object.entries(value)) {
+    } else if (Array.isArray(value)) {
+      for (let i = value.length - 1; i >= 0; i--) stack.push({ value: value[i], path: `${path}[${i}]`, depth: depth + 1, headers: false });
+    } else if (isObj(value)) {
+      const entries = Object.entries(value);
+      for (let i = entries.length - 1; i >= 0; i--) {
+        const [k, v] = entries[i]!;
         const at = path ? `${path}.${k}` : k;
         // Keys of a `headers` object are header names: the strict (parameter) rules apply.
         if (credentialName(k, extra, headers ? 'param' : 'key')) {
           found.push(`${at}: "${k}" looks like a credential; credentials go in the connection's secrets, never in the document`);
         }
-        walk(v, at, normalizeKey(k) === 'headers');
+        stack.push({ value: v, path: at, depth: depth + 1, headers: normalizeKey(k) === 'headers' });
       }
     }
-  };
-  walk(config, '', false);
+  }
   return found;
 }
 
@@ -260,5 +285,12 @@ export function credentialProblems(config: unknown, provider?: Pick<HolodeckProv
  * the generic credential scan plus the provider's own validation.
  */
 export function connectionConfigProblems(connection: Pick<ProviderConnection, 'provider' | 'config'>, provider?: Pick<HolodeckProvider, 'secrets'>): string[] {
-  return [...new Set([...credentialProblems(connection.config, provider), ...providerConfigProblems(connection.provider, connection.config)])];
+  const raw = credentialProblems(connection.config, provider);
+  // Depth / size refusals stop here: the provider's own (recursive) parser is not handed hostile input.
+  if (raw.some((p) => p.includes('refusing to store it'))) return raw;
+  const checked = checkWithProvider(connection.provider, connection.config);
+  // Also scan what the provider will actually use (its normalised config):
+  // any normalisation it applies (trimming, encoding) is then covered too.
+  const normalized = checked.normalized === undefined ? [] : credentialProblems(checked.normalized, provider);
+  return [...new Set([...raw, ...checked.problems, ...normalized])];
 }

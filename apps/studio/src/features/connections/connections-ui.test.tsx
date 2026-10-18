@@ -1,4 +1,4 @@
-import type { ConnectionState, HolodeckHost, ProviderHub, SignalBinding } from '@holodeck/sdk';
+import type { ConnectionState, HolodeckHost, HolodeckProvider, ProviderHub, SignalBinding } from '@holodeck/sdk';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { connectionFingerprint } from '../../connections/fingerprint';
@@ -126,6 +126,29 @@ describe('<ConnectionsPanel /> + <ConnectionDialog />', () => {
     fireEvent.click(within(screen.getByTestId('connection-dialog')).getByRole('button', { name: 'Add' }));
     expect(await screen.findByTestId('connection-problems')).toHaveTextContent('label');
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  // Review of #163 @ 51da21b: a schemaless provider is configured through the advanced JSON.
+  it('offers the advanced JSON for a provider without a schema and saves it', async () => {
+    if (!host.registry.get('holodeck.provider', 'test.schemaless')) {
+      host.registry.install({
+        id: 'test.schemaless-pkg',
+        version: '1.0.0',
+        contributions: {
+          'holodeck.provider': [
+            { id: 'test.schemaless', label: 'Schemaless', capabilities: { read: true }, connect: async () => Promise.reject(new Error('not used')) } as HolodeckProvider,
+          ],
+        },
+      });
+    }
+    const { onSave } = panel();
+    fireEvent.click(screen.getByRole('button', { name: /Add/ }));
+    pick('Provider', 'test.schemaless');
+    pick('Id', 'feed');
+    fireEvent.change(screen.getByLabelText('Advanced'), { target: { value: '{"endpoint":"https://feed.example.test/v1","pollMs":500}' } });
+    fireEvent.click(within(screen.getByTestId('connection-dialog')).getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    expect(onSave.mock.calls[0]![0].connection).toEqual({ id: 'feed', provider: 'test.schemaless', config: { endpoint: 'https://feed.example.test/v1', pollMs: 500 } });
   });
 
   it('AWS: region + credential mode in the form; access keys are secrets', async () => {

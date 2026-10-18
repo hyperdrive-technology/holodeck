@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { CLEAN_CASES, CREDENTIAL_CASES } from '../test-support';
-import { connectionConfigProblems, credentialInText, credentialName, credentialProblems, providerConfigProblems } from './credentials';
+import {
+  connectionConfigProblems,
+  credentialInText,
+  credentialName,
+  credentialProblems,
+  MAX_CONFIG_DEPTH,
+  MAX_CONFIG_NODES,
+  PROVIDER_CONFIG_VALIDATORS,
+  providerConfigProblems,
+} from './credentials';
 
 describe('connection credentials (holodeck#163 review)', () => {
   it.each(CREDENTIAL_CASES.map((c) => [c.name, c] as const))('refuses %s', (_name, c) => {
@@ -73,7 +82,15 @@ describe('connection credentials (holodeck#163 review)', () => {
     ['sk_live_abcdefghijklmnop', true],
     ['AIzaSyA1234567890abcdefghijklmnopqrstu', true],
     ['eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJl', true],
+    ['https://api.example.test/a path?api_key=abc', true],
+    ['https://x.test/a\t?token=abc', true],
+    ['write\n?api_key=abc', true],
+    ['https://x.test/a\u00a0b?key=abc', true],
+    ['\u0001https://u:p@x.test', true],
+    ['\u2003https://u:p@x.test', true],
     ['https://x.test/a?page_token=2&limit=5', false],
+    ['some prose with spaces', false],
+    ['line one\nline two', false],
     ['ssh://git@git.example/x.git', false],
     ['Basic tier', false],
     ['write/{source}', false],
@@ -86,5 +103,30 @@ describe('connection credentials (holodeck#163 review)', () => {
     const found = credentialInText(value, 'https://x.test/api/');
     if (expected) expect(found).toEqual(expect.any(String));
     else expect(found).toBeNull();
+  });
+
+  // Review of #163 @ 51da21b: what the provider will actually use is scanned too.
+  it('also scans the provider-normalised config', () => {
+    const validators = PROVIDER_CONFIG_VALIDATORS as Record<string, (c: unknown) => unknown>;
+    validators['test.normalising'] = () => ({ url: 'https://admin:hidden@x.test/a' });
+    try {
+      expect(connectionConfigProblems({ provider: 'test.normalising', config: { u: 'x' } }).join()).toContain('user name or password');
+    } finally {
+      delete validators['test.normalising'];
+    }
+  });
+
+  // Review of #163 @ 51da21b: hostile nesting / size is a problem, never a stack overflow.
+  it('refuses over-deep and over-large configs without throwing', () => {
+    let deep: unknown = 'leaf';
+    for (let i = 0; i < 6000; i++) deep = { a: deep };
+    const problems = credentialProblems(deep);
+    expect(problems.join()).toContain(`nested more than ${MAX_CONFIG_DEPTH} levels`);
+    expect(connectionConfigProblems({ provider: 'holodeck.http', config: deep as Record<string, unknown> }).join()).toContain('nested more than');
+    const wide = { list: Array.from({ length: MAX_CONFIG_NODES + 10 }, (_, i) => i) };
+    expect(credentialProblems(wide).join()).toContain(`more than ${MAX_CONFIG_NODES} values`);
+    let fine: unknown = 'leaf';
+    for (let i = 0; i < 20; i++) fine = { a: fine };
+    expect(credentialProblems(fine)).toEqual([]);
   });
 });

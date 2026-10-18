@@ -48,6 +48,13 @@ export const CREDENTIAL_CASES: ReadonlyArray<{ name: string; provider: string; c
   { name: 'HTTP sloppy userinfo https:/u:p@h', provider: 'holodeck.http', config: { url: 'https://x.test/a', write: { url: 'https:/admin:SECRET@x.test/w' } } },
   { name: 'HTTP header value with a GitHub token', provider: 'holodeck.http', config: { url: 'https://x.test/a', headers: { 'X-Custom': 'ghp_SECRETabcdefghijklmnopqrstu' } } },
   { name: 'HTTP body with a JWT', provider: 'holodeck.http', config: { url: 'https://x.test/a', method: 'POST', body: { q: 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJTRUNSRVQifQ.c2lnbmF0dXJl' } } },
+  // Review of #163 @ 51da21b: whitespace and control characters must not hide a URL from the scan.
+  { name: 'HTTP URL with an inner space', provider: 'holodeck.http', config: { url: 'https://api.example.test/a path?api_key=SECRET' } },
+  { name: 'HTTP URL with a tab', provider: 'holodeck.http', config: { url: 'https://api.example.test/a\t?api_key=SECRET' } },
+  { name: 'HTTP write.url with a newline', provider: 'holodeck.http', config: { url: 'https://x.test/a', write: { url: 'write\n?token=SECRET' } } },
+  { name: 'HTTP URL with a no-break space', provider: 'holodeck.http', config: { url: 'https://x.test/a\u00a0b?key=SECRET' } },
+  { name: 'HTTP URL with a leading control character', provider: 'holodeck.http', config: { url: '\u0001https://admin:SECRET@x.test/a' } },
+  { name: 'HTTP userinfo URL with surrounding spaces', provider: 'holodeck.http', config: { url: '  https://admin:SECRET@x.test/a  ' } },
 ];
 
 /**

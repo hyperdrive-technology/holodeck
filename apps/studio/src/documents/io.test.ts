@@ -101,6 +101,20 @@ describe('import / export', () => {
     expect(problems).not.toContain('SECRET');
   });
 
+  // Review of #163 @ 51da21b: parseDocumentText never throws, even on a 6,000-level config.
+  it('refuses a deeply nested connection config without throwing', () => {
+    let config = '"leaf"';
+    for (let i = 0; i < 6000; i++) config = `{"a":${config}}`;
+    const doc = createIsoDocument('A', 'a');
+    const text = `{"format":"holodeck.document.v1","id":"a","name":"A","engine":"holodeck.iso","connections":[{"id":"c","provider":"holodeck.http","config":${config}}],"body":${JSON.stringify(doc.body)}}`;
+    let result: ReturnType<typeof parseDocumentText> | undefined;
+    expect(() => {
+      result = parseDocumentText(text, host);
+    }).not.toThrow();
+    expect(result?.ok).toBe(false);
+    expect(result && !result.ok && result.problems.join('\n')).toContain('nested more than');
+  });
+
   it('reports invalid JSON', () => {
     expect(problemsOf('{ nope')[0]).toMatch(/^not valid JSON/);
   });

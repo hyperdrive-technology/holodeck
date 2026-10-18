@@ -83,7 +83,15 @@ export function checkHostDocument(host: HolodeckHost, doc: HolodeckDocument): { 
   // This runs on every save (the store's validator), import and embed load.
   for (const connection of doc.connections ?? []) {
     const provider = host.registry.get<HolodeckProvider>(HOLODECK_KINDS.provider, connection.provider);
-    problems.push(...connectionConfigProblems(connection, provider).map((p) => `connections.${connection.id}.config: ${p}`));
+    let found: string[];
+    try {
+      found = connectionConfigProblems(connection, provider);
+    } catch (error) {
+      // Belt and braces for the never-throws contract (parseDocumentText):
+      // anything the checks cannot handle is refused, not thrown.
+      found = [`could not be checked (${messageOf(error)})`];
+    }
+    problems.push(...found.map((p) => `connections.${connection.id}.config: ${p}`));
     // A label is free text too (holodeck#170).
     const inLabel = typeof connection.label === 'string' ? credentialInText(connection.label) : null;
     if (inLabel) problems.push(`connections.${connection.id}.label: looks like ${inLabel}; credentials go in the connection's secrets`);
