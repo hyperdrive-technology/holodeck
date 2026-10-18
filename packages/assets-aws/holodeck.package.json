@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "holodeck.package.v1",
+  "id": "holodeck.aws",
+  "name": "AWS architecture components",
+  "description": "Fifty-plus AWS services as data-only isometric parts: holodeck.cloud archetype models, the official AWS Architecture Icons on the logo slot and AWS category colours.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "contributes": ["holodeck.iso.part"],
+  "engines": { "holodeck.iso": "^1.0" },
+  "requires": { "holodeck.cloud": "^0.1" },
+  "entry": "dist/holodeck-package.js",
+  "assets": "assets",
+  "assetLicenses": [
+    {
+      "path": "assets/aws-icons",
+      "license": "LicenseRef-AWS-Architecture-Icons",
+      "notice": "AWS Architecture Icons, release 07312026, from https://aws.amazon.com/architecture/icons/ . Copyright Amazon.com, Inc. or its affiliates. 'AWS', 'Amazon' and the AWS service names and icons are trademarks of Amazon.com, Inc. or its affiliates. The icons are provided by AWS for creating architecture diagrams and are used here under the AWS Architecture Icons terms and AWS Trademark Guidelines (https://aws.amazon.com/trademark-guidelines/): they are not covered by this package's MIT licence, and their use does not imply sponsorship or endorsement by AWS."
+    }
+  ],
+  "homepage": "https://github.com/hyperdrive-technology/holodeck/tree/main/packages/assets-aws#readme",
+  "repository": "github:hyperdrive-technology/holodeck",
+  "keywords": ["aws", "cloud", "architecture", "icons", "isometric"]
+}

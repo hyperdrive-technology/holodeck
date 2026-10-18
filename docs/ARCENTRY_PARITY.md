@@ -79,7 +79,7 @@ Status: ✓ done · ◐ partial · ✗ missing · — out of scope (SaaS account
 | Arcentry | Holodeck today | Status | Lane |
 |---|---|---|---|
 | CloudWatch plugin: connect with a read-only IAM role, per-component metrics | `aws.cloudwatch` provider (`@holodeck/provider-aws`): batched GetMetricData polled at each source's period, alarm states, browse, discover; static / temporary keys, assumed read-only role, Cognito identity pool or host credentials via secrets | ✓ | — |
-| Map component type → CloudWatch namespace | `discover` suggests a `partHint` and a default metric binding per resource kind (`DEFAULT_PART_HINTS`; A2's map plugs in via `partHints`) | ◐ | A2 |
+| Map component type → CloudWatch namespace | `discover` suggests a `partHint` and a default metric binding per resource kind (`DEFAULT_PART_HINTS`; ids are `@holodeck/assets-aws` parts, `aws:<slug>`; hosts may override via `partHints`) | ◐ | A2 |
 | Metrics plane on a component (current value) | — | ✗ | E2 (bindings → `format` label) |
 | Chart widget (time series) | provider `history` (CloudWatch metric series, alarm state changes) | ◐ | E2 follow-up (chart part) |
 | Scale group: scale components by a metric | animators drive params; no generic scale | ◐ | E1 (`scale` transform) |

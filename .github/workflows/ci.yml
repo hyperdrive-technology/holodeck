@@ -21,9 +21,11 @@ jobs:
         # registry, which is not published. Add it once it is revived.
         # library-cloud follows provider-http's type/test/build/package smoke
         # path; its shipped GLBs are checked without requiring Blender in CI.
+        # assets-aws checks its icons (sanitised SVG), vendored archetype models and the
+        # provider-aws part hints from source; it needs no network or AWS credentials.
         # provider-aws runs the real AWS SDK against an in-process fake backend
         # (ProviderContext.fetch); no AWS credentials and no network.
-        package: [editor-2.5d-react, editor-2d-react, viewer-3d-react, flow-runtime, provider-http, library-cloud, provider-aws]
+        package: [editor-2.5d-react, editor-2d-react, viewer-3d-react, flow-runtime, provider-http, library-cloud, provider-aws, assets-aws]
     timeout-minutes: 30
     steps:
       # The packages depend on the SDK via `file:../../../holodeck-sdk/ts`, so the
@@ -146,10 +148,11 @@ jobs:
       # flow-runtime's script also deploys a small flow through holodeck.flow.local;
       # provider-http's reads a value through holodeck.http from a local server.
       # library-cloud's checks its 26 models, logo assets and two theme installs.
+      # assets-aws's installs 54 AWS parts after a stand-in holodeck.cloud and checks npm contents.
       # provider-aws's reads a metric and an alarm through aws.cloudwatch from an
       # in-process fake CloudWatch endpoint.
       - name: Smoke-test the Holodeck package entry
-        if: matrix.package == 'editor-2.5d-react' || matrix.package == 'flow-runtime' || matrix.package == 'provider-http' || matrix.package == 'library-cloud' || matrix.package == 'provider-aws'
+        if: matrix.package == 'editor-2.5d-react' || matrix.package == 'flow-runtime' || matrix.package == 'provider-http' || matrix.package == 'library-cloud' || matrix.package == 'provider-aws' || matrix.package == 'assets-aws'
         working-directory: holodeck/packages/${{ matrix.package }}
         run: node --no-deprecation scripts/smoke-holodeck-package.mjs
 

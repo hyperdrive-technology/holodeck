@@ -7,10 +7,11 @@
  * across most services, in one paginated call per region. Untagged resources
  * are not listed; that is an AWS limitation, noted in the README.
  *
- * `partHint`s: lane A2 (`@holodeck/assets-aws`) owns the canonical service →
- * part id map. Until it ships, `DEFAULT_PART_HINTS` follows the `aws.<service>`
- * ids used in PACKAGING.md (`aws.ec2`); hosts pass A2's map through
- * `AwsProviderOptions.partHints` and it wins over the defaults.
+ * `partHint`s: `@holodeck/assets-aws` (package `holodeck.aws`) owns the part ids
+ * (`aws:<slug>`, e.g. `aws:ec2`); `DEFAULT_PART_HINTS` maps resource kinds onto
+ * them and `assets-aws`' tests fail if a hint names a part that does not exist.
+ * Hosts can still pass their own map through `AwsProviderOptions.partHints`;
+ * it wins over the defaults.
  */
 
 import type { DiscoveredResource } from '@holodeck/sdk';
@@ -70,32 +71,32 @@ export function resourceKind(arn: Arn): string {
   return `aws.${clean(arn.service)}.${clean(arn.type)}`;
 }
 
-/** Default `kind` → part id (A2 supplies the real map). */
+/** Default `kind` → part id in `@holodeck/assets-aws` (checked by that package's tests). */
 export const DEFAULT_PART_HINTS: Readonly<Record<string, string>> = Object.freeze({
-  'aws.ec2.instance': 'aws.ec2',
-  'aws.ec2.volume': 'aws.ebs',
-  'aws.ec2.vpc': 'aws.vpc',
-  'aws.ec2.natgateway': 'aws.nat-gateway',
-  'aws.rds.db': 'aws.rds',
-  'aws.rds.cluster': 'aws.aurora',
-  'aws.lambda.function': 'aws.lambda',
-  'aws.dynamodb.table': 'aws.dynamodb',
-  'aws.s3.bucket': 'aws.s3',
-  'aws.sqs.queue': 'aws.sqs',
-  'aws.sns.topic': 'aws.sns',
-  'aws.elasticloadbalancing.loadbalancer': 'aws.elb',
-  'aws.ecs.cluster': 'aws.ecs',
-  'aws.ecs.service': 'aws.ecs',
-  'aws.eks.cluster': 'aws.eks',
-  'aws.elasticache.cluster': 'aws.elasticache',
-  'aws.elasticache.replicationgroup': 'aws.elasticache',
-  'aws.cloudfront.distribution': 'aws.cloudfront',
-  'aws.apigateway.restapis': 'aws.api-gateway',
-  'aws.kinesis.stream': 'aws.kinesis',
-  'aws.states.statemachine': 'aws.step-functions',
-  'aws.redshift.cluster': 'aws.redshift',
-  'aws.es.domain': 'aws.opensearch',
-  'aws.cloudwatch.alarm': 'aws.cloudwatch',
+  'aws.ec2.instance': 'aws:ec2',
+  'aws.ec2.volume': 'aws:ebs',
+  'aws.ec2.vpc': 'aws:vpc',
+  'aws.ec2.natgateway': 'aws:vpc',
+  'aws.rds.db': 'aws:rds',
+  'aws.rds.cluster': 'aws:aurora',
+  'aws.lambda.function': 'aws:lambda',
+  'aws.dynamodb.table': 'aws:dynamodb',
+  'aws.s3.bucket': 'aws:s3',
+  'aws.sqs.queue': 'aws:sqs',
+  'aws.sns.topic': 'aws:sns',
+  'aws.elasticloadbalancing.loadbalancer': 'aws:elb',
+  'aws.ecs.cluster': 'aws:ecs',
+  'aws.ecs.service': 'aws:ecs',
+  'aws.eks.cluster': 'aws:eks',
+  'aws.elasticache.cluster': 'aws:elasticache',
+  'aws.elasticache.replicationgroup': 'aws:elasticache',
+  'aws.cloudfront.distribution': 'aws:cloudfront',
+  'aws.apigateway.restapis': 'aws:api-gateway',
+  'aws.kinesis.stream': 'aws:kinesis',
+  'aws.states.statemachine': 'aws:step-functions',
+  'aws.redshift.cluster': 'aws:redshift',
+  'aws.es.domain': 'aws:opensearch',
+  'aws.cloudwatch.alarm': 'aws:cloudwatch',
 });
 
 export type PartHints = Readonly<Record<string, string>> | ((resource: { kind: string; arn: Arn }) => string | undefined);

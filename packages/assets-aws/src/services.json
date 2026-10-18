@@ -1,0 +1,488 @@
+[
+  {
+    "slug": "ec2",
+    "label": "EC2",
+    "icon": "Amazon-EC2",
+    "category": "compute",
+    "archetype": "server",
+    "cloudwatchNamespace": "AWS/EC2",
+    "hint": "Virtual server instance"
+  },
+  {
+    "slug": "lambda",
+    "label": "Lambda",
+    "icon": "AWS-Lambda",
+    "category": "compute",
+    "archetype": "function",
+    "cloudwatchNamespace": "AWS/Lambda",
+    "hint": "Serverless function"
+  },
+  {
+    "slug": "batch",
+    "label": "Batch",
+    "icon": "AWS-Batch",
+    "category": "compute",
+    "archetype": "server",
+    "cloudwatchNamespace": "AWS/Batch",
+    "hint": "Batch compute jobs"
+  },
+  {
+    "slug": "elastic-beanstalk",
+    "label": "Elastic Beanstalk",
+    "icon": "AWS-Elastic-Beanstalk",
+    "category": "compute",
+    "archetype": "server",
+    "cloudwatchNamespace": "AWS/ElasticBeanstalk",
+    "hint": "Managed web application environment"
+  },
+  {
+    "slug": "auto-scaling",
+    "label": "EC2 Auto Scaling",
+    "icon": "Amazon-EC2-Auto-Scaling",
+    "category": "compute",
+    "archetype": "generic-block",
+    "cloudwatchNamespace": "AWS/AutoScaling",
+    "hint": "Auto Scaling group"
+  },
+  {
+    "slug": "ecs",
+    "label": "ECS",
+    "icon": "Amazon-Elastic-Container-Service",
+    "category": "containers",
+    "archetype": "container",
+    "cloudwatchNamespace": "AWS/ECS",
+    "hint": "Container orchestration service"
+  },
+  {
+    "slug": "fargate",
+    "label": "Fargate",
+    "icon": "AWS-Fargate",
+    "category": "containers",
+    "archetype": "container",
+    "cloudwatchNamespace": "AWS/ECS",
+    "hint": "Serverless container compute"
+  },
+  {
+    "slug": "eks",
+    "label": "EKS",
+    "icon": "Amazon-Elastic-Kubernetes-Service",
+    "category": "containers",
+    "archetype": "container",
+    "cloudwatchNamespace": "AWS/EKS",
+    "hint": "Managed Kubernetes cluster"
+  },
+  {
+    "slug": "ecr",
+    "label": "ECR",
+    "icon": "Amazon-Elastic-Container-Registry",
+    "category": "containers",
+    "archetype": "registry",
+    "cloudwatchNamespace": "AWS/ECR",
+    "hint": "Container image registry"
+  },
+  {
+    "slug": "rds",
+    "label": "RDS",
+    "icon": "Amazon-RDS",
+    "category": "database",
+    "archetype": "database",
+    "cloudwatchNamespace": "AWS/RDS",
+    "hint": "Managed relational database"
+  },
+  {
+    "slug": "aurora",
+    "label": "Aurora",
+    "icon": "Amazon-Aurora",
+    "category": "database",
+    "archetype": "database",
+    "cloudwatchNamespace": "AWS/RDS",
+    "hint": "Aurora relational database cluster"
+  },
+  {
+    "slug": "dynamodb",
+    "label": "DynamoDB",
+    "icon": "Amazon-DynamoDB",
+    "category": "database",
+    "archetype": "database",
+    "cloudwatchNamespace": "AWS/DynamoDB",
+    "hint": "NoSQL key-value table"
+  },
+  {
+    "slug": "elasticache",
+    "label": "ElastiCache",
+    "icon": "Amazon-ElastiCache",
+    "category": "database",
+    "archetype": "cache",
+    "cloudwatchNamespace": "AWS/ElastiCache",
+    "hint": "In-memory cache cluster"
+  },
+  {
+    "slug": "memorydb",
+    "label": "MemoryDB",
+    "icon": "Amazon-MemoryDB",
+    "category": "database",
+    "archetype": "cache",
+    "cloudwatchNamespace": "AWS/MemoryDB",
+    "hint": "Durable in-memory database"
+  },
+  {
+    "slug": "documentdb",
+    "label": "DocumentDB",
+    "icon": "Amazon-DocumentDB",
+    "category": "database",
+    "archetype": "database",
+    "cloudwatchNamespace": "AWS/DocDB",
+    "hint": "Managed document database"
+  },
+  {
+    "slug": "neptune",
+    "label": "Neptune",
+    "icon": "Amazon-Neptune",
+    "category": "database",
+    "archetype": "database",
+    "cloudwatchNamespace": "AWS/Neptune",
+    "hint": "Managed graph database"
+  },
+  {
+    "slug": "redshift",
+    "label": "Redshift",
+    "icon": "Amazon-Redshift",
+    "category": "analytics",
+    "archetype": "warehouse",
+    "cloudwatchNamespace": "AWS/Redshift",
+    "hint": "Data warehouse cluster"
+  },
+  {
+    "slug": "s3",
+    "label": "S3",
+    "icon": "Amazon-Simple-Storage-Service",
+    "category": "storage",
+    "archetype": "bucket",
+    "cloudwatchNamespace": "AWS/S3",
+    "hint": "Object storage bucket"
+  },
+  {
+    "slug": "ebs",
+    "label": "EBS",
+    "icon": "Amazon-Elastic-Block-Store",
+    "category": "storage",
+    "archetype": "disk",
+    "cloudwatchNamespace": "AWS/EBS",
+    "hint": "Block storage volume"
+  },
+  {
+    "slug": "efs",
+    "label": "EFS",
+    "icon": "Amazon-EFS",
+    "category": "storage",
+    "archetype": "disk",
+    "cloudwatchNamespace": "AWS/EFS",
+    "hint": "Elastic file system"
+  },
+  {
+    "slug": "backup",
+    "label": "Backup",
+    "icon": "AWS-Backup",
+    "category": "storage",
+    "archetype": "vault",
+    "cloudwatchNamespace": "AWS/Backup",
+    "hint": "Backup vault"
+  },
+  {
+    "slug": "elb",
+    "label": "Elastic Load Balancing",
+    "icon": "Elastic-Load-Balancing",
+    "category": "networking",
+    "archetype": "load-balancer",
+    "cloudwatchNamespace": "AWS/ApplicationELB",
+    "hint": "Application load balancer"
+  },
+  {
+    "slug": "cloudfront",
+    "label": "CloudFront",
+    "icon": "Amazon-CloudFront",
+    "category": "networking",
+    "archetype": "cdn",
+    "cloudwatchNamespace": "AWS/CloudFront",
+    "hint": "Content delivery network distribution"
+  },
+  {
+    "slug": "route53",
+    "label": "Route 53",
+    "icon": "Amazon-Route-53",
+    "category": "networking",
+    "archetype": "generic-flat",
+    "cloudwatchNamespace": "AWS/Route53",
+    "hint": "DNS and health checks"
+  },
+  {
+    "slug": "vpc",
+    "label": "VPC",
+    "icon": "Amazon-Virtual-Private-Cloud",
+    "category": "networking",
+    "archetype": "generic-flat",
+    "cloudwatchNamespace": "AWS/VPC",
+    "hint": "Virtual private cloud network"
+  },
+  {
+    "slug": "api-gateway",
+    "label": "API Gateway",
+    "icon": "Amazon-API-Gateway",
+    "category": "networking",
+    "archetype": "gateway",
+    "cloudwatchNamespace": "AWS/ApiGateway",
+    "hint": "Managed API front door"
+  },
+  {
+    "slug": "transit-gateway",
+    "label": "Transit Gateway",
+    "icon": "AWS-Transit-Gateway",
+    "category": "networking",
+    "archetype": "gateway",
+    "cloudwatchNamespace": "AWS/TransitGateway",
+    "hint": "Network transit hub"
+  },
+  {
+    "slug": "direct-connect",
+    "label": "Direct Connect",
+    "icon": "AWS-Direct-Connect",
+    "category": "networking",
+    "archetype": "gateway",
+    "cloudwatchNamespace": "AWS/DX",
+    "hint": "Dedicated network connection"
+  },
+  {
+    "slug": "global-accelerator",
+    "label": "Global Accelerator",
+    "icon": "AWS-Global-Accelerator",
+    "category": "networking",
+    "archetype": "gateway",
+    "cloudwatchNamespace": "AWS/GlobalAccelerator",
+    "hint": "Global traffic accelerator"
+  },
+  {
+    "slug": "sqs",
+    "label": "SQS",
+    "icon": "Amazon-Simple-Queue-Service",
+    "category": "integration",
+    "archetype": "queue",
+    "cloudwatchNamespace": "AWS/SQS",
+    "hint": "Managed message queue"
+  },
+  {
+    "slug": "sns",
+    "label": "SNS",
+    "icon": "Amazon-Simple-Notification-Service",
+    "category": "integration",
+    "archetype": "broker",
+    "cloudwatchNamespace": "AWS/SNS",
+    "hint": "Pub/sub notification topic"
+  },
+  {
+    "slug": "eventbridge",
+    "label": "EventBridge",
+    "icon": "Amazon-EventBridge",
+    "category": "integration",
+    "archetype": "broker",
+    "cloudwatchNamespace": "AWS/Events",
+    "hint": "Serverless event bus"
+  },
+  {
+    "slug": "step-functions",
+    "label": "Step Functions",
+    "icon": "AWS-Step-Functions",
+    "category": "integration",
+    "archetype": "generic-block",
+    "cloudwatchNamespace": "AWS/States",
+    "hint": "Workflow state machine"
+  },
+  {
+    "slug": "mq",
+    "label": "MQ",
+    "icon": "Amazon-MQ",
+    "category": "integration",
+    "archetype": "broker",
+    "cloudwatchNamespace": "AWS/AmazonMQ",
+    "hint": "Managed message broker"
+  },
+  {
+    "slug": "appsync",
+    "label": "AppSync",
+    "icon": "AWS-AppSync",
+    "category": "integration",
+    "archetype": "gateway",
+    "cloudwatchNamespace": "AWS/AppSync",
+    "hint": "Managed GraphQL API"
+  },
+  {
+    "slug": "kinesis",
+    "label": "Kinesis",
+    "icon": "Amazon-Kinesis-Data-Streams",
+    "category": "analytics",
+    "archetype": "stream",
+    "cloudwatchNamespace": "AWS/Kinesis",
+    "hint": "Real-time data stream"
+  },
+  {
+    "slug": "firehose",
+    "label": "Data Firehose",
+    "icon": "Amazon-Data-Firehose",
+    "category": "analytics",
+    "archetype": "stream",
+    "cloudwatchNamespace": "AWS/Firehose",
+    "hint": "Streaming delivery to data stores"
+  },
+  {
+    "slug": "msk",
+    "label": "MSK",
+    "icon": "Amazon-Managed-Streaming-for-Apache-Kafka",
+    "category": "analytics",
+    "archetype": "stream",
+    "cloudwatchNamespace": "AWS/Kafka",
+    "hint": "Managed Apache Kafka cluster"
+  },
+  {
+    "slug": "opensearch",
+    "label": "OpenSearch Service",
+    "icon": "Amazon-OpenSearch-Service",
+    "category": "analytics",
+    "archetype": "database",
+    "cloudwatchNamespace": "AWS/ES",
+    "hint": "Search and analytics domain"
+  },
+  {
+    "slug": "athena",
+    "label": "Athena",
+    "icon": "Amazon-Athena",
+    "category": "analytics",
+    "archetype": "warehouse",
+    "cloudwatchNamespace": "AWS/Athena",
+    "hint": "Serverless SQL over S3"
+  },
+  {
+    "slug": "glue",
+    "label": "Glue",
+    "icon": "AWS-Glue",
+    "category": "analytics",
+    "archetype": "generic-block",
+    "cloudwatchNamespace": "Glue",
+    "hint": "Serverless data integration"
+  },
+  {
+    "slug": "iam",
+    "label": "IAM",
+    "icon": "AWS-Identity-and-Access-Management",
+    "category": "security",
+    "archetype": "identity",
+    "cloudwatchNamespace": null,
+    "hint": "Identity and access management"
+  },
+  {
+    "slug": "cognito",
+    "label": "Cognito",
+    "icon": "Amazon-Cognito",
+    "category": "security",
+    "archetype": "identity",
+    "cloudwatchNamespace": "AWS/Cognito",
+    "hint": "User identity pools and sign-in"
+  },
+  {
+    "slug": "secrets-manager",
+    "label": "Secrets Manager",
+    "icon": "AWS-Secrets-Manager",
+    "category": "security",
+    "archetype": "vault",
+    "cloudwatchNamespace": null,
+    "hint": "Managed secrets store"
+  },
+  {
+    "slug": "kms",
+    "label": "KMS",
+    "icon": "AWS-Key-Management-Service",
+    "category": "security",
+    "archetype": "vault",
+    "cloudwatchNamespace": "AWS/KMS",
+    "hint": "Encryption key management"
+  },
+  {
+    "slug": "waf",
+    "label": "WAF",
+    "icon": "AWS-WAF",
+    "category": "security",
+    "archetype": "firewall",
+    "cloudwatchNamespace": "AWS/WAFV2",
+    "hint": "Web application firewall"
+  },
+  {
+    "slug": "shield",
+    "label": "Shield",
+    "icon": "AWS-Shield",
+    "category": "security",
+    "archetype": "firewall",
+    "cloudwatchNamespace": "AWS/DDoSProtection",
+    "hint": "DDoS protection"
+  },
+  {
+    "slug": "acm",
+    "label": "Certificate Manager",
+    "icon": "AWS-Certificate-Manager",
+    "category": "security",
+    "archetype": "vault",
+    "cloudwatchNamespace": "AWS/CertificateManager",
+    "hint": "TLS certificate manager"
+  },
+  {
+    "slug": "guardduty",
+    "label": "GuardDuty",
+    "icon": "Amazon-GuardDuty",
+    "category": "security",
+    "archetype": "monitoring",
+    "cloudwatchNamespace": null,
+    "hint": "Threat detection"
+  },
+  {
+    "slug": "cloudwatch",
+    "label": "CloudWatch",
+    "icon": "Amazon-CloudWatch",
+    "category": "management",
+    "archetype": "monitoring",
+    "cloudwatchNamespace": "AWS/CloudWatch",
+    "hint": "Metrics, alarms and dashboards"
+  },
+  {
+    "slug": "cloudtrail",
+    "label": "CloudTrail",
+    "icon": "AWS-CloudTrail",
+    "category": "management",
+    "archetype": "monitoring",
+    "cloudwatchNamespace": null,
+    "hint": "API activity audit log"
+  },
+  {
+    "slug": "cloudformation",
+    "label": "CloudFormation",
+    "icon": "AWS-CloudFormation",
+    "category": "management",
+    "archetype": "generic-block",
+    "cloudwatchNamespace": null,
+    "hint": "Infrastructure as code stacks"
+  },
+  {
+    "slug": "systems-manager",
+    "label": "Systems Manager",
+    "icon": "AWS-Systems-Manager",
+    "category": "management",
+    "archetype": "monitoring",
+    "cloudwatchNamespace": null,
+    "hint": "Operations management"
+  },
+  {
+    "slug": "ses",
+    "label": "SES",
+    "icon": "Amazon-Simple-Email-Service",
+    "category": "business",
+    "archetype": "queue",
+    "cloudwatchNamespace": "AWS/SES",
+    "hint": "Email sending service"
+  }
+]

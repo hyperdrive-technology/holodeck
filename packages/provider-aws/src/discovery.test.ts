@@ -49,7 +49,7 @@ describe('toDiscoveredResource', () => {
       label: 'web-1',
       kind: 'aws.ec2.instance',
       group: 'eu-west-1',
-      partHint: 'aws.ec2',
+      partHint: 'aws:ec2',
       bindings: { metric: 'cloudwatch:eu-west-1/AWS/EC2/CPUUtilization?InstanceId=i-0abc' },
       metadata: {
         arn: 'arn:aws:ec2:eu-west-1:123456789012:instance/i-0abc',
@@ -109,7 +109,7 @@ describe('toDiscoveredResource', () => {
     const nlb = toDiscoveredResource({ ResourceARN: 'arn:aws:elasticloadbalancing:eu-west-1:1:loadbalancer/net/n/1' }, 'eu-west-1');
     expect(nlb?.bindings).toBeUndefined();
     const vpc = toDiscoveredResource({ ResourceARN: 'arn:aws:ec2:eu-west-1:1:vpc/vpc-1' }, 'eu-west-1');
-    expect(vpc).toMatchObject({ kind: 'aws.ec2.vpc', partHint: 'aws.vpc', label: 'vpc-1' });
+    expect(vpc).toMatchObject({ kind: 'aws.ec2.vpc', partHint: 'aws:vpc', label: 'vpc-1' });
     expect(vpc?.bindings).toBeUndefined();
     const unknown = toDiscoveredResource({ ResourceARN: 'arn:aws:glue:eu-west-1:1:job/etl' }, 'eu-west-1');
     expect(unknown?.partHint).toBeUndefined();
@@ -120,9 +120,9 @@ describe('toDiscoveredResource', () => {
   it('host part hints (A2) win over the defaults; a function falls back to them', () => {
     const arn = 'arn:aws:ec2:eu-west-1:1:instance/i-1';
     expect(toDiscoveredResource({ ResourceARN: arn }, 'eu-west-1', { 'aws.ec2.instance': 'holodeck.aws/ec2' })?.partHint).toBe('holodeck.aws/ec2');
-    expect(toDiscoveredResource({ ResourceARN: arn }, 'eu-west-1', { other: 'x' })?.partHint).toBe('aws.ec2');
+    expect(toDiscoveredResource({ ResourceARN: arn }, 'eu-west-1', { other: 'x' })?.partHint).toBe('aws:ec2');
     expect(toDiscoveredResource({ ResourceARN: arn }, 'eu-west-1', ({ kind }) => (kind === 'aws.ec2.instance' ? 'fn' : undefined))?.partHint).toBe('fn');
-    expect(toDiscoveredResource({ ResourceARN: arn }, 'eu-west-1', () => undefined)?.partHint).toBe('aws.ec2');
+    expect(toDiscoveredResource({ ResourceARN: arn }, 'eu-west-1', () => undefined)?.partHint).toBe('aws:ec2');
     expect(Object.isFrozen(DEFAULT_PART_HINTS)).toBe(true);
   });
 
