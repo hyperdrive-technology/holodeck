@@ -76,7 +76,7 @@ errors.
 | `protocols` | none | WebSocket subprotocols |
 | `write` | disabled | `{ method?: 'POST'\|'PUT'\|'PATCH', url?: '/tags/{selector}', body?: 'envelope'\|'value' }` |
 | `maxBytes` | 4 MiB | Largest response, SSE event or WebSocket message accepted |
-| `followRedirects` | `false` | A redirect is an error unless enabled. Enabled: at most 5 hops; credentials go only to the connection's origin and are dropped for good once a hop leaves it |
+| `followRedirects` | `false` | A redirect is an error unless enabled. Enabled: at most 5 hops; credentials go only to the connection's origin and are dropped for good once a hop leaves it. **Node/hosts only**: browsers hide redirect targets (`redirect: 'manual'` gives an opaque response), so `connect` rejects `followRedirects: true` there (holodeck#98) |
 
 ### Writes
 
@@ -84,6 +84,22 @@ errors.
 value (`body: 'value'`) to `write.url` (default: the connection URL, on its HTTP origin for WebSocket connections).
 `{source}` and `{selector}` in `write.url` are replaced with the URI-encoded source or selector. Non-2xx responses
 reject with `HTTP <status>`; the response body is never read into errors or logs.
+
+### Host limits (`createHttpProvider` options)
+
+- `maxChannels` (default 32): most distinct endpoint channels one session keeps open. A document can name any path on
+  the connection origin and each opens its own authenticated feed; sources past the cap come back as `bad` samples and
+  the reason is logged (holodeck#94).
+- `pathPrefix` (e.g. `'/api/v1'`): restrict the paths a document may address, matched on a segment boundary after `..`
+  is resolved; paths with encoded slashes or backslashes (`%2f`, `%5c`) are refused. Enforced for the initial URL and every
+  same-origin redirect hop of subscribe, read, browse and write alike; a rejected target sends no request. The connection
+  URL must be inside it. Host-level on purpose: a scope the document sets itself is no boundary.
+- Redirect targets on another origin are not path-scoped (`pathPrefix` applies to the connection origin); `origins` is the
+  control for those. A redirect that comes back to the connection origin is checked again.
+- `browser`: overrides browser detection (`followRedirects` is refused in browsers). Electron renderers with
+  `nodeIntegration` look like Node to the detector only if `process.versions.node` is set; pass `browser: true` there,
+  since the renderer's fetch still cannot inspect manual redirects.
+- `maxChannels` does not limit one-shot `read`/`browse` (they open no channel).
 
 ## Secrets
 

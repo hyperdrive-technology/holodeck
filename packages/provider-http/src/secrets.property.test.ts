@@ -83,13 +83,19 @@ interface Exposure {
   text: string[];
 }
 
-async function exercise(site: string, auth: (typeof AUTHS)[number], mode: 'poll' | 'sse' | 'websocket', exposure: Exposure) {
+async function exercise(
+  site: string,
+  auth: (typeof AUTHS)[number],
+  mode: 'poll' | 'sse' | 'websocket',
+  exposure: Exposure,
+  options: Parameters<typeof createHttpProvider>[0] = {},
+) {
   const logs = exposure.text;
   const record = (error: unknown) => {
     logs.push(String(error), (error as Error)?.message ?? '', JSON.stringify(error) ?? '');
     if (error instanceof Error && error.cause) logs.push(String(error.cause));
   };
-  const provider = createHttpProvider();
+  const provider = createHttpProvider(options);
   const isWs = mode === 'websocket';
   const url = isWs ? `${server.wsUrl}/${site}` : `${server.url}/${site}`;
   const config: Record<string, unknown> = {
@@ -162,6 +168,26 @@ describe('secrets never leak (property over sites × auth schemes × secret shap
     }
     // The provider did say things (errors, statuses, logs): the property is not vacuous.
     expect(exposedChars).toBeGreaterThan(10_000);
+    expect(failures).toEqual([]);
+  }, 120_000);
+
+  it('rejection paths (maxChannels, pathPrefix, browser followRedirects) stay redacted', async () => {
+    const failures: string[] = [];
+    let exposedChars = 0;
+    for (const s of SECRETS) {
+      for (const site of Object.keys(SITES).filter((x) => !x.startsWith('sse-'))) {
+        secret = s;
+        // `browser: true` + followRedirects rejects at connect; the other half exercises scope/cap rejections.
+        for (const browser of [true, false]) {
+          const exposure: Exposure = { text: [] };
+          await exercise(site, AUTHS[2], 'poll', exposure, { maxChannels: 1, pathPrefix: `/${site}`, browser });
+          const all = exposure.text.join('\n');
+          exposedChars += all.length;
+          for (const form of forms(s)) if (all.includes(form)) failures.push(`${site} browser=${browser} form=${form}`);
+        }
+      }
+    }
+    expect(exposedChars).toBeGreaterThan(1000);
     expect(failures).toEqual([]);
   }, 120_000);
 

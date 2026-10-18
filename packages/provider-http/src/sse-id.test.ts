@@ -44,4 +44,21 @@ describe('SseIdTracker', () => {
     t.feed('\n\n');
     expect(t.lastEventId).toBe('1');
   });
+
+  it('an id line interrupted before its terminator does not survive a reconnect (holodeck#106)', () => {
+    const t = new SseIdTracker();
+    t.feed('id: committed\n\n');
+    t.feed('id: pending\n');
+    t.resetStream();
+    t.feed('\n'); // e.g. a heartbeat blank line on the new stream
+    expect(t.lastEventId).toBe('committed');
+  });
+
+  it('an undispatched empty reset does not survive a reconnect either', () => {
+    const t = new SseIdTracker();
+    t.feed('id: a\n\nid\n');
+    t.resetStream();
+    t.feed('\n');
+    expect(t.lastEventId).toBe('a');
+  });
 });

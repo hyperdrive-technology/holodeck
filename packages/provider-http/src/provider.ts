@@ -72,6 +72,47 @@ export interface HttpProviderOptions {
   clearTimeout?: (handle: unknown) => void;
   /** Random source for backoff jitter (default `Math.random`). */
   random?: () => number;
+  /**
+   * Most distinct endpoint channels (poll/SSE/WebSocket feeds) one session
+   * keeps open; sources past the cap become `bad` samples with a logged
+   * reason (default 32). A document can name any path on the connection
+   * origin, and each distinct path opens its own authenticated channel.
+   */
+  maxChannels?: number;
+  /**
+   * Restrict the paths a document may address to this prefix (e.g. `/api/v1`),
+   * matched on a path-segment boundary after `.`/`..` are resolved. The
+   * connection URL itself must be inside it. Unset: any path on the origin.
+   * Host-level on purpose: a prefix a document sets for itself is no boundary.
+   */
+  pathPrefix?: string;
+  /**
+   * Override browser detection (default: auto). `followRedirects` is refused
+   * in browsers, where `redirect: 'manual'` yields an opaque response (#98).
+   */
+  browser?: boolean;
+}
+
+export const DEFAULT_MAX_CHANNELS = 32;
+
+/** Browser main thread or worker: no Node, and a DOM or worker global scope. */
+function detectBrowser(): boolean {
+  const g = globalThis as { process?: { versions?: { node?: string } }; document?: unknown; WorkerGlobalScope?: unknown };
+  if (g.process?.versions?.node) return false;
+  return g.document !== undefined || g.WorkerGlobalScope !== undefined;
+}
+
+/** Why `path` (a URL's raw pathname) is outside `prefix`, or undefined when it is inside. */
+function pathScopeError(path: string, prefix: string): string | undefined {
+  // Encoded separators could be decoded by the server into a different path (/api/..%2fadmin).
+  if (/%2f|%5c/i.test(path) || path.includes('\\')) return "path has an encoded slash or backslash, refused under this provider's pathPrefix";
+  if (!pathInPrefix(path, prefix)) return `path is outside this provider's pathPrefix ${prefix}`;
+  return undefined;
+}
+
+/** Is `path` equal to `prefix` or below it, on a segment boundary? `prefix` has no trailing slash (except "/"). */
+function pathInPrefix(path: string, prefix: string): boolean {
+  return prefix === '/' || path === prefix || path.startsWith(prefix + '/');
 }
 
 interface Subscription {
@@ -111,6 +152,12 @@ export function createHttpProvider(options: HttpProviderOptions = {}): HolodeckP
   if (origins) {
     const bad = origins.filter((o) => !isOriginPattern(o));
     if (bad.length) throw new TypeError(`createHttpProvider: invalid origin pattern(s): ${bad.join(', ')}`);
+  }
+  if (options.maxChannels !== undefined && !(Number.isInteger(options.maxChannels) && options.maxChannels >= 1)) {
+    throw new TypeError('createHttpProvider: maxChannels must be a positive integer');
+  }
+  if (options.pathPrefix !== undefined && !/^\/[^?#\s]*$/.test(options.pathPrefix)) {
+    throw new TypeError('createHttpProvider: pathPrefix must be an absolute path such as "/api/v1"');
   }
   const provider: HolodeckProvider = {
     id: HTTP_PROVIDER_ID,
@@ -216,6 +263,19 @@ async function openSession(
 ): Promise<ProviderSession> {
   const config = parseHttpConfig(rawConfig);
   checkOrigins(config, origins);
+  if (config.followRedirects && (options.browser ?? detectBrowser())) {
+    throw new HttpProviderError(
+      'followRedirects is not supported in browsers (a manual redirect is opaque there, so no redirect can be followed); ' +
+        'use it only on Node/hosts, or point the connection at the final URL',
+      'unsupported',
+    );
+  }
+  const maxChannels = options.maxChannels ?? DEFAULT_MAX_CHANNELS;
+  // Normalised: no trailing slash, so "/api/" and "/api" mean the same.
+  const pathPrefix = options.pathPrefix === undefined ? undefined : options.pathPrefix.replace(/\/+$/, '') || '/';
+  const scopeError = pathPrefix === undefined ? undefined : (url: URL) => pathScopeError(url.pathname, pathPrefix);
+  const baseScope = scopeError?.(new URL(config.url));
+  if (baseScope) throw new HttpProviderError(`connection URL: ${baseScope}`, 'network');
   const auth = await resolveAuth(config, ctx, redact);
   const tsTokens = timestampTokens(config);
   const streaming = config.mode !== 'poll';
@@ -238,6 +298,7 @@ async function openSession(
     signal: controller.signal,
     setTimeout: setTimer,
     clearTimeout: clearTimer,
+    scopeError,
     allowOrigin: origins ? (origin) => origins.some((pattern) => originMatches(pattern, origin)) : undefined,
   });
 
@@ -296,16 +357,20 @@ async function openSession(
   };
 
   /** Record a payload for an endpoint: timestamp from the `timestamp` selector, next sequence number. */
-  const storePayload = (href: string, json: unknown, receivedAt: number) => {
+  const storePayload = (href: string, json: unknown, receivedAt: number, requestSeq?: number) => {
     let ts = receivedAt;
     if (tsTokens) {
       const hit = lookup(json, tsTokens);
       const parsed = hit.found ? toEpochMs(hit.value) : undefined;
       if (parsed !== undefined) ts = parsed;
     }
-    const record = { json, ts, seq: ++seq };
-    setBounded(payloads, href, record, MAX_CACHED_PAYLOADS);
-    return record;
+    // Request order, not arrival order: a response to an older request that
+    // lands late must not displace a newer payload (#97).
+    const record = { json, ts, seq: requestSeq ?? ++seq };
+    const existing = payloads.get(href);
+    if (!existing || existing.seq <= record.seq) setBounded(payloads, href, record, MAX_CACHED_PAYLOADS);
+    // Stale: hand back the newer payload so subscribers still get the current state.
+    return existing !== undefined && existing.seq > record.seq ? existing : record;
   };
 
   /**
@@ -317,20 +382,26 @@ async function openSession(
     const cached = sampleCache.get(parsed.source);
     const payload = payloads.get(href);
     const fromPayload = payload && sampleFor(parsed, payload.json, payload.ts, partial);
-    if (fromPayload && (!cached || payload.seq >= cached.seq)) return fromPayload;
+    if (fromPayload && (!cached || payload.seq >= cached.seq)) {
+      // Cache what we answer with, so a later payload that lacks this source
+      // (a partial update) cannot make the next read fall back to older data (#105).
+      remember([fromPayload], payload.seq);
+      return fromPayload;
+    }
     return cached?.sample ?? fromPayload;
   };
 
-  const onPayload = (href: string, json: unknown, receivedAt: number) => {
+  const onPayload = (href: string, json: unknown, receivedAt: number, requestSeq?: number) => {
     if (closed) return;
-    const { ts, seq: from } = storePayload(href, json, receivedAt);
+    // If a newer request already answered, this returns that payload, not this one.
+    const { json: current, ts, seq: from } = storePayload(href, json, receivedAt, requestSeq);
     const entry = channels.get(href);
     if (!entry) return;
     for (const sub of [...entry.subs]) {
       if (!entry.subs.has(sub)) continue; // unsubscribed by an earlier callback
       const samples: Sample[] = [];
       for (const parsed of sub.byEndpoint.get(href) ?? []) {
-        const sample = sampleFor(parsed, json, ts, streaming);
+        const sample = sampleFor(parsed, current, ts, streaming);
         if (sample) samples.push(sample);
       }
       if (samples.length) {
@@ -352,7 +423,8 @@ async function openSession(
         random: options.random ?? Math.random,
         webSocket: options.webSocket ?? defaultWebSocket(),
         sink: {
-          payload: (json, receivedAt) => onPayload(href, json, receivedAt),
+          payload: (json, receivedAt, requestSeq) => onPayload(href, json, receivedAt, requestSeq),
+          begin: () => ++seq,
           state: (state, message) => {
             if (channels.get(href) !== entry) return;
             entry.state = state;
@@ -374,14 +446,23 @@ async function openSession(
   };
 
   /** Group sources by endpoint URL; unparsable ones become `bad` samples. */
-  const group = (sources: readonly string[]) => {
+  // `capped`: only subscribe opens channels; one-shot reads/browse are exempt from maxChannels.
+  const group = (sources: readonly string[], capped = false) => {
     const byEndpoint = new Map<string, ParsedSource[]>();
     const invalid: Sample[] = [];
     const ts = ctx.now();
+    let newEndpoints = 0; // endpoints this call would open beyond the live channels
     for (const source of sources) {
       try {
         const parsed = parseSource(source);
-        const href = resolveEndpoint(config, parsed.endpoint).href;
+        const url = resolveEndpoint(config, parsed.endpoint);
+        const href = url.href;
+        const scope = scopeError?.(url);
+        if (scope) throw new HttpProviderError(`endpoint ${scope}`, 'network');
+        if (capped && !byEndpoint.has(href) && !channels.has(href) && channels.size + newEndpoints >= maxChannels) {
+          throw new HttpProviderError(`channel limit reached (${maxChannels} endpoints per session)`, 'unsupported');
+        }
+        if (capped && !byEndpoint.has(href) && !channels.has(href)) newEndpoints++;
         const list = byEndpoint.get(href) ?? [];
         list.push(parsed);
         byEndpoint.set(href, list);
@@ -404,7 +485,7 @@ async function openSession(
 
     subscribe(sources, onSamples) {
       if (closed) return () => {};
-      const { byEndpoint, invalid } = group([...sources]);
+      const { byEndpoint, invalid } = group([...sources], true);
       let active = true;
       const sub: Subscription = {
         byEndpoint,
@@ -463,10 +544,11 @@ async function openSession(
             }
             return;
           }
+          const requestSeq = ++seq; // taken before the request starts (#97)
           try {
             const json = await fetchJson(requestDeps(), new URL(href));
             // Same sample builder as subscriptions: `timestamp` selector, sequence number.
-            const record = storePayload(href, json, ctx.now());
+            const record = storePayload(href, json, ctx.now(), requestSeq);
             const samples = list.map((parsed) => sampleFor(parsed, record.json, record.ts, false) as Sample);
             remember(samples, record.seq);
             out.push(...samples);
@@ -513,8 +595,9 @@ async function openSession(
         json = payloads.get(url.href)?.json;
         if (json === undefined) return [];
       } else {
+        const requestSeq = ++seq; // before the request starts, like read() (#97)
         json = await fetchJson(requestDeps(), url);
-        storePayload(url.href, json, ctx.now());
+        storePayload(url.href, json, ctx.now(), requestSeq);
       }
       const hit = lookup(json, parsed.tokens);
       if (!hit.found || hit.value === null || typeof hit.value !== 'object') return [];
