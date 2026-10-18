@@ -114,6 +114,14 @@ export function currentFrameContext(win: Window = window): FrameContext {
  * a page cannot forge it). Without it (Firefox) only a single level of framing
  * whose referrer origin is trusted counts; a withheld referrer means no.
  * Anything unknown is untrusted: then only `loadDocument` documents are shown.
+ *
+ * INVARIANT for the referrer fallback (holodeck#157): `document.referrer` is the
+ * origin of the document that INITIATED the iframe navigation, which equals the
+ * parent only while no studio-origin page can navigate a named / attacker-chosen
+ * frame. So NO studio page may call `window.open(url, name)`, use `<a target>` /
+ * `<form target>` fed by untrusted input, or expose an open redirect; otherwise
+ * an untrusted top page could launder a studio-origin referrer into its own
+ * iframe. Remove the fallback once Firefox ships `location.ancestorOrigins`.
  */
 export function storedDocumentsVisible(policy: Pick<EmbedOriginPolicy, 'trusted'>, frame: FrameContext): boolean {
   if (!frame.framed) return true;
@@ -126,4 +134,14 @@ export function storedDocumentsVisible(policy: Pick<EmbedOriginPolicy, 'trusted'
     return false;
   }
   return policy.trusted.has(origin);
+}
+
+/**
+ * True when the stored-document check is closed only because this browser has
+ * no `ancestorOrigins` (Firefox) AND the referrer was withheld (a partner
+ * sending `Referrer-Policy: no-referrer`). Lets the embed say why instead of
+ * waiting silently (holodeck#157).
+ */
+export function referrerWithheld(frame: FrameContext): boolean {
+  return frame.framed && frame.ancestorOrigins === null && frame.parentIsTop && !frame.referrer;
 }

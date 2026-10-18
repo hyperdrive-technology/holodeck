@@ -25,7 +25,7 @@ import { documentKeys, useDocument, useDocumentCamera } from '../documents/queri
 import { useStudio } from '../studio-context';
 import { LiveValues } from '../features/LiveValues';
 import { handleEmbedMessage, type IsoDocument } from './handler';
-import { currentFrameContext, embedOriginPolicy, storedDocumentsVisible, type FrameContext } from './origins';
+import { currentFrameContext, embedOriginPolicy, referrerWithheld, storedDocumentsVisible, type FrameContext } from './origins';
 import { mergeObjectStates, withObjectState, withoutObjectState, type EmbedInbound, type ObjectStates } from './protocol';
 import { useEmbedBridge, type EmbedParent } from './use-embed-bridge';
 const NO_CONNECTIONS: Readonly<Record<string, ConnectionState>> = Object.freeze({});
@@ -58,11 +58,18 @@ export function EmbedRoute({
    * studio route in this tab is ignored): the embed shows only what the
    * parent sends with loadDocument.
    */
-  const storedVisible = useMemo(() => storedDocumentsVisible(policy, frameContext ?? currentFrameContext()), [policy, frameContext]);
+  const frame = useMemo(() => frameContext ?? currentFrameContext(), [frameContext]);
+  const storedVisible = useMemo(() => storedDocumentsVisible(policy, frame), [policy, frame]);
   const stored = useDocument(docId, { enabled: storedVisible });
   const camera = useDocumentCamera(docId, { enabled: storedVisible });
   /** A document the parent sent (`loadDocument`); wins over the stored one. */
   const [supplied, setSupplied] = useState<IsoDocument | null>(null);
+  /**
+   * Counts `loadDocument`s. A second load with the SAME id but a different body
+   * must still re-announce `ready` and get a fresh view (camera), so the ready
+   * key and the viewer key include it, not just `doc.id` (holodeck#158).
+   */
+  const [loadGeneration, setLoadGeneration] = useState(0);
   const storedDoc = storedVisible ? ((stored.data?.document as IsoDocument | undefined) ?? null) : null;
   const doc = supplied ?? storedDoc;
   const [states, setStates] = useState<ObjectStates>(EMPTY_STATES);
@@ -121,6 +128,7 @@ export function EmbedRoute({
       else if (action.kind === 'load') {
         docRef.current = { doc: action.document, isStored: false };
         setSupplied(action.document);
+        setLoadGeneration((n) => n + 1);
         setStates(EMPTY_STATES);
       }
       return outcome;
@@ -135,7 +143,7 @@ export function EmbedRoute({
   const { enabled } = useEmbedBridge({
     policy,
     documentIdFor,
-    readyKey: `${doc?.id ?? ''}:${isStored}`,
+    readyKey: `${doc?.id ?? ''}:${isStored}:${loadGeneration}`,
     onMessage,
     parent: embedParent,
   });
@@ -157,7 +165,9 @@ export function EmbedRoute({
     return (
       <div {...rootProps}>
         <p role="status" className="m-auto p-6 text-sm text-muted-foreground">
-          Waiting for the embedding page to send a document.
+          {referrerWithheld(frame)
+            ? 'This browser does not report the embedding page and the referrer was withheld, so the stored document is not shown. The embedding page must send the document with loadDocument, or serve this page with Referrer-Policy: strict-origin-when-cross-origin (or origin).'
+            : 'Waiting for the embedding page to send a document.'}
         </p>
       </div>
     );
@@ -195,8 +205,8 @@ export function EmbedRoute({
   return (
     <div {...rootProps}>
       <ProcessEditor
-        // A new document (loadDocument) gets a fresh view.
-        key={doc.id}
+        // A new document (loadDocument, even one with the same id) gets a fresh view.
+        key={`${doc.id}:${loadGeneration}`}
         scene={doc.body}
         onChange={noop}
         mode="run"

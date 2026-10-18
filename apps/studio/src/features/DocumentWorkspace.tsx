@@ -13,7 +13,7 @@ import { DocumentWriter } from '../documents/writer';
 import { INSPECTOR_BOUNDS, INSPECTOR_WIDTH_KEY } from '../layout/panel-width.logic';
 import { SidePanel } from '../layout/SidePanel';
 import { notify, panelStore } from '../layout/ui-state';
-import { documentRequires } from '../host/studio-host';
+import { documentRequires, mergeRequires } from '../host/studio-host';
 import { useStudio } from '../studio-context';
 import { LiveValues } from './LiveValues';
 import { activeDocumentStore } from './active-document';
@@ -35,7 +35,7 @@ type IsoDoc = HolodeckDocument<IsoSceneFile>;
 
 /** Recompute `requires` (parts + connection providers, holodeck#172) on a draft document, in place. */
 function withRequires(doc: IsoDoc, host: HolodeckHost): void {
-  const requires = documentRequires(host, doc.body, doc.connections);
+  const requires = mergeRequires(host, doc.requires, documentRequires(host, doc.body, doc.connections));
   if (Object.keys(requires).length) doc.requires = requires;
   else delete doc.requires;
 }

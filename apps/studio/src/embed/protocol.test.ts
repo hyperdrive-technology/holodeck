@@ -103,8 +103,14 @@ describe('parseEmbedMessage: request ids and types', () => {
     expect(r.requestId).toBeUndefined();
   });
 
-  it.each([['toString'], ['__proto__'], ['hasOwnProperty'], [42]])('refuses type %j', (type) => {
+  it.each([['toString'], ['__proto__'], ['hasOwnProperty']])('refuses type %j', (type) => {
     expect(error(msg({ type })).error).toMatch(/unknown message type/);
+  });
+
+  it('replies with an error, never throws, for a non-string type (holodeck#161)', () => {
+    for (const type of [{ toString: 0 }, { toString: () => 'getInfo' }, 5, null, ['getInfo'], undefined, Object.create(null)]) {
+      expect(parseEmbedMessage({ protocol: EMBED_PROTOCOL, type, requestId: 'r1' })).toEqual({ kind: 'error', error: 'type: must be a string', requestId: 'r1' });
+    }
   });
 
   it('parses clearObjectState with and without an objectId', () => {

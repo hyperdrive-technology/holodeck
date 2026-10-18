@@ -138,7 +138,9 @@ export function parseEmbedMessage(data: unknown): ParseResult {
   }
   const fail = (error: string): ParseResult => ({ kind: 'error', error, ...(requestId ? { requestId } : {}) });
   const type = data.type;
-  if (typeof type !== 'string' || !own(ALLOWED_KEYS, type)) return fail(`type: unknown message type ${JSON.stringify(String(type).slice(0, 40))}`);
+  // Never coerce a non-string: `String({ toString: 0 })` throws, and this runs outside the bridge's try/catch (holodeck#161).
+  if (typeof type !== 'string') return fail('type: must be a string');
+  if (!own(ALLOWED_KEYS, type)) return fail(`type: unknown message type ${JSON.stringify(type.slice(0, 40))}`);
   const kind = type as EmbedInbound['type'];
   const extra = Object.keys(data).filter((k) => !ALLOWED_KEYS[kind].has(k));
   if (extra.length) return fail(`${kind}: unexpected field(s) ${extra.slice(0, 5).map((k) => JSON.stringify(k.slice(0, 40))).join(', ')}`);

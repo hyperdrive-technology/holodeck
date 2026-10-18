@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { acceptMessage, currentFrameContext, embedOriginPolicy, parseOrigin, storedDocumentsVisible, type FrameContext } from './origins';
+import { acceptMessage, currentFrameContext, embedOriginPolicy, parseOrigin, referrerWithheld, storedDocumentsVisible, type FrameContext } from './origins';
 
 const SELF = 'https://studio.example';
 
@@ -124,5 +124,15 @@ describe('storedDocumentsVisible', () => {
 
   it('reads the current window (jsdom: not framed)', () => {
     expect(currentFrameContext()).toMatchObject({ framed: false });
+  });
+});
+
+describe('referrerWithheld (holodeck#157)', () => {
+  const f = (o: Partial<FrameContext>): FrameContext => ({ framed: true, ancestorOrigins: null, referrer: '', parentIsTop: true, ...o });
+  it('is true only for a framed, ancestorOrigins-less page with no referrer', () => {
+    expect(referrerWithheld(f({}))).toBe(true);
+    expect(referrerWithheld(f({ referrer: 'https://a.example/' }))).toBe(false);
+    expect(referrerWithheld(f({ ancestorOrigins: ['https://a.example'] }))).toBe(false);
+    expect(referrerWithheld(f({ framed: false }))).toBe(false);
   });
 });
