@@ -60,12 +60,23 @@ PLC or Hyperdrive code: the studio is a plain Holodeck host.
   Each secret is bound to the endpoint it was entered for
   (`connections/fingerprint.ts`: HTTP origin + auth scheme, AWS region + role /
   pool, the whole config for other providers): point the connection elsewhere,
-  or import another document under the same id, and it is not sent.
+  or import another document under the same id, and it is not sent. The
+  binding is per provider session (`connections/session-secrets.ts`): a
+  session only ever receives secrets for the endpoint it was opened with. If
+  the browser blocks sessionStorage, secrets are kept in memory for the page
+  (with a notice) instead of failing to start.
+- **Undo and connections**: removing a connection is an envelope edit, outside
+  the canvas undo history. If an undo brings back bindings to a connection
+  removed in this session, the connection is restored (with a notice) so the
+  document stays valid; a binding to an unknown connection is flagged
+  "missing" in the inspector and can always be removed.
 - **No credentials in documents** (`connections/credentials.ts`): connection
   configs pass the provider's own validation (`parseHttpConfig`,
   `parseAwsConfig`: no Authorization / Cookie headers, no `user:pass@` URLs,
   no AWS key names) and a generic deep scan for credential-looking keys and
   values, in the connection dialog, on every save and on import / embed load.
+  Connection labels and binding sources (which can carry an endpoint query)
+  are scanned too.
 - **Layout**: T3 Code idioms: resizable, persisted side panels
   (`src/layout/`), TanStack Store for UI state, TanStack Hotkeys for
   shortcuts (`Mod+/` lists them).

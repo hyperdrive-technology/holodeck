@@ -54,8 +54,23 @@ export function BindingDialog({
           <DialogTitle>Bind “{paramLabel}”</DialogTitle>
           <DialogDescription>The live value replaces the parameter while the document is open (canvas and embeds).</DialogDescription>
         </DialogHeader>
+        {current && !connections.some((c) => c.id === current.connection) ? (
+          <p role="alert" data-testid="binding-dangling" className="text-sm text-destructive">
+            This binding uses connection “{current.connection}”, which the document no longer has. Remove the binding, or bind it to another
+            connection.
+          </p>
+        ) : null}
         {connections.length === 0 ? (
-          <p className="text-sm text-muted-foreground">This document has no connections yet. Add one in the Connections tab first.</p>
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">This document has no connections yet. Add one in the Connections tab first.</p>
+            {current ? (
+              <div className="flex justify-start">
+                <Button type="button" variant="outline" className="text-destructive" onClick={() => onSave(undefined)}>
+                  Remove binding
+                </Button>
+              </div>
+            ) : null}
+          </div>
         ) : (
           <form
             className="flex flex-col gap-3"

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SECRET_PREFIX, SessionSecretStore } from './secrets';
+import { memoryStorage as pageMemoryStorage, resolveSecretStorage, SECRET_PREFIX, SessionSecretStore } from './secrets';
 
 const FP = 'fp-1';
 
@@ -26,8 +26,6 @@ describe('SessionSecretStore', () => {
     expect(store.get('doc-a', 'api', 'token', FP)).toBe('s3cret');
     expect(store.get('doc-b', 'api', 'token', FP)).toBe('other');
     expect(store.has('doc-a', 'db', 'token', FP)).toBe(false);
-    expect(await store.forDocument('doc-a', () => FP)('api', 'token')).toBe('s3cret');
-    expect(await store.forDocument('doc-a', () => FP)('api', 'password')).toBeUndefined();
     expect([...storage.map.keys()].every((k) => k.startsWith(SECRET_PREFIX))).toBe(true);
   });
 
@@ -85,12 +83,6 @@ describe('SessionSecretStore', () => {
     expect(store.get('d', 'api', 'token', 'endpoint-A')).toBe('tok');
     expect(store.get('d', 'api', 'token', 'endpoint-B')).toBeUndefined();
     expect(store.has('d', 'api', 'token', 'endpoint-B')).toBe(false);
-    let current = 'endpoint-A';
-    const lookup = store.forDocument('d', () => current);
-    expect(await lookup('api', 'token')).toBe('tok');
-    current = 'endpoint-B';
-    expect(await lookup('api', 'token')).toBeUndefined();
-    expect(await store.forDocument('d', () => undefined)('api', 'token')).toBeUndefined();
   });
 
   it('ignores values stored in another format (fail closed)', () => {
@@ -100,5 +92,39 @@ describe('SessionSecretStore', () => {
     const key = [...storage.map.keys()][0]!;
     storage.map.set(key, 'plain-old-value');
     expect(store.get('d', 'api', 'token', 'fp')).toBeUndefined();
+  });
+
+  // Review of holodeck#163: a browser policy that blocks sessionStorage must not stop the app.
+  describe('resolveSecretStorage', () => {
+    it('uses sessionStorage when it works', () => {
+      expect(resolveSecretStorage().kind).toBe('session');
+    });
+
+    it('falls back to memory when reading sessionStorage throws', () => {
+      const r = resolveSecretStorage(() => {
+        throw new DOMException('denied', 'SecurityError');
+      });
+      expect(r.kind).toBe('memory');
+      const store = new SessionSecretStore(r.storage);
+      store.set('d', 'a', 'token', 'x', FP);
+      expect(store.get('d', 'a', 'token', FP)).toBe('x');
+    });
+
+    it('falls back to memory when writes are refused', () => {
+      const refusing = { ...pageMemoryStorage(), setItem: () => { throw new DOMException('quota', 'QuotaExceededError'); } } as unknown as Storage;
+      expect(resolveSecretStorage(() => refusing).kind).toBe('memory');
+    });
+
+    it('the default constructor survives a throwing sessionStorage getter', () => {
+      const original = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
+      Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, get: () => { throw new DOMException('denied', 'SecurityError'); } });
+      try {
+        const store = new SessionSecretStore();
+        store.set('d', 'a', 'token', 'x', FP);
+        expect(store.get('d', 'a', 'token', FP)).toBe('x');
+      } finally {
+        if (original) Object.defineProperty(globalThis, 'sessionStorage', original);
+      }
+    });
   });
 });

@@ -28,8 +28,8 @@ export class SessionSecretStore {
   private readonly listeners = new Set<() => void>();
   private version = 0;
 
-  /** `null`: no storage available (secrets cannot be kept). Default: this tab's `sessionStorage`. */
-  constructor(private readonly storage: SecretStorage | null = typeof sessionStorage === 'undefined' ? null : sessionStorage) {}
+  /** `null`: no storage available (secrets cannot be kept). Default: this tab's `sessionStorage`, else memory (see `resolveSecretStorage`). */
+  constructor(private readonly storage: SecretStorage | null = resolveSecretStorage().storage) {}
 
   /** The secret, if one was entered for this connection while it had `fingerprint`. */
   get(docId: string, connectionId: string, key: string, fingerprint: string): string | undefined {
@@ -78,18 +78,6 @@ export class SessionSecretStore {
     if (doomed.length) this.changed();
   }
 
-  /**
-   * Hub callback for one document (`ProviderHubOptions.secret`).
-   * `fingerprintOf` gives the connection's current fingerprint (undefined for
-   * an unknown connection: no secret).
-   */
-  forDocument(docId: string, fingerprintOf: (connectionId: string) => string | undefined): (connectionId: string, key: string) => Promise<string | undefined> {
-    return async (connectionId, key) => {
-      const fingerprint = fingerprintOf(connectionId);
-      return fingerprint === undefined ? undefined : this.get(docId, connectionId, key, fingerprint);
-    };
-  }
-
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -102,4 +90,43 @@ export class SessionSecretStore {
     this.version += 1;
     for (const l of this.listeners) l();
   }
+}
+
+/** A Storage that lives in this page's memory only (lost on reload). */
+export function memoryStorage(): SecretStorage {
+  const map = new Map<string, string>();
+  return {
+    getItem: (k) => map.get(k) ?? null,
+    setItem: (k, v) => void map.set(k, String(v)),
+    removeItem: (k) => void map.delete(k),
+    key: (i) => [...map.keys()][i] ?? null,
+    get length() {
+      return map.size;
+    },
+  };
+}
+
+/**
+ * This tab's sessionStorage if the browser lets us use it, else an in-memory
+ * store. Browser policies can make merely READING `window.sessionStorage`
+ * throw (`SecurityError`), which used to abort app startup (review of
+ * holodeck#163). `kind` says which one, for a notice.
+ */
+export function resolveSecretStorage(get: () => Storage | undefined = () => (typeof sessionStorage === 'undefined' ? undefined : sessionStorage)): {
+  storage: SecretStorage;
+  kind: 'session' | 'memory';
+} {
+  try {
+    const storage = get();
+    if (storage) {
+      // Some policies allow the getter but refuse writes.
+      const probe = `${SECRET_PREFIX}probe`;
+      storage.setItem(probe, '1');
+      storage.removeItem(probe);
+      return { storage, kind: 'session' };
+    }
+  } catch {
+    // Fall through to memory.
+  }
+  return { storage: memoryStorage(), kind: 'memory' };
 }

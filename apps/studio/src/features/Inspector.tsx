@@ -304,7 +304,13 @@ function BindingRow({
       <div className="flex min-w-0 items-center gap-1">
         {binding ? (
           <>
-            <StatusBadge state={live.statuses[binding.connection]} />
+            {connections.some((c) => c.id === binding.connection) ? (
+              <StatusBadge state={live.statuses[binding.connection]} />
+            ) : (
+              <span data-testid={`binding-dangling-${param}`} className="rounded-full bg-destructive/15 px-2 py-0.5 text-[11px] font-medium text-destructive" title="This connection no longer exists">
+                missing
+              </span>
+            )}
             <button type="button" className="min-w-0 flex-1 truncate text-left hover:underline" title={`${binding.connection}: ${binding.source}`} onClick={() => setOpen(true)}>
               <code>{binding.connection}</code> {binding.source}
             </button>

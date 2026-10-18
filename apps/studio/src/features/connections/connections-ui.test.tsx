@@ -117,6 +117,17 @@ describe('<ConnectionsPanel /> + <ConnectionDialog />', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
+  it('dialog refuses a label that carries a credential (holodeck#170)', async () => {
+    const { onSave } = panel();
+    fireEvent.click(screen.getByRole('button', { name: /Add/ }));
+    pick('Provider', 'holodeck.sim');
+    pick('Id', 'plant');
+    pick('Label', 'https://admin:SECRET@x.test');
+    fireEvent.click(within(screen.getByTestId('connection-dialog')).getByRole('button', { name: 'Add' }));
+    expect(await screen.findByTestId('connection-problems')).toHaveTextContent('label');
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
   it('AWS: region + credential mode in the form; access keys are secrets', async () => {
     const { onSave } = panel();
     fireEvent.click(screen.getByRole('button', { name: /Add/ }));

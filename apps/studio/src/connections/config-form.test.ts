@@ -27,7 +27,7 @@ describe('describeConfig', () => {
   });
 
   it('no schema: no fields', () => {
-    expect(describeConfig(undefined)).toEqual({ fields: [], advancedKeys: [] });
+    expect(describeConfig(undefined)).toEqual({ fields: [], advancedKeys: [], allowsExtra: true });
   });
 });
 
@@ -68,6 +68,31 @@ describe('form <-> config', () => {
     const form = describeConfig(AWS_CONFIG_SCHEMA);
     const state = configToForm(form, { region: 'eu-west-1', credentials: { type: 'assumeRole' } });
     expect(formToConfig(form, state).problems).toContain('Credentials Role Arn: required');
+  });
+});
+
+// Review of holodeck#163: editing a connection must never drop settings the form does not show.
+describe('unknown settings survive editing', () => {
+  it('schemaless provider: the whole config round-trips through the advanced JSON', () => {
+    const form = describeConfig(undefined);
+    const config = { endpoint: 'https://api.example.test', nested: { a: [1, 2] }, flag: false };
+    const state = configToForm(form, config);
+    expect(JSON.parse(state.advanced)).toEqual(config);
+    expect(formToConfig(form, state)).toEqual({ config, problems: [] });
+  });
+
+  it('schema with additionalProperties: undeclared keys are kept next to the form fields', () => {
+    const schema = { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] };
+    const form = describeConfig(schema);
+    expect(form.allowsExtra).toBe(true);
+    const config = { url: 'https://x.test', vendorOption: 3 };
+    const state = configToForm(form, config);
+    expect(JSON.parse(state.advanced)).toEqual({ vendorOption: 3 });
+    expect(formToConfig(form, state).config).toEqual(config);
+  });
+
+  it('closed schema (HTTP): nothing extra is offered, declared advanced keys still round-trip', () => {
+    expect(describeConfig(HTTP_CONFIG_SCHEMA).allowsExtra).toBe(false);
   });
 });
 

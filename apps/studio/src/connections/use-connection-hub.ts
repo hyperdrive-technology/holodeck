@@ -5,10 +5,10 @@
  * `ProcessEditor` and each connection's status for the badges.
  */
 
-import type { ConnectionState, HolodeckDocument, HolodeckHost, ProviderHub } from '@holodeck/sdk';
+import { ProviderHub, type ConnectionState, type HolodeckDocument, type HolodeckHost } from '@holodeck/sdk';
 import { connectIsoDocument, useHubMetrics, type IsoMetrics, type IsoSceneFile } from '@holodeck/editor-2.5d-react';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { connectionFingerprint } from './fingerprint';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { sessionBoundRegistry } from './session-secrets';
 import type { SessionSecretStore } from './secrets';
 
 const NO_CONNECTIONS: Readonly<Record<string, ConnectionState>> = Object.freeze({});
@@ -29,19 +29,13 @@ export function useConnectionHub(
   secrets: SessionSecretStore,
 ): ConnectionHub {
   const [hub, setHub] = useState<ProviderHub | undefined>(undefined);
-  // The hub asks for secrets whenever a session (re)opens; answer with the
-  // connection's CURRENT fingerprint, so a secret entered for another
-  // endpoint is never sent (holodeck#166).
-  const connectionsRef = useRef(doc.connections);
-  connectionsRef.current = doc.connections;
   // Created in an effect (not useMemo) so StrictMode's double mount disposes
   // the first hub instead of reusing a disposed one (same as the embed route).
   useEffect(() => {
-    const fingerprintOf = (connectionId: string) => {
-      const connection = connectionsRef.current?.find((c) => c.id === connectionId);
-      return connection ? connectionFingerprint(connection) : undefined;
-    };
-    const created = host.createProviderHub({ secret: secrets.forDocument(doc.id, fingerprintOf) });
+    // Each session gets only secrets entered for the endpoint it was opened
+    // with (holodeck#166 and its review): see session-secrets.ts.
+    const registry = sessionBoundRegistry(host.registry, (connectionId, key, fingerprint) => secrets.get(doc.id, connectionId, key, fingerprint));
+    const created = new ProviderHub({ registry });
     setHub(created);
     return () => {
       void created.dispose();

@@ -36,13 +36,11 @@ describe('useConnectionHub', () => {
     await waitFor(() => expect(result.current.metrics['tank-1']?.level).toBe(0.9));
   });
 
-  it('asks the secret store, scoped to the document, and reconnect re-asks', async () => {
+  it('reconnect reopens a connection', async () => {
     const secrets = new SessionSecretStore(null);
-    const get = vi.spyOn(secrets, 'forDocument');
     const doc = simDoc();
     const { result } = renderHook(() => useConnectionHub(host, doc, secrets));
     await waitFor(() => expect(result.current.statuses.sim?.status.state).toBe('live'));
-    expect(get).toHaveBeenCalledWith('live', expect.any(Function));
     act(() => result.current.reconnect('sim'));
     await waitFor(() => expect(result.current.statuses.sim?.status.state).toBe('live'));
   });

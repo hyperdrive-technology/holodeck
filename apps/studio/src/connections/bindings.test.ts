@@ -3,6 +3,7 @@ import type { IsoSceneFile } from '@holodeck/editor-2.5d-react';
 import { describe, expect, it } from 'vitest';
 import {
   bindingProblems,
+  reconcileConnections,
   connectionIdProblem,
   connectionUsages,
   EMPTY_TRANSFORM_FORM,
@@ -67,6 +68,13 @@ describe('bindings', () => {
     expect(bindingProblems(connections, { connection: 'sim', source: 'x', transform: { kind: 'format', template: 'x' } }).join()).toContain('{value}');
   });
 
+  // holodeck#167: a source can carry an endpoint query; credentials there are refused.
+  it('bindingProblems refuses credential-looking sources', () => {
+    expect(bindingProblems(connections, { connection: 'sim', source: '/api/line2?api_key=SECRET#/speed' }).join()).toContain('api_key');
+    expect(bindingProblems(connections, { connection: 'sim', source: 'https://u:SECRET@x.test/a' }).join()).not.toContain('SECRET');
+    expect(bindingProblems(connections, { connection: 'sim', source: '/api/line2?limit=5#/speed' })).toEqual([]);
+  });
+
   it('withBinding sets and removes, dropping an empty map', () => {
     const one = withBinding(undefined, 'level', { connection: 'sim', source: 'sine:10' });
     expect(one).toEqual({ level: { connection: 'sim', source: 'sine:10' } });
@@ -98,5 +106,29 @@ describe('bindings', () => {
     const result = connectionIdProblem(id, existing);
     if (problem === null) expect(result).toBeNull();
     else expect(result).toContain(problem);
+  });
+
+  // holodeck#164: undo can bring back bindings to a connection removed meanwhile.
+  describe('reconcileConnections', () => {
+    const plant = { id: 'plant', provider: 'holodeck.sim' };
+    const scene: IsoSceneFile = {
+      id: 's',
+      name: 'S',
+      gridCellSize: 1,
+      objects: [
+        { id: 't', object: 'tank', x: 0, y: 0, bindings: { level: { connection: 'plant', source: 'sine:5' }, temp: { connection: 'plant', source: 'const:1' } } },
+        { id: 'v', object: 'valve', x: 0, y: 0, bindings: { open: { connection: 'ghost', source: 'mem:v' } } },
+      ],
+    };
+    it('restores a connection removed earlier (once) and reports unknown ones as dangling', () => {
+      const r = reconcileConnections(scene, [], new Map([['plant', plant]]));
+      expect(r.connections).toEqual([plant]);
+      expect(r.restored).toEqual(['plant']);
+      expect(r.dangling).toEqual(['v.open']);
+    });
+    it('changes nothing when every binding has its connection', () => {
+      const ok = { ...scene, objects: [scene.objects[0]!] };
+      expect(reconcileConnections(ok, [plant], new Map())).toEqual({ connections: [plant], restored: [], dangling: [] });
+    });
   });
 });

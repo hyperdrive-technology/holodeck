@@ -95,4 +95,23 @@ describe('<Inspector />', () => {
     expect(visible.length).toBeGreaterThan(0);
     for (const [name, spec] of visible) expect(screen.getByLabelText(spec.label || name)).toBeInTheDocument();
   });
+
+  // Review of holodeck#163: a binding to a connection that is gone is flagged and can always be removed.
+  it('flags a dangling binding and offers Remove binding even with no connections', () => {
+    const doc = createIsoDocument('Plant', 'p');
+    doc.body = withPart(doc.body, host.registry, 'tank').scene;
+    doc.body.objects[0]!.bindings = { level: { connection: 'gone', source: 'sine:5' } };
+    const onEdit = vi.fn();
+    const live = { metrics: {}, statuses: {}, hub: undefined, connectionsPanel: null };
+    render(
+      <StudioProvider services={{ host, store: new DocumentStore(openStudioDb('inspector-test-2')), channel: NO_CHANNEL, secrets: new SessionSecretStore(null) }}>
+        <Inspector doc={doc} selectedId="tank-1" onRename={vi.fn()} onEdit={onEdit} onDeleteObject={vi.fn()} onDeleteDocument={vi.fn()} live={live} />
+      </StudioProvider>,
+    );
+    expect(screen.getByTestId('binding-dangling-level')).toHaveTextContent('missing');
+    fireEvent.click(screen.getByTitle('gone: sine:5'));
+    expect(screen.getByTestId('binding-dangling')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove binding' }));
+    expect(onEdit).toHaveBeenCalledWith('tank-1', { kind: 'bindings', bindings: undefined });
+  });
 });

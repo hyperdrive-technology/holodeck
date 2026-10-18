@@ -103,6 +103,15 @@ function decodeURIComponentSafe(s: string) {
   }
 }
 
+/**
+ * A credential inside free text (a binding source, a label): URL userinfo,
+ * credential query parameters, `Bearer` / `Basic` values, AWS key ids.
+ * `null` when clean. Never returns the value itself.
+ */
+export function credentialInText(value: string): string | null {
+  return credentialValue(value, new Set());
+}
+
 /** Every credential-looking key or value in `config`, at any depth. */
 export function credentialProblems(config: unknown, provider?: Pick<HolodeckProvider, 'secrets'>): string[] {
   const extra = new Set((provider?.secrets ?? []).map((s) => normalizeKey(s.key)));

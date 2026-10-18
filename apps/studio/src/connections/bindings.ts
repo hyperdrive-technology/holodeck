@@ -6,6 +6,7 @@
 
 import { validateTransform, type ProviderConnection, type SignalBinding, type SignalValue, type ValueTransform } from '@holodeck/sdk';
 import type { IsoPlacement, IsoSceneFile } from '@holodeck/editor-2.5d-react';
+import { credentialInText } from './credentials';
 
 export type TransformKind = 'none' | ValueTransform['kind'];
 export const TRANSFORM_KINDS: readonly TransformKind[] = ['none', 'scale', 'threshold', 'map', 'format'];
@@ -146,6 +147,8 @@ export function bindingProblems(connections: readonly ProviderConnection[] | und
   const problems: string[] = [];
   if (!(connections ?? []).some((c) => c.id === binding.connection)) problems.push('connection: choose one of the document’s connections');
   if (binding.source.trim() === '') problems.push('source: required');
+  const credential = credentialInText(binding.source);
+  if (credential) problems.push(`source: looks like ${credential}; credentials go in the connection's secrets`);
   if (binding.transform) problems.push(...validateTransform(binding.transform, 'transform'));
   return problems;
 }
@@ -176,4 +179,37 @@ export function connectionIdProblem(id: string, existing: readonly string[]): st
   if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(id)) return 'id: start with a letter; letters, digits, - _ . only (max 64)';
   if (existing.includes(id)) return `id: "${id}" is already used in this document`;
   return null;
+}
+
+/**
+ * Keep a scene's bindings and the document's connections consistent after a
+ * canvas change (holodeck#164, review of #163). Connection removal is an
+ * envelope edit, outside the canvas undo history, so an undo can bring back a
+ * binding (or a deleted object that had one) to a connection that is gone.
+ * A connection removed earlier in this session (`removed`) is restored, so
+ * the document stays valid and saving keeps working; bindings to connections
+ * the session never had are reported as `dangling` (the inspector flags them
+ * and offers "Remove binding").
+ */
+export function reconcileConnections(
+  scene: IsoSceneFile,
+  connections: readonly ProviderConnection[],
+  removed: ReadonlyMap<string, ProviderConnection>,
+): { connections: ProviderConnection[]; restored: string[]; dangling: string[] } {
+  const have = new Set(connections.map((c) => c.id));
+  const next = [...connections];
+  const restored: string[] = [];
+  const dangling: string[] = [];
+  for (const o of scene.objects) {
+    for (const [param, b] of Object.entries(o.bindings ?? {})) {
+      if (have.has(b.connection)) continue;
+      const back = removed.get(b.connection);
+      if (back) {
+        next.push(back);
+        have.add(back.id);
+        restored.push(back.id);
+      } else dangling.push(`${o.id}.${param}`);
+    }
+  }
+  return { connections: next, restored, dangling };
 }

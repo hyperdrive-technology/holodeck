@@ -46,6 +46,12 @@ export interface ConfigForm {
   fields: ConfigField[];
   /** Properties edited as JSON. */
   advancedKeys: string[];
+  /**
+   * The schema accepts properties it does not declare (no schema, or
+   * `additionalProperties` not `false`): the advanced JSON box is offered for
+   * them, and existing ones are kept there (never dropped on save).
+   */
+  allowsExtra: boolean;
 }
 
 const isObj = (v: unknown): v is Schema => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -117,7 +123,7 @@ function variantField(key: string, schema: Schema, required: boolean): VariantFi
 
 /** Split a config schema into form fields and JSON-edited keys. No schema = everything advanced. */
 export function describeConfig(schema: unknown): ConfigForm {
-  if (!isObj(schema) || !isObj(schema.properties)) return { fields: [], advancedKeys: [] };
+  if (!isObj(schema) || !isObj(schema.properties)) return { fields: [], advancedKeys: [], allowsExtra: true };
   const required = new Set(Array.isArray(schema.required) ? (schema.required as string[]) : []);
   const fields: ConfigField[] = [];
   const advancedKeys: string[] = [];
@@ -126,7 +132,7 @@ export function describeConfig(schema: unknown): ConfigForm {
     if (field) fields.push(field);
     else advancedKeys.push(key);
   }
-  return { fields, advancedKeys };
+  return { fields, advancedKeys, allowsExtra: schema.additionalProperties !== false };
 }
 
 /** Form state: simple fields as strings / booleans, variants as `{ [discriminator]: value, ...fields }`, the rest as JSON text. */
@@ -151,8 +157,12 @@ export function configToForm(form: ConfigForm, config: Record<string, unknown> =
     } else if (f.kind === 'boolean') values[f.key] = typeof v === 'boolean' ? v : f.default === true;
     else values[f.key] = toText(v);
   }
+  // Everything the form does not own goes to the advanced JSON, declared or
+  // not, so editing (even just the label) never drops a setting (review of
+  // holodeck#163: schemaless providers lost their whole config).
+  const owned = new Set(form.fields.map((f) => f.key));
   const advanced: Record<string, unknown> = {};
-  for (const k of form.advancedKeys) if (config[k] !== undefined) advanced[k] = config[k];
+  for (const [k, v] of Object.entries(config)) if (!owned.has(k) && v !== undefined) advanced[k] = v;
   return { values, advanced: Object.keys(advanced).length ? JSON.stringify(advanced, null, 2) : '' };
 }
 

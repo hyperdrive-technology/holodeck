@@ -1,4 +1,4 @@
-import { HOLODECK_KINDS, type HolodeckDocument } from '@holodeck/sdk';
+import { HOLODECK_KINDS, type HolodeckDocument, type ProviderConnection } from '@holodeck/sdk';
 import { ISO_ENGINE_ID, ProcessEditor, type IsoSceneFile, type ProcessEditorHandle } from '@holodeck/editor-2.5d-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useBlocker, useNavigate } from '@tanstack/react-router';
@@ -21,6 +21,7 @@ import { ConflictDialog } from './ConflictDialog';
 import { inspectorActions, libraryAddActions } from './editor-commands';
 import { downloadBlob, downloadComponentsCsv, downloadDocument } from './file-io';
 import { imageFileName } from '../documents/io';
+import { reconcileConnections } from '../connections/bindings';
 import { connectionFingerprint } from '../connections/fingerprint';
 import { useConnectionHub } from '../connections/use-connection-hub';
 import { ConnectionsPanel } from './connections/ConnectionsPanel';
@@ -172,12 +173,25 @@ function DocumentWorkspace({
   }, [writer]);
 
   /** Apply a new body: recompute `requires`, update the working copy, persist. */
+  /** Connections removed in this session, so an undo that brings back their bindings can restore them (holodeck#164). */
+  const removedConnections = useRef(new Map<string, ProviderConnection>());
+
   const commitScene = useCallback(
     (scene: IsoSceneFile) => {
       const requires = requiresFor(host, usedIsoContributions(scene));
       const next: IsoDoc = { ...docRef.current, body: scene };
       if (Object.keys(requires).length) next.requires = requires;
       else delete next.requires;
+      const reconciled = reconcileConnections(scene, next.connections ?? [], removedConnections.current);
+      if (reconciled.restored.length) {
+        next.connections = reconciled.connections;
+        for (const id of reconciled.restored) removedConnections.current.delete(id);
+        notify({
+          tone: 'info',
+          title: `Restored connection ${reconciled.restored.map((id) => `“${id}”`).join(', ')}`,
+          details: ['Undo brought back bindings that use it. Its secrets were cleared when it was removed: enter them again if it needs any.'],
+        });
+      }
       docRef.current = next;
       setDoc(next);
       saveWorkingCopy();
@@ -312,6 +326,8 @@ function DocumentWorkspace({
 
   const removeConnection = useCallback(
     (id: string) => {
+      const removed = docRef.current.connections?.find((c) => c.id === id);
+      if (removed) removedConnections.current.set(id, removed);
       const connections = (docRef.current.connections ?? []).filter((c) => c.id !== id);
       const next: IsoDoc = { ...docRef.current, connections };
       if (!connections.length) delete next.connections;

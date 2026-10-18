@@ -25,7 +25,7 @@ import {
   isoPackage,
   loadIsoDocument,
 } from '@holodeck/editor-2.5d-react';
-import { connectionConfigProblems } from '../connections/credentials';
+import { connectionConfigProblems, credentialInText } from '../connections/credentials';
 import { PROVIDER_PACKAGES } from './provider-packages';
 
 export const STUDIO_HOST_NAME = 'holodeck-studio';
@@ -84,7 +84,13 @@ export function checkHostDocument(host: HolodeckHost, doc: HolodeckDocument): { 
   for (const connection of doc.connections ?? []) {
     const provider = host.registry.get<HolodeckProvider>(HOLODECK_KINDS.provider, connection.provider);
     problems.push(...connectionConfigProblems(connection, provider).map((p) => `connections.${connection.id}.config: ${p}`));
+    // A label is free text too (holodeck#170).
+    const inLabel = typeof connection.label === 'string' ? credentialInText(connection.label) : null;
+    if (inLabel) problems.push(`connections.${connection.id}.label: looks like ${inLabel}; credentials go in the connection's secrets`);
   }
+  // Binding sources are provider addresses, which can carry an endpoint
+  // query such as `/api?api_key=…` (holodeck#167).
+  problems.push(...bindingSourceProblems(doc.body));
   let document: HolodeckDocument = doc;
   try {
     if (doc.engine === ISO_ENGINE_ID) document = loadIsoDocument(doc, host.registry).document as HolodeckDocument;
@@ -115,4 +121,21 @@ export function requiresFor(host: HolodeckHost, usedContributions: Iterable<read
     if (version) requires[pkg.manifest.id] = `^${version.major}.${version.minor}`;
   }
   return Object.fromEntries(Object.entries(requires).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+/** Credential-looking binding sources in an iso body (`objects[].bindings[param].source`). */
+export function bindingSourceProblems(body: unknown): string[] {
+  const objects = body && typeof body === 'object' && Array.isArray((body as { objects?: unknown }).objects) ? (body as { objects: unknown[] }).objects : [];
+  const problems: string[] = [];
+  for (const o of objects) {
+    if (!o || typeof o !== 'object') continue;
+    const { id, bindings } = o as { id?: unknown; bindings?: unknown };
+    if (!bindings || typeof bindings !== 'object') continue;
+    for (const [param, b] of Object.entries(bindings as Record<string, unknown>)) {
+      const source = b && typeof b === 'object' ? (b as { source?: unknown }).source : undefined;
+      const found = typeof source === 'string' ? credentialInText(source) : null;
+      if (found) problems.push(`${String(id)}.${param}: the binding source looks like ${found}; credentials go in the connection's secrets`);
+    }
+  }
+  return problems;
 }

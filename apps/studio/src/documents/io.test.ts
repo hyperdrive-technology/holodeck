@@ -89,6 +89,18 @@ describe('import / export', () => {
     expect(problems.join('\n')).not.toContain('SECRET');
   });
 
+  // holodeck#167 / #170: binding sources and connection labels are free text and are scanned too.
+  it('refuses credentials in a binding source or a connection label', () => {
+    const doc = createIsoDocument('A', 'a');
+    const body = { ...doc.body, objects: [{ id: 't', object: 'tank', x: 0, y: 0, bindings: { level: { connection: 'api', source: '/v1?token=SECRET#/level' } } }] };
+    const withSource = { ...doc, body, connections: [{ id: 'api', provider: 'holodeck.http', config: { url: 'https://x.test/a' } }] };
+    expect(problemsOf(JSON.stringify(withSource)).join('\n')).toContain('t.level');
+    const withLabel = { ...doc, connections: [{ id: 'api', provider: 'holodeck.sim', label: 'https://admin:SECRET@x.test' }] };
+    const problems = problemsOf(JSON.stringify(withLabel)).join('\n');
+    expect(problems).toContain('connections.api.label');
+    expect(problems).not.toContain('SECRET');
+  });
+
   it('reports invalid JSON', () => {
     expect(problemsOf('{ nope')[0]).toMatch(/^not valid JSON/);
   });

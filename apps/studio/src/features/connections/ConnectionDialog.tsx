@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { connectionIdProblem } from '../../connections/bindings';
-import { connectionConfigProblems } from '../../connections/credentials';
+import { connectionConfigProblems, credentialInText } from '../../connections/credentials';
 import { connectionFingerprint } from '../../connections/fingerprint';
 import {
   configToForm,
@@ -104,6 +104,8 @@ export function ConnectionDialog({
       const idProblem = connectionIdProblem(value.id.trim(), takenIds);
       if (idProblem) problems.push(idProblem);
     }
+    const inLabel = credentialInText(value.label);
+    if (inLabel) problems.push(`label: looks like ${inLabel}; credentials go in the secrets fields`);
     const { config, problems: formProblems } = formToConfig(formOf(value.provider), value.config);
     problems.push(...formProblems);
     if (!formProblems.length) {
