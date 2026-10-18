@@ -1,12 +1,15 @@
-import { HOLODECK_KINDS, type HolodeckDocument } from '@holodeck/sdk';
-import type { IsoPartDefinition, IsoPartParamSpec, IsoPlacement, IsoSceneFile } from '@holodeck/editor-2.5d-react';
-import { RotateCcwIcon, RotateCwIcon, Trash2Icon } from 'lucide-react';
+import { HOLODECK_KINDS, type ConnectionState, type HolodeckDocument, type HolodeckProvider, type ProviderConnection, type ProviderHub } from '@holodeck/sdk';
+import type { IsoMetrics, IsoPartDefinition, IsoPartParamSpec, IsoPlacement, IsoSceneFile } from '@holodeck/editor-2.5d-react';
+import { LinkIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon } from 'lucide-react';
 import { useId, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { useStudio } from '../studio-context';
+import { withBinding } from '../connections/bindings';
+import { BindingDialog } from './connections/BindingDialog';
+import { StatusBadge } from './connections/StatusBadge';
 import { DraftField, ReadonlyField } from './fields';
 import { coerceCoordinate, coerceParam, paramValue, rotationDegrees, visibleParams } from './inspector.logic';
 
@@ -22,7 +25,18 @@ export const formatTime = (iso: string | undefined) => {
 export type InspectorEdit =
   | { kind: 'move'; patch: { x?: number; y?: number } }
   | { kind: 'rotate'; direction: 1 | -1 }
-  | { kind: 'param'; name: string; value: unknown };
+  | { kind: 'param'; name: string; value: unknown }
+  /** Replace the placement's bindings (undefined = none). */
+  | { kind: 'bindings'; bindings: IsoPlacement['bindings'] | undefined };
+
+/** Live data for the inspector: values, connection statuses, the hub (for browse), and the Connections tab. */
+export interface InspectorLive {
+  metrics: IsoMetrics;
+  statuses: Readonly<Record<string, ConnectionState>>;
+  hub: ProviderHub | undefined;
+  /** Rendered in the Connections tab. */
+  connectionsPanel: React.ReactNode;
+}
 
 export interface InspectorProps {
   doc: HolodeckDocument<IsoSceneFile>;
@@ -33,13 +47,34 @@ export interface InspectorProps {
   /** Delete through the editor (connector anchors detach, hosted parts follow: holodeck#124). */
   onDeleteObject: (id: string) => void;
   onDeleteDocument: () => void;
+  live?: InspectorLive;
 }
 
 export function Inspector(props: InspectorProps) {
+  const [tab, setTab] = useState<'properties' | 'connections'>('properties');
   const selected = props.selectedId ? props.doc.body.objects.find((o) => o.id === props.selectedId) : undefined;
+  const count = props.doc.connections?.length ?? 0;
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-testid="inspector">
-      {selected ? <ObjectInspector {...props} placement={selected} /> : <DocumentInspector {...props} />}
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="inspector">
+      {props.live ? (
+        <div role="tablist" aria-label="Inspector" className="flex shrink-0 gap-1 border-b px-2 pt-2">
+          {(['properties', 'connections'] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              role="tab"
+              aria-selected={tab === t}
+              onClick={() => setTab(t)}
+              className="rounded-t-md px-3 py-1.5 text-xs font-medium text-muted-foreground aria-selected:bg-background aria-selected:text-foreground aria-selected:shadow-[inset_0_-2px_0_var(--color-primary)]"
+            >
+              {t === 'properties' ? 'Properties' : `Connections${count ? ` (${count})` : ''}`}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" role={props.live ? 'tabpanel' : undefined}>
+        {tab === 'connections' && props.live ? props.live.connectionsPanel : selected ? <ObjectInspector {...props} placement={selected} /> : <DocumentInspector {...props} />}
+      </div>
     </div>
   );
 }
@@ -111,7 +146,7 @@ function DocumentInspector({ doc, onRename, onDeleteDocument }: InspectorProps) 
   );
 }
 
-function ObjectInspector({ doc, placement, onEdit, onDeleteObject }: InspectorProps & { placement: IsoPlacement }) {
+function ObjectInspector({ doc, placement, onEdit, onDeleteObject, live }: InspectorProps & { placement: IsoPlacement }) {
   // Grouped objects select, rotate and delete as a unit (as on the canvas); say so.
   const groupSize = placement.group ? doc.body.objects.filter((o) => o.group === placement.group).length : 1;
   const { host } = useStudio();
@@ -153,7 +188,19 @@ function ObjectInspector({ doc, placement, onEdit, onDeleteObject }: InspectorPr
           <SectionTitle>Parameters</SectionTitle>
           <div className="flex flex-col gap-2 px-4">
             {visibleParams(def.params).map(([name, spec]) => (
-              <ParamField key={name} name={name} spec={spec} value={paramValue(placement, name, spec)} onCommit={(value) => edit({ kind: 'param', name, value })} />
+              <div key={name} className="flex flex-col gap-1">
+                <ParamField name={name} spec={spec} value={paramValue(placement, name, spec)} onCommit={(value) => edit({ kind: 'param', name, value })} />
+                {live ? (
+                  <BindingRow
+                    placement={placement}
+                    param={name}
+                    paramLabel={spec.label || name}
+                    doc={doc}
+                    live={live}
+                    onChange={(bindings) => edit({ kind: 'bindings', bindings })}
+                  />
+                ) : null}
+              </div>
             ))}
           </div>
         </>
@@ -227,4 +274,64 @@ function ParamField({ name, spec, value, onCommit }: { name: string; spec: IsoPa
     default:
       return <ReadonlyField label={label} value={<code className="text-xs">{JSON.stringify(value)}</code>} />;
   }
+}
+
+/** A param's binding: what it is bound to, its live value, and the editor dialog. */
+function BindingRow({
+  placement,
+  param,
+  paramLabel,
+  doc,
+  live,
+  onChange,
+}: {
+  placement: IsoPlacement;
+  param: string;
+  paramLabel: string;
+  doc: HolodeckDocument<IsoSceneFile>;
+  live: InspectorLive;
+  onChange: (bindings: IsoPlacement['bindings'] | undefined) => void;
+}) {
+  const { host } = useStudio();
+  const [open, setOpen] = useState(false);
+  const binding = placement.bindings?.[param];
+  const value = live.metrics[placement.id]?.[param];
+  const connections = doc.connections ?? [];
+  const providerOf = (c: ProviderConnection | undefined) => (c ? host.registry.get<HolodeckProvider>(HOLODECK_KINDS.provider, c.provider) : undefined);
+  return (
+    <div className="grid grid-cols-[6rem_1fr] items-center gap-2 text-xs" data-testid={`binding-${param}`}>
+      <span />
+      <div className="flex min-w-0 items-center gap-1">
+        {binding ? (
+          <>
+            <StatusBadge state={live.statuses[binding.connection]} />
+            <button type="button" className="min-w-0 flex-1 truncate text-left hover:underline" title={`${binding.connection}: ${binding.source}`} onClick={() => setOpen(true)}>
+              <code>{binding.connection}</code> {binding.source}
+            </button>
+            <span className="tabular-nums font-medium" data-testid={`live-${param}`}>
+              {value === undefined ? '…' : typeof value === 'number' ? Number(value.toFixed(4)) : String(value)}
+            </span>
+          </>
+        ) : (
+          <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs" aria-label={`Bind ${paramLabel}`} onClick={() => setOpen(true)}>
+            <LinkIcon className="size-3" /> Bind
+          </Button>
+        )}
+      </div>
+      {open ? (
+        <BindingDialog
+          paramLabel={paramLabel}
+          connections={connections}
+          current={binding}
+          hub={live.hub}
+          providerOf={providerOf}
+          onClose={() => setOpen(false)}
+          onSave={(next) => {
+            onChange(withBinding(placement.bindings, param, next));
+            setOpen(false);
+          }}
+        />
+      ) : null}
+    </div>
+  );
 }

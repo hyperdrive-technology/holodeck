@@ -5,6 +5,7 @@ import { openStudioDb } from '../documents/db';
 import { createIsoDocument } from '../documents/new-document';
 import { DocumentStore } from '../documents/store';
 import { createStudioHost } from '../host/studio-host';
+import { SessionSecretStore } from '../connections/secrets';
 import { StudioProvider } from '../studio-context';
 import { NO_CHANNEL, withPart } from '../test-support';
 import type { IsoPartDefinition } from '@holodeck/editor-2.5d-react';
@@ -29,7 +30,7 @@ function setup(over: Partial<InspectorProps> = {}) {
     ...over,
   };
   render(
-    <StudioProvider services={{ host, store: new DocumentStore(openStudioDb('inspector-test')), channel: NO_CHANNEL }}>
+    <StudioProvider services={{ host, store: new DocumentStore(openStudioDb('inspector-test')), channel: NO_CHANNEL, secrets: new SessionSecretStore(null) }}>
       <Inspector {...props} />
     </StudioProvider>,
   );

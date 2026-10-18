@@ -21,6 +21,9 @@ import { ConflictDialog } from './ConflictDialog';
 import { inspectorActions, libraryAddActions } from './editor-commands';
 import { downloadBlob, downloadComponentsCsv, downloadDocument } from './file-io';
 import { imageFileName } from '../documents/io';
+import { useConnectionHub } from '../connections/use-connection-hub';
+import { ConnectionsPanel } from './connections/ConnectionsPanel';
+import type { ConnectionSubmit } from './connections/ConnectionDialog';
 import { Inspector, type InspectorEdit } from './Inspector';
 import { describeSaveStatus } from './save-status';
 import { useStudioActions } from './use-studio-actions';
@@ -91,7 +94,7 @@ function DocumentWorkspace({
   /** Let the route drop this workspace (nothing here needs keeping). */
   onReleased: () => void;
 }) {
-  const { host, store, channel } = useStudio();
+  const { host, store, channel, secrets } = useStudio();
   const client = useQueryClient();
   const [doc, setDoc] = useState<IsoDoc>(initial.document as IsoDoc);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -274,6 +277,46 @@ function DocumentWorkspace({
   }, []);
   const onEdit = useCallback((id: string, edit: InspectorEdit) => runOnObject(id, edit), [runOnObject]);
   const onDeleteObject = useCallback((id: string) => runOnObject(id, { kind: 'delete' }), [runOnObject]);
+  // Live data: a hub on this document's connections + bindings, secrets from this tab (holodeck#101).
+  const live = useConnectionHub(host, doc, secrets);
+
+  /**
+   * Add or edit a connection. The connection (non-secret settings) goes into
+   * the document envelope and is saved; secrets go to this tab's
+   * sessionStorage only, then the connection reopens to pick them up.
+   * Envelope edits are not on the canvas undo stack (they are not body edits).
+   */
+  const saveConnection = useCallback(
+    ({ connection, secrets: secretUpdates }: ConnectionSubmit, isNew: boolean) => {
+      const current = docRef.current.connections ?? [];
+      const connections = isNew ? [...current, connection] : current.map((c) => (c.id === connection.id ? connection : c));
+      const next: IsoDoc = { ...docRef.current, connections };
+      docRef.current = next;
+      setDoc(next);
+      saveWorkingCopy();
+      try {
+        for (const [key, value] of Object.entries(secretUpdates)) secrets.set(next.id, connection.id, key, value);
+      } catch (error) {
+        notify({ tone: 'error', title: 'Could not keep the secrets in this tab', details: [error instanceof Error ? error.message : String(error)] });
+      }
+      if (Object.keys(secretUpdates).length) live.reconnect(connection.id);
+    },
+    [live, saveWorkingCopy, secrets],
+  );
+
+  const removeConnection = useCallback(
+    (id: string) => {
+      const connections = (docRef.current.connections ?? []).filter((c) => c.id !== id);
+      const next: IsoDoc = { ...docRef.current, connections };
+      if (!connections.length) delete next.connections;
+      docRef.current = next;
+      setDoc(next);
+      saveWorkingCopy();
+      secrets.clear(next.id, id);
+    },
+    [saveWorkingCopy, secrets],
+  );
+
   const onRename = useCallback(
     (name: string) => {
       // Optimistic in the working copy; the store applies it to the stored
@@ -328,6 +371,7 @@ function DocumentWorkspace({
             }}
             placing={placing}
             onPlacingChange={setPlacing}
+            metrics={live.metrics}
           />
         </CanvasErrorBoundary>
       </main>
@@ -341,7 +385,23 @@ function DocumentWorkspace({
             onDeleteObject={onDeleteObject}
             onDeleteDocument={() => {
               leaving.current = true;
+              secrets.clear(doc.id);
               void deleteDocument(doc.id, { navigateAway: true });
+            }}
+            live={{
+              metrics: live.metrics,
+              statuses: live.statuses,
+              hub: live.hub,
+              connectionsPanel: (
+                <ConnectionsPanel
+                  host={host}
+                  doc={doc}
+                  statuses={live.statuses}
+                  secrets={secrets}
+                  onSave={saveConnection}
+                  onRemove={removeConnection}
+                />
+              ),
             }}
           />
         </SidePanel>

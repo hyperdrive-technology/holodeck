@@ -41,6 +41,23 @@ PLC or Hyperdrive code: the studio is a plain Holodeck host.
 - **Embed** (`/embed/<docId>`, `src/embed/`): a read-only live view for
   iframes: run mode, no studio chrome, provider hub for live data, never
   writes. The Export dialog builds the URL and an `<iframe>` snippet.
+- **Connections and live data** (holodeck#101, `src/connections/`,
+  `src/features/connections/`): the inspector's Connections tab adds, edits
+  and removes the document's provider connections (`holodeck.sim`,
+  `holodeck.http`, `aws.cloudwatch`, installed as packages in
+  `src/host/provider-packages.ts`). Settings come from each provider's
+  `configSchema` (form + Ajv validation, `config-form.ts`). Each object
+  parameter can be bound to a signal (source typed or picked with the
+  provider's `browse`, optional scale / threshold / map / format transform,
+  validated by the SDK); binding edits are canvas edits (undoable). A
+  `ProviderHub` per open document streams live values into the canvas and
+  the inspector, with a status badge per connection.
+- **Secrets** (API tokens, passwords, AWS keys) live in this tab's
+  `sessionStorage` only (`connections/secrets.ts`): never in IndexedDB, a
+  document, an export or an embed, and never shown again once entered (the UI
+  only says whether one is set). A document whose connection config carries a
+  provider secret is refused. Another tab, or the same document after the tab
+  closes, asks for them again.
 - **Layout**: T3 Code idioms: resizable, persisted side panels
   (`src/layout/`), TanStack Store for UI state, TanStack Hotkeys for
   shortcuts (`Mod+/` lists them).
@@ -88,6 +105,17 @@ Rules (`src/embed/`):
   refused with a `result { ok: false, error }` when it carries a `requestId`.
   Replies go to the verified sender origin; `ready` goes to each allowed
   origin with that exact `targetOrigin`; nothing is posted with `'*'`.
+
+### Live data in embeds
+
+An embed connects the document's connections without any secrets: secret-free
+connections (`holodeck.sim`, a public `holodeck.http` endpoint, AWS through a
+Cognito identity pool) go live; a connection whose provider needs a secret
+(bearer token, AWS access keys) stays in `error`, because the embedding page
+has no way to hand credentials to the frame yet. Until a credentials channel
+exists (follow-up: holodeck#162), the host should expose such data
+through a secret-free endpoint or push values with `setObjectState`. The
+embed root reports connection states as `data-connections="id:state,..."`.
 
 ## Deploying
 

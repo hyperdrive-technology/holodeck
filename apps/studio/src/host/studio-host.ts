@@ -8,7 +8,9 @@
  */
 
 import {
+  HOLODECK_KINDS,
   HolodeckHost,
+  type HolodeckProvider,
   parseVersion,
   satisfiesRange,
   type HolodeckDocument,
@@ -23,6 +25,8 @@ import {
   isoPackage,
   loadIsoDocument,
 } from '@holodeck/editor-2.5d-react';
+import { secretsInConfig } from '../connections/config-form';
+import { PROVIDER_PACKAGES } from './provider-packages';
 
 export const STUDIO_HOST_NAME = 'holodeck-studio';
 
@@ -32,7 +36,7 @@ export interface StudioPackage {
 }
 
 export const STUDIO_ENGINES: readonly HolodeckEngine[] = [isoEngine as HolodeckEngine];
-export const STUDIO_PACKAGES: readonly StudioPackage[] = [{ manifest: ISO_PACKAGE_MANIFEST, module: isoPackage }];
+export const STUDIO_PACKAGES: readonly StudioPackage[] = [{ manifest: ISO_PACKAGE_MANIFEST, module: isoPackage }, ...PROVIDER_PACKAGES];
 
 /** The engine new documents use. */
 export const DEFAULT_ENGINE_ID = ISO_ENGINE_ID;
@@ -72,6 +76,12 @@ export function checkHostDocument(host: HolodeckHost, doc: HolodeckDocument): { 
     else if (!satisfiesRange(installed.manifest.version, range)) {
       problems.push(`requires: "${id}" ${range} is needed, ${installed.manifest.version} is installed`);
     }
+  }
+  // Secrets never travel in a document (they stay in this tab's
+  // sessionStorage, connections/secrets.ts): refuse configs that carry one.
+  for (const connection of doc.connections ?? []) {
+    const provider = host.registry.get<HolodeckProvider>(HOLODECK_KINDS.provider, connection.provider);
+    problems.push(...secretsInConfig(provider, connection.config).map((p) => `connections.${connection.id}.config.${p}`));
   }
   let document: HolodeckDocument = doc;
   try {

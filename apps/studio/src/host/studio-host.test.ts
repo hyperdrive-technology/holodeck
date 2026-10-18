@@ -10,7 +10,8 @@ describe('studio host', () => {
   it('registers the iso engine and installs its package through the manifest', async () => {
     const host = await createStudioHost();
     expect(host.engine(ISO_ENGINE_ID)).toBeDefined();
-    expect(host.packages().map((p) => p.manifest.id)).toEqual([ISO_ENGINE_ID]);
+    expect(host.packages().map((p) => p.manifest.id)).toEqual([ISO_ENGINE_ID, 'holodeck.sim', 'holodeck.http', 'holodeck.provider-aws']);
+    expect(host.registry.list(HOLODECK_KINDS.provider).map((p) => p.id).sort()).toEqual(['aws.cloudwatch', 'holodeck.http', 'holodeck.sim']);
     expect(host.registry.get(HOLODECK_KINDS.isoPart, 'tank')).toBeDefined();
     expect(host.registry.ownerOf(HOLODECK_KINDS.isoPart, 'tank')).toBe(ISO_ENGINE_ID);
   });

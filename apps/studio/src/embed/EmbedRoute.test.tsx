@@ -14,6 +14,7 @@ import { openStudioDb } from '../documents/db';
 import { createIsoDocument } from '../documents/new-document';
 import { DocumentStore } from '../documents/store';
 import { createStudioHost, hostDocumentProblems } from '../host/studio-host';
+import { SessionSecretStore } from '../connections/secrets';
 import { StudioProvider } from '../studio-context';
 import { NO_CHANNEL, withPart } from '../test-support';
 import { EmbedRoute } from './EmbedRoute';
@@ -61,7 +62,7 @@ function plant(id = 'plant-1', name = 'Plant') {
 function renderEmbed(docId: string, embedParent: typeof parent | null = parent, frameContext?: FrameContext) {
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
   return render(
-    <StudioProvider services={{ host, store, channel: NO_CHANNEL }}>
+    <StudioProvider services={{ host, store, channel: NO_CHANNEL, secrets: new SessionSecretStore(null) }}>
       <QueryClientProvider client={client}>
         <EmbedRoute docId={docId} embedParent={embedParent} frameContext={frameContext} />
       </QueryClientProvider>

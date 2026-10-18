@@ -60,6 +60,27 @@ describe('import / export', () => {
     expect(parseDocumentText(JSON.stringify(doc), host).ok).toBe(true);
   });
 
+  // holodeck#101: secrets never travel in documents.
+  it('refuses a connection config that carries a provider secret', () => {
+    const doc = {
+      ...createIsoDocument('A', 'a'),
+      connections: [{ id: 'api', provider: 'holodeck.http', config: { url: 'http://localhost:1/x', token: 'leak' } }],
+    };
+    expect(problemsOf(JSON.stringify(doc)).join('\n')).toContain('connections.api.config.token');
+  });
+
+  it('accepts connections without secrets, also for providers it does not have', () => {
+    const doc = {
+      ...createIsoDocument('A', 'a'),
+      connections: [
+        { id: 'sim', provider: 'holodeck.sim' },
+        { id: 'aws', provider: 'aws.cloudwatch', config: { region: 'eu-west-1', credentials: { type: 'static' } } },
+        { id: 'other', provider: 'acme.custom', config: { token: 'opaque to us' } },
+      ],
+    };
+    expect(parseDocumentText(JSON.stringify(doc), host).ok).toBe(true);
+  });
+
   it('reports invalid JSON', () => {
     expect(problemsOf('{ nope')[0]).toMatch(/^not valid JSON/);
   });

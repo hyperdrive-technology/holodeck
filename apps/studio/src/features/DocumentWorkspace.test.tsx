@@ -20,6 +20,7 @@ import { DocumentStore } from '../documents/store';
 import { createStudioHost, hostDocumentProblems } from '../host/studio-host';
 import { createStudioRouter } from '../router';
 import { documentKeys } from '../documents/queries';
+import { SessionSecretStore } from '../connections/secrets';
 import { StudioProvider } from '../studio-context';
 import { withPart } from '../test-support';
 import { activeDocumentStore } from './active-document';
@@ -88,7 +89,7 @@ async function openWorkspace(doc: HolodeckDocument) {
   const router = createStudioRouter(createMemoryHistory({ initialEntries: [`/d/${doc.id}`] }));
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
   render(
-    <StudioProvider services={{ host, store, channel }}>
+    <StudioProvider services={{ host, store, channel, secrets: new SessionSecretStore(null) }}>
       <QueryClientProvider client={client}>
         <RouterProvider router={router} />
       </QueryClientProvider>
@@ -219,7 +220,7 @@ describe('DocumentWorkspace <-> ProcessEditor', () => {
     const router = createStudioRouter(createMemoryHistory({ initialEntries: ['/d/p'] }));
     const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
     render(
-      <StudioProvider services={{ host, store, channel }}>
+      <StudioProvider services={{ host, store, channel, secrets: new SessionSecretStore(null) }}>
         <QueryClientProvider client={client}>
           <RouterProvider router={router} />
         </QueryClientProvider>
@@ -255,7 +256,7 @@ describe('DocumentWorkspace <-> ProcessEditor', () => {
     // This tab's cache still holds the camera from an earlier visit.
     client.setQueryData(documentKeys.camera('p'), { zoom: 12, target: [0, 0, 0] });
     render(
-      <StudioProvider services={{ host, store, channel }}>
+      <StudioProvider services={{ host, store, channel, secrets: new SessionSecretStore(null) }}>
         <QueryClientProvider client={client}>
           <RouterProvider router={router} />
         </QueryClientProvider>

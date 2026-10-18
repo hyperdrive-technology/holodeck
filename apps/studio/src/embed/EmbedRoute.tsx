@@ -17,16 +17,18 @@
  *   `loadDocument` always wins and is never stored.
  */
 
-import type { ProviderHub } from '@holodeck/sdk';
+import type { ConnectionState, ProviderHub } from '@holodeck/sdk';
 import { connectIsoDocument, ISO_ENGINE_ID, ProcessEditor, useHubMetrics } from '@holodeck/editor-2.5d-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { documentKeys, useDocument, useDocumentCamera } from '../documents/queries';
 import { useStudio } from '../studio-context';
 import { handleEmbedMessage, type IsoDocument } from './handler';
 import { currentFrameContext, embedOriginPolicy, storedDocumentsVisible, type FrameContext } from './origins';
 import { mergeObjectStates, withObjectState, withoutObjectState, type EmbedInbound, type ObjectStates } from './protocol';
 import { useEmbedBridge, type EmbedParent } from './use-embed-bridge';
+const NO_CONNECTIONS: Readonly<Record<string, ConnectionState>> = Object.freeze({});
+const NO_SUBSCRIBE = () => () => undefined;
 
 const EMPTY_STATES: ObjectStates = Object.freeze(Object.create(null));
 const noop = () => {};
@@ -97,6 +99,15 @@ export function EmbedRoute({
     }
   }, [hub, doc]);
   const hubMetrics = useHubMetrics(hub);
+  // Connection states, for the host page and tests (`data-connections`).
+  // Embeds have no credential source: connections whose provider needs a
+  // secret stay in `error` until a credentials channel exists (holodeck#162);
+  // secret-free ones (holodeck.sim, public HTTP) go live.
+  const connectionStates = useSyncExternalStore(
+    hub?.subscribe ?? NO_SUBSCRIBE,
+    () => hub?.getSnapshot().connections ?? NO_CONNECTIONS,
+    () => NO_CONNECTIONS,
+  );
   const metrics = useMemo(() => mergeObjectStates(hubMetrics, states), [hubMetrics, states]);
 
   const onMessage = useCallback(
@@ -135,6 +146,9 @@ export function EmbedRoute({
     'data-document-id': doc?.id ?? '',
     'data-stored-documents': storedVisible ? 'shown' : 'hidden',
     'data-object-states': String(stateCount),
+    'data-connections': Object.entries(connectionStates)
+      .map(([id, c]) => `${id}:${c.status.state}`)
+      .join(','),
     className: 'relative flex h-full w-full flex-1 overflow-hidden bg-white',
   };
 
