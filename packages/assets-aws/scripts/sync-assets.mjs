@@ -53,8 +53,14 @@ for (const service of services) {
     failed = true;
     continue;
   }
-  const svg = sanitizeSvg(readFileSync(files[0], 'utf8'));
-  const problems = svgProblems(svg);
+  const raw = readFileSync(files[0], 'utf8');
+  const problems = svgProblems(raw);
+  if (problems.length) {
+    console.error(`${service.slug}: ${problems.join('; ')}`);
+    failed = true;
+    continue;
+  }
+  const svg = sanitizeSvg(raw);
   const colour = tileColour(svg);
   if (colour !== categories[service.category].color.toUpperCase()) problems.push(`tile colour ${colour} is not the ${service.category} category colour`);
   if (problems.length) {
