@@ -163,7 +163,8 @@ describe('<ConnectionsPanel /> + <ConnectionDialog />', () => {
     fireEvent.click(within(screen.getByTestId('connection-dialog')).getByRole('button', { name: 'Add' }));
     await waitFor(() => expect(onSave).toHaveBeenCalled());
     const [{ connection, secrets }] = onSave.mock.calls[0]!;
-    expect(connection.config).toEqual({ region: 'eu-west-1', credentials: { type: 'static' } });
+    // The credentials mode was left at the schema default (static): not written, the provider applies it.
+    expect(connection.config).toEqual({ region: 'eu-west-1' });
     expect(secrets).toEqual({ accessKeyId: 'AKIA-TEST' });
   });
 

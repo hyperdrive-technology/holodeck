@@ -1,7 +1,7 @@
 import { AWS_CONFIG_SCHEMA } from '@holodeck/provider-aws';
 import { HTTP_CONFIG_SCHEMA } from '@holodeck/provider-http';
 import { describe, expect, it } from 'vitest';
-import { configToForm, describeConfig, formToConfig, validateConfig, type VariantField } from './config-form';
+import { configToForm, describeConfig, formToConfig, validateConfig, type FieldValue, type VariantField } from './config-form';
 import { connectionConfigProblems } from './credentials';
 
 describe('describeConfig', () => {
@@ -65,12 +65,12 @@ describe('form <-> config', () => {
     expect(formToConfig(form, state).problems.join()).toContain('not valid JSON');
   });
 
-  it('AWS assumeRole with an empty roleArn: kept as "" and refused by the provider', () => {
+  it('AWS assumeRole without a roleArn: left as it was (no edit) and refused by the provider', () => {
     const form = describeConfig(AWS_CONFIG_SCHEMA);
     const state = configToForm(form, { region: 'eu-west-1', credentials: { type: 'assumeRole' } });
     const { config, problems } = formToConfig(form, state);
     expect(problems).toEqual([]);
-    expect(config.credentials).toEqual({ type: 'assumeRole', roleArn: '' });
+    expect(config.credentials).toEqual({ type: 'assumeRole' });
     expect(connectionConfigProblems({ provider: 'aws.cloudwatch', config }).join()).toContain('roleArn');
   });
 
@@ -107,6 +107,43 @@ describe('unknown settings survive editing', () => {
 
   it('closed schema (HTTP): nothing extra is offered, declared advanced keys still round-trip', () => {
     expect(describeConfig(HTTP_CONFIG_SCHEMA).allowsExtra).toBe(false);
+  });
+});
+
+// Review of holodeck#163 @ 076954e: variants are edited as an overlay too.
+describe('variants', () => {
+  const schema = {
+    type: 'object',
+    properties: {
+      auth: {
+        oneOf: [
+          { type: 'object', required: ['kind'], properties: { kind: { const: 'none' } } },
+          { type: 'object', required: ['kind', 'header'], properties: { kind: { const: 'token' }, header: { type: 'string' }, raw: { type: 'boolean' } } },
+        ],
+      },
+    },
+  };
+  const form = describeConfig(schema);
+
+  it('an open variant keeps its undeclared properties when one of its fields is edited', () => {
+    const config = { auth: { kind: 'token', header: 'X-Key', vendorHint: { a: 1 } } };
+    const state = configToForm(form, config);
+    state.values.auth = { ...(state.values.auth as Record<string, FieldValue>), header: 'X-Other' };
+    expect(formToConfig(form, state)).toEqual({ config: { auth: { kind: 'token', header: 'X-Other', vendorHint: { a: 1 } } }, problems: [] });
+  });
+
+  it('a boolean inside a variant is a boolean (checked = true), never "enter a number"', () => {
+    const config = { auth: { kind: 'token', header: 'X-Key' } };
+    const state = configToForm(form, config);
+    expect((state.values.auth as Record<string, FieldValue>).raw).toBe(false);
+    state.values.auth = { ...(state.values.auth as Record<string, FieldValue>), raw: true };
+    expect(formToConfig(form, state)).toEqual({ config: { auth: { kind: 'token', header: 'X-Key', raw: true } }, problems: [] });
+  });
+
+  it('switching the variant starts a fresh object (the old variant’s fields do not apply)', () => {
+    const state = configToForm(form, { auth: { kind: 'token', header: 'X-Key', raw: true } });
+    state.values.auth = { ...(state.values.auth as Record<string, FieldValue>), kind: 'none' };
+    expect(formToConfig(form, state).config).toEqual({ auth: { kind: 'none' } });
   });
 });
 

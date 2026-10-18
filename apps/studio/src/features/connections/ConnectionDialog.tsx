@@ -15,6 +15,7 @@ import {
   validateConfig,
   type ConfigField,
   type ConfigFormValues,
+  type FieldValue,
   type SimpleField,
 } from '../../connections/config-form';
 
@@ -285,7 +286,7 @@ export function ConnectionDialog({
 
 function ConfigInput({ field, value, onChange }: { field: ConfigField; value: ConfigFormValues['values'][string] | undefined; onChange: (v: ConfigFormValues['values'][string]) => void }) {
   if (field.kind === 'variant') {
-    const entry = (value && typeof value === 'object' ? value : {}) as Record<string, string>;
+    const entry = (value && typeof value === 'object' ? value : {}) as Record<string, FieldValue>;
     const chosen = field.variants.find((v) => v.value === entry[field.discriminator]);
     return (
       <div className="flex flex-col gap-2">
@@ -293,7 +294,7 @@ function ConfigInput({ field, value, onChange }: { field: ConfigField; value: Co
           <select
             id={`config-${field.key}`}
             className={selectClass}
-            value={entry[field.discriminator] ?? ''}
+            value={typeof entry[field.discriminator] === 'string' ? (entry[field.discriminator] as string) : ''}
             onChange={(e) => onChange({ ...entry, [field.discriminator]: e.target.value })}
           >
             {!field.required ? <option value="">none</option> : null}
@@ -309,8 +310,9 @@ function ConfigInput({ field, value, onChange }: { field: ConfigField; value: Co
             key={sub.key}
             id={`config-${field.key}-${sub.key}`}
             field={{ ...sub, label: `${field.label} ${sub.label}` }}
-            value={entry[sub.key] ?? ''}
-            onChange={(v) => onChange({ ...entry, [sub.key]: String(v) })}
+            value={entry[sub.key]}
+            // Keep the input's own type: a checkbox stays a boolean (review of #163).
+            onChange={(v) => onChange({ ...entry, [sub.key]: v })}
           />
         ))}
       </div>

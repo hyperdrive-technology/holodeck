@@ -135,15 +135,70 @@ export function describeConfig(schema: unknown): ConfigForm {
   return { fields, advancedKeys, allowsExtra: schema.additionalProperties !== false };
 }
 
-/** Form state: simple fields as strings / booleans, variants as `{ [discriminator]: value, ...fields }`, the rest as JSON text. */
+/** One form input's value: text for strings / numbers / enums, a boolean for checkboxes. */
+export type FieldValue = string | boolean;
+
+/**
+ * Form state. The form is an OVERLAY on the raw config (review of
+ * holodeck#163): `original` is the config being edited, `initial` the form
+ * values it produced; `formToConfig` starts from a deep copy of `original`
+ * and writes only the form-owned fields whose value differs from `initial`.
+ * Anything the form does not show (undeclared keys, extra keys inside a
+ * variant, nested objects) is never touched unless the user edits the
+ * Advanced JSON, which holds exactly the keys the form does not own.
+ */
 export interface ConfigFormValues {
-  values: Record<string, string | boolean | Record<string, string>>;
+  /** Top-level fields; a variant is `{ [discriminator]: value, ...sub-fields }`. */
+  values: Record<string, FieldValue | Record<string, FieldValue>>;
   advanced: string;
+  /** The config being edited (deep copy). */
+  original: Record<string, unknown>;
+  /** `values` and `advanced` as `configToForm` produced them. */
+  initial: { values: ConfigFormValues['values']; advanced: string };
 }
 
-const toText = (v: unknown) => (v === undefined || v === null ? '' : String(v));
+// -----------------------------------------------------------------------------
+// Codecs: one per field kind, config value <-> form value.
+// -----------------------------------------------------------------------------
 
-/** Current config -> form state (for editing an existing connection). */
+type Decoded = { value: unknown } | { absent: true } | { problem: string };
+
+const codecs = {
+  /** config -> form */
+  toForm(f: SimpleField, v: unknown): FieldValue {
+    if (f.kind === 'boolean') return typeof v === 'boolean' ? v : f.default === true;
+    return v === undefined || v === null ? '' : String(v);
+  },
+  /** form -> config. `absent`: leave the key out. `required`: a present-but-empty text value is kept as "" (the schema / provider decide). */
+  fromForm(f: SimpleField, input: FieldValue | undefined, inVariant: boolean): Decoded {
+    switch (f.kind) {
+      case 'boolean':
+        return { value: input === true };
+      case 'string':
+      case 'enum': {
+        const text = typeof input === 'string' ? input : '';
+        if (text !== '') return { value: text };
+        if (!f.required) return { absent: true };
+        // Inside a variant an empty required text (HTTP basic auth with an empty user name) is valid data.
+        return inVariant ? { value: '' } : { problem: `${f.label}: required` };
+      }
+      case 'number':
+      case 'integer': {
+        const text = typeof input === 'string' ? input.trim() : '';
+        if (text === '') return f.required ? { problem: `${f.label}: required` } : { absent: true };
+        const n = Number(text);
+        if (!Number.isFinite(n)) return { problem: `${f.label}: enter a number` };
+        if (f.kind === 'integer' && !Number.isInteger(n)) return { problem: `${f.label}: enter a whole number` };
+        return { value: n };
+      }
+    }
+  },
+};
+
+const sameValue = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const clone = <T,>(v: T): T => (v === undefined ? v : (structuredClone(v) as T));
+
+/** Config -> form state (for editing an existing connection, or `{}` for a new one). */
 export function configToForm(form: ConfigForm, config: Record<string, unknown> = {}): ConfigFormValues {
   const values: ConfigFormValues['values'] = {};
   for (const f of form.fields) {
@@ -151,44 +206,55 @@ export function configToForm(form: ConfigForm, config: Record<string, unknown> =
     if (f.kind === 'variant') {
       const obj = isObj(v) ? v : {};
       const chosen = typeof obj[f.discriminator] === 'string' ? (obj[f.discriminator] as string) : (f.defaultVariant ?? '');
-      const entry: Record<string, string> = { [f.discriminator]: chosen };
-      for (const variant of f.variants) for (const sub of variant.fields) entry[sub.key] = toText(obj[sub.key]);
+      const entry: Record<string, FieldValue> = { [f.discriminator]: chosen };
+      const variant = f.variants.find((x) => x.value === chosen);
+      // Sub-fields of every variant get an entry (switching variants shows empty inputs); the chosen one's carry the values.
+      for (const other of f.variants) for (const sub of other.fields) if (!(sub.key in entry)) entry[sub.key] = codecs.toForm(sub, undefined);
+      for (const sub of variant?.fields ?? []) entry[sub.key] = codecs.toForm(sub, obj[sub.key]);
       values[f.key] = entry;
-    } else if (f.kind === 'boolean') values[f.key] = typeof v === 'boolean' ? v : f.default === true;
-    else values[f.key] = toText(v);
+    } else values[f.key] = codecs.toForm(f, v);
   }
-  // Everything the form does not own goes to the advanced JSON, declared or
-  // not, so editing (even just the label) never drops a setting (review of
-  // holodeck#163: schemaless providers lost their whole config).
+  // Everything the form does not own goes to the advanced JSON, declared or not.
   const owned = new Set(form.fields.map((f) => f.key));
-  const advanced: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(config)) if (!owned.has(k) && v !== undefined) advanced[k] = v;
-  return { values, advanced: Object.keys(advanced).length ? JSON.stringify(advanced, null, 2) : '' };
-}
-
-function parseScalar(f: SimpleField, text: string): { value?: unknown; problem?: string } {
-  if (f.kind === 'string' || f.kind === 'enum') return { value: text };
-  const n = Number(text);
-  if (text.trim() === '' || !Number.isFinite(n)) return { problem: `${f.label}: enter a number` };
-  if (f.kind === 'integer' && !Number.isInteger(n)) return { problem: `${f.label}: enter a whole number` };
-  return { value: n };
+  const advancedObj: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(config)) if (!owned.has(k) && v !== undefined) advancedObj[k] = v;
+  const advanced = Object.keys(advancedObj).length ? JSON.stringify(advancedObj, null, 2) : '';
+  return { values, advanced, original: clone(config), initial: { values: clone(values), advanced } };
 }
 
 /**
- * Form state -> config. Empty optional fields are left out (the provider's
- * default applies); a variant left at "none" is left out. Advanced JSON must
- * be an object and may not repeat a form field.
+ * Form state -> config: a deep copy of the original config with only the
+ * form-owned fields the user changed written over it (see ConfigFormValues).
+ * Advanced JSON, if edited, replaces exactly the keys the form does not own;
+ * it must be an object and may not repeat a form field.
  */
 export function formToConfig(form: ConfigForm, state: ConfigFormValues): { config: Record<string, unknown>; problems: string[] } {
-  const config: Record<string, unknown> = {};
+  const original = state.original ?? {};
+  const initial = state.initial ?? { values: {}, advanced: '' };
+  const config: Record<string, unknown> = clone(original);
   const problems: string[] = [];
+  const write = (target: Record<string, unknown>, key: string, d: Decoded) => {
+    if ('problem' in d) problems.push(d.problem);
+    else if ('absent' in d) delete target[key];
+    else target[key] = d.value;
+  };
+
   for (const f of form.fields) {
-    const raw = state.values[f.key];
+    const now = state.values[f.key];
+    const was = initial.values[f.key];
     if (f.kind === 'variant') {
-      const entry = isObj(raw) ? (raw as Record<string, string>) : {};
-      const chosen = entry[f.discriminator];
+      const entry = isObj(now) ? (now as Record<string, FieldValue>) : {};
+      const before = isObj(was) ? (was as Record<string, FieldValue>) : {};
+      const chosen = typeof entry[f.discriminator] === 'string' ? (entry[f.discriminator] as string) : '';
+      // Untouched (including a variant shown only because of the schema default): the original stays as it was.
+      if (sameValue(entry, before)) {
+        if (!chosen && f.required && !isObj(original[f.key])) problems.push(`${f.label}: choose one`);
+        continue;
+      }
+      const switched = chosen !== before[f.discriminator] || !isObj(original[f.key]);
       if (!chosen) {
         if (f.required) problems.push(`${f.label}: choose one`);
+        else if (switched) delete config[f.key];
         continue;
       }
       const variant = f.variants.find((v) => v.value === chosen);
@@ -196,49 +262,42 @@ export function formToConfig(form: ConfigForm, state: ConfigFormValues): { confi
         problems.push(`${f.label}: unknown option "${chosen}"`);
         continue;
       }
-      const obj: Record<string, unknown> = { [f.discriminator]: chosen };
+      // Same variant: overlay on the original object (its undeclared keys stay).
+      // Another variant: a fresh object (the old variant's fields do not apply).
+      const obj: Record<string, unknown> = switched ? { [f.discriminator]: chosen } : clone(original[f.key] as Record<string, unknown>);
       for (const sub of variant.fields) {
-        const text = entry[sub.key] ?? '';
-        if (text === '') {
-          // A required text field is present even when empty (HTTP basic auth
-          // with an empty user name is valid, review of #163): the schema and
-          // the provider decide whether "" is acceptable. Optional ones are left out.
-          if (sub.required && (sub.kind === 'string' || sub.kind === 'enum')) obj[sub.key] = '';
-          else if (sub.required) problems.push(`${f.label} ${sub.label}: required`);
-          continue;
-        }
-        const parsed = parseScalar(sub, text);
-        if (parsed.problem) problems.push(parsed.problem);
-        else obj[sub.key] = parsed.value;
+        if (!switched && sameValue(entry[sub.key], before[sub.key])) continue;
+        write(obj, sub.key, codecs.fromForm(sub, entry[sub.key], true));
       }
       config[f.key] = obj;
       continue;
     }
-    if (f.kind === 'boolean') {
-      if (raw !== undefined && raw !== f.default) config[f.key] = raw === true;
+    if (sameValue(now, was) && (f.key in original || f.kind === 'boolean' || now === '')) {
+      // Unchanged. A required field that is still empty and absent is reported.
+      if (f.required && !(f.key in original) && f.kind !== 'boolean') problems.push(`${f.label}: required`);
       continue;
     }
-    const text = typeof raw === 'string' ? raw : '';
-    if (text === '') {
-      if (f.required) problems.push(`${f.label}: required`);
-      continue;
-    }
-    const parsed = parseScalar(f, text);
-    if (parsed.problem) problems.push(parsed.problem);
-    else config[f.key] = parsed.value;
+    write(config, f.key, codecs.fromForm(f, now as FieldValue | undefined, false));
   }
-  if (state.advanced.trim() !== '') {
-    let advanced: unknown;
-    try {
-      advanced = JSON.parse(state.advanced);
-    } catch (error) {
-      problems.push(`Advanced settings: not valid JSON (${error instanceof Error ? error.message : String(error)})`);
+
+  if (state.advanced !== initial.advanced) {
+    const owned = new Set(form.fields.map((f) => f.key));
+    let parsed: unknown = {};
+    if (state.advanced.trim() !== '') {
+      try {
+        parsed = JSON.parse(state.advanced);
+      } catch (error) {
+        problems.push(`Advanced settings: not valid JSON (${error instanceof Error ? error.message : String(error)})`);
+        parsed = undefined;
+      }
     }
-    if (advanced !== undefined) {
-      if (!isObj(advanced)) problems.push('Advanced settings: must be a JSON object');
+    if (parsed !== undefined) {
+      if (!isObj(parsed)) problems.push('Advanced settings: must be a JSON object');
       else {
-        for (const [k, v] of Object.entries(advanced)) {
-          if (form.fields.some((f) => f.key === k)) problems.push(`Advanced settings: "${k}" is set in the form above`);
+        // The advanced JSON is the whole set of keys the form does not own.
+        for (const k of Object.keys(config)) if (!owned.has(k)) delete config[k];
+        for (const [k, v] of Object.entries(parsed)) {
+          if (owned.has(k)) problems.push(`Advanced settings: "${k}" is set in the form above`);
           else config[k] = v;
         }
       }
@@ -247,6 +306,7 @@ export function formToConfig(form: ConfigForm, state: ConfigFormValues): { confi
   return { config, problems };
 }
 
+// -----------------------------------------------------------------------------
 // -----------------------------------------------------------------------------
 // Validation
 // -----------------------------------------------------------------------------
