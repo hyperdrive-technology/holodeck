@@ -32,7 +32,7 @@ describe('data-only model colour bindings', () => {
   it("an empty colour param (a valid 'no colour' default) doesn't override placement or package colours", () => {
     const def: IsoPartDefinition = {
       id: 'cloud:server', label: 'Server', footprint: { w: 2, h: 2 },
-      params: { color: { kind: 'color', default: '' } } as IsoPartDefinition['params'],
+      params: { color: { type: 'color', label: 'Colour', default: '' } },
       model: '/server.glb', colors: { accent: '#123456' },
     };
     const placement = { id: 'web', object: def.id, x: 0, y: 0, color: '#abcdef' };
