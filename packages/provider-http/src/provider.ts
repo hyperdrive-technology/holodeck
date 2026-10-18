@@ -102,6 +102,14 @@ function detectBrowser(): boolean {
   return g.document !== undefined || g.WorkerGlobalScope !== undefined;
 }
 
+/** Why `path` (a URL's raw pathname) is outside `prefix`, or undefined when it is inside. */
+function pathScopeError(path: string, prefix: string): string | undefined {
+  // Encoded separators could be decoded by the server into a different path (/api/..%2fadmin).
+  if (/%2f|%5c/i.test(path) || path.includes('\\')) return "path has an encoded slash or backslash, refused under this provider's pathPrefix";
+  if (!pathInPrefix(path, prefix)) return `path is outside this provider's pathPrefix ${prefix}`;
+  return undefined;
+}
+
 /** Is `path` equal to `prefix` or below it, on a segment boundary? `prefix` has no trailing slash (except "/"). */
 function pathInPrefix(path: string, prefix: string): boolean {
   return prefix === '/' || path === prefix || path.startsWith(prefix + '/');
@@ -265,9 +273,9 @@ async function openSession(
   const maxChannels = options.maxChannels ?? DEFAULT_MAX_CHANNELS;
   // Normalised: no trailing slash, so "/api/" and "/api" mean the same.
   const pathPrefix = options.pathPrefix === undefined ? undefined : options.pathPrefix.replace(/\/+$/, '') || '/';
-  if (pathPrefix !== undefined && !pathInPrefix(new URL(config.url).pathname, pathPrefix)) {
-    throw new HttpProviderError(`connection URL path is outside this provider's pathPrefix ${pathPrefix}`, 'network');
-  }
+  const scopeError = pathPrefix === undefined ? undefined : (url: URL) => pathScopeError(url.pathname, pathPrefix);
+  const baseScope = scopeError?.(new URL(config.url));
+  if (baseScope) throw new HttpProviderError(`connection URL: ${baseScope}`, 'network');
   const auth = await resolveAuth(config, ctx, redact);
   const tsTokens = timestampTokens(config);
   const streaming = config.mode !== 'poll';
@@ -290,6 +298,7 @@ async function openSession(
     signal: controller.signal,
     setTimeout: setTimer,
     clearTimeout: clearTimer,
+    scopeError,
     allowOrigin: origins ? (origin) => origins.some((pattern) => originMatches(pattern, origin)) : undefined,
   });
 
@@ -360,7 +369,8 @@ async function openSession(
     const record = { json, ts, seq: requestSeq ?? ++seq };
     const existing = payloads.get(href);
     if (!existing || existing.seq <= record.seq) setBounded(payloads, href, record, MAX_CACHED_PAYLOADS);
-    return { ...record, stale: existing !== undefined && existing.seq > record.seq };
+    // Stale: hand back the newer payload so subscribers still get the current state.
+    return existing !== undefined && existing.seq > record.seq ? existing : record;
   };
 
   /**
@@ -383,15 +393,15 @@ async function openSession(
 
   const onPayload = (href: string, json: unknown, receivedAt: number, requestSeq?: number) => {
     if (closed) return;
-    const { ts, seq: from, stale } = storePayload(href, json, receivedAt, requestSeq);
-    if (stale) return; // a newer request already answered; do not deliver older data after it
+    // If a newer request already answered, this returns that payload, not this one.
+    const { json: current, ts, seq: from } = storePayload(href, json, receivedAt, requestSeq);
     const entry = channels.get(href);
     if (!entry) return;
     for (const sub of [...entry.subs]) {
       if (!entry.subs.has(sub)) continue; // unsubscribed by an earlier callback
       const samples: Sample[] = [];
       for (const parsed of sub.byEndpoint.get(href) ?? []) {
-        const sample = sampleFor(parsed, json, ts, streaming);
+        const sample = sampleFor(parsed, current, ts, streaming);
         if (sample) samples.push(sample);
       }
       if (samples.length) {
@@ -436,7 +446,8 @@ async function openSession(
   };
 
   /** Group sources by endpoint URL; unparsable ones become `bad` samples. */
-  const group = (sources: readonly string[]) => {
+  // `capped`: only subscribe opens channels; one-shot reads/browse are exempt from maxChannels.
+  const group = (sources: readonly string[], capped = false) => {
     const byEndpoint = new Map<string, ParsedSource[]>();
     const invalid: Sample[] = [];
     const ts = ctx.now();
@@ -446,13 +457,12 @@ async function openSession(
         const parsed = parseSource(source);
         const url = resolveEndpoint(config, parsed.endpoint);
         const href = url.href;
-        if (pathPrefix !== undefined && !pathInPrefix(url.pathname, pathPrefix)) {
-          throw new HttpProviderError(`endpoint path is outside this provider's pathPrefix ${pathPrefix}`, 'network');
-        }
-        if (!byEndpoint.has(href) && !channels.has(href) && channels.size + newEndpoints >= maxChannels) {
+        const scope = scopeError?.(url);
+        if (scope) throw new HttpProviderError(`endpoint ${scope}`, 'network');
+        if (capped && !byEndpoint.has(href) && !channels.has(href) && channels.size + newEndpoints >= maxChannels) {
           throw new HttpProviderError(`channel limit reached (${maxChannels} endpoints per session)`, 'unsupported');
         }
-        if (!byEndpoint.has(href) && !channels.has(href)) newEndpoints++;
+        if (capped && !byEndpoint.has(href) && !channels.has(href)) newEndpoints++;
         const list = byEndpoint.get(href) ?? [];
         list.push(parsed);
         byEndpoint.set(href, list);
@@ -475,7 +485,7 @@ async function openSession(
 
     subscribe(sources, onSamples) {
       if (closed) return () => {};
-      const { byEndpoint, invalid } = group([...sources]);
+      const { byEndpoint, invalid } = group([...sources], true);
       let active = true;
       const sub: Subscription = {
         byEndpoint,

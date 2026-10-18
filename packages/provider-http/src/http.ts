@@ -80,6 +80,13 @@ export interface RequestDeps {
   clearTimeout: (handle: unknown) => void;
   /** Origin allowlist check applied to every redirect hop (provider `origins`). */
   allowOrigin?: (origin: string) => boolean;
+  /**
+   * Path scope (provider `pathPrefix`): returns a reason when `url` may not
+   * be requested. Checked in `fetchFollowingRedirects` for the initial URL and
+   * every redirect hop, so no operation (subscribe, read, browse, write) can
+   * reach a rejected target; a rejected target sends no request.
+   */
+  scopeError?: (url: URL) => string | undefined;
 }
 
 export interface RequestOptions {
@@ -169,6 +176,9 @@ async function fetchFollowingRedirects(
   let body = options.body;
   let trusted = current.origin === home;
   for (let hop = 0; ; hop++) {
+    // Same-origin targets only: other origins are governed by the `origins` allowlist.
+    const outOfScope = current.origin === home ? deps.scopeError?.(current) : undefined;
+    if (outOfScope) throw new HttpProviderError(`${safeUrl(current)}: ${outOfScope}`, 'network');
     const headers: Record<string, string> = { accept: 'application/json', ...config.headers, ...options.headers };
     if (body === undefined) delete headers['content-type'];
     if (trusted) Object.assign(headers, auth.headers);

@@ -40,7 +40,7 @@ describe('#97 cache newest = request order', () => {
     const a = collector();
     h.session.subscribe(['/v'], a.onSamples);
     await waitFor(() => a.latest('/v')?.value === 'new');
-    expect((await reading)[0]?.value).toBe('old'); // the read reports what it fetched
+    expect((await reading)[0]?.value).toBe('new'); // a stale read answers with the newest payload
     const b = collector();
     h.session.subscribe(['/v'], b.onSamples);
     await waitFor(() => b.count() > 0);
@@ -145,5 +145,80 @@ describe('#94 channel cap and path scope', () => {
     await expect(connect({ url: `${server.url}/elsewhere` }, { options: { pathPrefix: '/api' } })).rejects.toThrow(/pathPrefix/);
     await expect(connect({ url: `${server.url}/x` }, { options: { maxChannels: 0 } })).rejects.toThrow(/maxChannels/);
     await expect(connect({ url: `${server.url}/x` }, { options: { pathPrefix: 'api' } })).rejects.toThrow(/pathPrefix/);
+  });
+});
+
+describe('pathPrefix is enforced on every outbound request (review of #188)', () => {
+  const opts = { options: { pathPrefix: '/api' } };
+  const outside = () => [...server.requestsTo('/other'), ...server.requestsTo('/api/../other')];
+
+  it('browse and write cannot reach out-of-scope paths', async () => {
+    server.json('/api/x', { v: 1 });
+    server.route('*', '/other', (_req, res) => void res.writeHead(200, { 'content-type': 'application/json' }).end('{"v":1}'));
+    const h = await open({ url: `${server.url}/api/x`, write: { url: '/other' } }, opts);
+    await expect(h.session.write!('/v', 1)).rejects.toThrow(/pathPrefix/);
+    const b = await open({ url: `${server.url}/api/x` }, opts);
+    await expect(b.session.browse!('/other#')).rejects.toThrow(/pathPrefix/);
+    expect(outside()).toHaveLength(0);
+    // in-scope browse still works
+    expect((await b.session.browse!('')).map((n) => n.label)).toEqual(['v']);
+  });
+
+  it('read and subscribe send nothing out of scope', async () => {
+    server.json('/api/x', { v: 1 });
+    server.json('/other', { v: 2 });
+    const h = await open({ url: `${server.url}/api/x`, intervalMs: 60_000 }, opts);
+    expect((await h.session.read!(['/other#/v']))[0]).toMatchObject({ value: null, quality: 'bad' });
+    const c = collector();
+    h.session.subscribe(['/other#/v'], c.onSamples);
+    await waitFor(() => c.count() > 0);
+    expect(outside()).toHaveLength(0);
+  });
+
+  it('a same-origin redirect out of the prefix is not followed (no request sent)', async () => {
+    server.route('GET', '/api/r', (_req, res) => void res.writeHead(302, { location: '/other' }).end());
+    server.json('/other', { v: 2 });
+    const h = await open({ url: `${server.url}/api/r`, followRedirects: true }, opts);
+    await expect(h.session.read!(['/v']).then((r) => r[0]?.quality)).resolves.toBe('bad');
+    expect(h.logs.some(([, m]) => /pathPrefix/.test(m))).toBe(true);
+    expect(server.requestsTo('/other')).toHaveLength(0);
+  });
+
+  it.each(['%2f', '%2F', '%5c', '%5C'])('refuses encoded separators (%s) under a pathPrefix', async (enc) => {
+    server.route('*', '/api/*', (_req, res) => void res.writeHead(200, { 'content-type': 'application/json' }).end('{"v":1}'));
+    server.json('/other', { v: 2 });
+    const h = await open({ url: `${server.url}/api/x`, intervalMs: 60_000 }, opts);
+    const before = server.requests.length;
+    expect((await h.session.read!([`/api/..${enc}other#/v`]))[0]).toMatchObject({ quality: 'bad' });
+    expect(server.requests.length).toBe(before);
+  });
+});
+
+describe('review of #188: cap and stale delivery', () => {
+  it('read is exempt from maxChannels (it opens no channel)', async () => {
+    server.json('/a', { v: 'a' });
+    server.json('/b', { v: 'b' });
+    const h = await open({ url: `${server.url}/a`, intervalMs: 60_000 }, { options: { maxChannels: 1 } });
+    const c = collector();
+    h.session.subscribe(['/a#/v'], c.onSamples);
+    await waitFor(() => c.count() > 0);
+    expect((await h.session.read!(['/b#/v']))[0]).toMatchObject({ value: 'b' });
+    expect(server.requestsTo('/b')).toHaveLength(1);
+  });
+
+  it('a poll response older than a completed read still delivers the newest payload', async () => {
+    let calls = 0;
+    server.route('GET', '/s', async (_req, res) => {
+      const n = ++calls;
+      if (n === 1) await sleep(250); // the poll: slow
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ v: n === 1 ? 'poll' : 'read' }));
+    });
+    const h = await open({ url: `${server.url}/s`, intervalMs: 60_000 });
+    const a = collector();
+    h.session.subscribe(['/v'], a.onSamples);
+    await sleep(30);
+    expect((await h.session.read!(['/v']))[0]?.value).toBe('read');
+    await waitFor(() => a.count() > 0);
+    expect(a.latest('/v')?.value).toBe('read');
   });
 });
