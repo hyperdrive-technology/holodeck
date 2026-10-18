@@ -20,6 +20,12 @@ Part ids are `aws:<slug>` (for example `aws:ec2`, `aws:elb`, `aws:s3`), matching
    archetype models from `../library-cloud`.
 3. `pnpm test`: validates every part, icon and size budget.
 
+The sanitiser rejects elements, attributes and namespaces outside its drawing allowlist,
+all styles, and references other than same-document fragments. XML prologs, processing
+instructions, DOCTYPE/entity declarations and CDATA are rejected before output is written.
+Accepted SVGs are serialised deterministically; drawing data and title/description text
+are preserved. The parser is a development dependency used only by sync and tests.
+
 ## Archetype models are vendored
 
 A package cannot reach another package's assets through `assetUrl`, so the GLBs used by the

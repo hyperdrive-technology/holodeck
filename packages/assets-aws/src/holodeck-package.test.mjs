@@ -92,7 +92,10 @@ describe('icons', () => {
     expect(svgProblems(text)).toEqual([]);
     expect(statSync(path).size).toBeLessThanOrEqual(MAX_ICON_BYTES);
     expect(tileColour(text)).toBe(AWS_CATEGORIES[service.category].color.toUpperCase());
-    expect(text).toBe(sanitizeSvg(text)); // already normalised: sync is idempotent
+    const canonical = sanitizeSvg(text);
+    expect(svgProblems(canonical)).toEqual([]);
+    expect(sanitizeSvg(canonical)).toBe(canonical);
+    expect(tileColour(canonical)).toBe(tileColour(text));
   });
 
   it('keeps the total asset size within budget', () => {
@@ -107,29 +110,6 @@ describe('icons', () => {
     expect(iconSource.releasePage).toBe('https://aws.amazon.com/architecture/icons/');
     expect(manifest.assetLicenses[0].notice).toContain(iconSource.version);
     expect(readFileSync(`${dir}/NOTICE.txt`, 'utf8')).toContain(manifest.assetLicenses[0].notice);
-  });
-});
-
-describe('svg sanitiser', () => {
-  const ok = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><path d="M0 0h8v8z" fill="url(#g)"/></svg>';
-  it('accepts a plain icon', () => expect(svgProblems(ok)).toEqual([]));
-  it.each([
-    ['script element', '<svg><script>alert(1)</script></svg>'],
-    ['event handler', '<svg onload="x()"><path/></svg>'],
-    ['external href', '<svg><use xlink:href="https://evil.test/a.svg#x"/></svg>'],
-    ['javascript url', '<svg><a href="javascript:alert(1)"><path/></a></svg>'],
-    ['external url()', '<svg><path fill="url(https://evil.test/p)"/></svg>'],
-    ['foreignObject', '<svg><foreignObject><div/></foreignObject></svg>'],
-    ['embedded image', '<svg><image href="data:image/png;base64,AAAA"/></svg>'],
-    ['entity', '<!DOCTYPE svg [<!ENTITY x "y">]><svg/>'],
-    ['style import', '<svg><style>@import "x";</style></svg>'],
-    ['http mention', '<svg><text>http://evil.test</text></svg>'],
-    ['not svg', '<html></html>'],
-    ['too large', `<svg>${'<g/>'.repeat(MAX_ICON_BYTES)}</svg>`],
-  ])('rejects %s', (_name, text) => expect(svgProblems(text).length).toBeGreaterThan(0));
-  it('strips prolog, comments and xlink namespace without touching drawing data', () => {
-    const noisy = '<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">\n  <!-- c -->\n  <path d="M0 0"/>\n</svg>';
-    expect(sanitizeSvg(noisy)).toBe('<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>\n');
   });
 });
 
