@@ -5,15 +5,16 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { applyHolodeckStyle, type ApplyStyleOverrides } from './apply-style';
 import { useHolodeckStyle } from './style-context';
 import type { HolodeckStyle } from './style';
-import { holdPendingAsset, RenderTrackerContext, useMountHold } from '../../src/iso/render-signal';
+import { confirmAssetMounted, holdPendingAsset, RenderTrackerContext, useMountHold } from '../../src/iso/render-signal';
 
 /**
  * `useLoader(GLTFLoader, url)` that holds IsoCanvas's rendered signal while
  * the request is pending. Exported for parts that read the parsed scene
  * themselves (DataPart's logo anchor); the loader cache is shared, so a
- * second call for the same URL is a cache hit. Pass `holdRequest: false` when
- * a committed component already holds for the load (HolodeckModel, a
- * `PendingAsset` fallback): a bare promise hold outlives a removed model.
+ * second call for the same URL is a cache hit. The request hold is keyed by
+ * `url` and ends on `confirmAssetMounted(tracker, url)` (the model mounted, or
+ * a committed owner took over). Pass `holdRequest: false` only when a
+ * committed `PendingAsset` fallback already holds for the load.
  */
 export function useTrackedGLTF(url: string, { holdRequest = true }: { holdRequest?: boolean } = {}) {
   const tracker = useContext(RenderTrackerContext);
@@ -24,7 +25,7 @@ export function useTrackedGLTF(url: string, { holdRequest = true }: { holdReques
     // Register synchronously so a null Suspense fallback cannot report ready
     // while the request is parked. Loaded cache hits need no hold.
     if (holdRequest && tracker && pending && typeof (pending as PromiseLike<unknown>).then === 'function') {
-      holdPendingAsset(tracker, pending as PromiseLike<unknown>);
+      holdPendingAsset(tracker, pending as PromiseLike<unknown>, url);
     }
     throw pending;
   }
@@ -44,6 +45,16 @@ interface ModelProps {
   style?: HolodeckStyle;
   /** Called once the styled clone is mounted (e.g. to fit a camera to its bounds). */
   onReady?: (root: Object3D) => void;
+  /**
+   * Opt in to exact render-signal tracking (holodeck#58, #63): the model wraps
+   * its suspending body in its OWN `Suspense fallback={null}` and a committed
+   * wrapper holds from mount until the body mounts, releasing on removal or
+   * failure. Costs: the host's own Suspense fallback is not shown for this
+   * model, and the wrapper only takes over once it commits (an ancestor
+   * suspension delays that; the request hold covers the gap). Default off:
+   * suspension stays host-controlled.
+   */
+  ownBoundary?: boolean;
 }
 
 /**
@@ -57,10 +68,13 @@ interface ModelProps {
  * including with a host-provided `Suspense fallback={null}`. Outside IsoCanvas
  * loading works normally; hosts must still supply a Suspense boundary.
  */
-export function HolodeckModel(props: ModelProps) {
-  // Own boundary + committed wrapper (holodeck#58, #63): the wrapper's effects
-  // run even while the body suspends, so the hold starts before the first frame
-  // (host fallback may be null), ends only when the body has mounted, and ends
+export function HolodeckModel({ ownBoundary = false, ...props }: ModelProps) {
+  return ownBoundary ? <OwnedHolodeckModel {...props} /> : <HolodeckModelBody {...props} />;
+}
+
+function OwnedHolodeckModel(props: Omit<ModelProps, 'ownBoundary'>) {
+  // The wrapper's effects run even while the body suspends below its own
+  // boundary, so it can own the hold: until the body has mounted, and released
   // when the model is removed or its load fails (the wrapper unmounts).
   const [mountedUrl, setMountedUrl] = useState<string | null>(null);
   useMountHold(props.url, mountedUrl);
@@ -82,13 +96,16 @@ function HolodeckModelBody({
   edgeColor,
   style: styleProp,
   onReady,
-}: ModelProps & { onMounted: (url: string) => void }) {
+}: Omit<ModelProps, 'ownBoundary'> & { onMounted?: (url: string) => void }) {
   const contextStyle = useHolodeckStyle();
   const style = styleProp ?? contextStyle;
-  // The wrapper's mount hold covers the request; a bare promise hold would outlive removal.
-  const gltf = useTrackedGLTF(url, { holdRequest: false });
-  // The wrapper's hold ends only once this body is committed.
-  useLayoutEffect(() => onMounted(url), [onMounted, url]);
+  const gltf = useTrackedGLTF(url);
+  const tracker = useContext(RenderTrackerContext);
+  // The request hold (or the owner wrapper's) ends only once this body is committed.
+  useLayoutEffect(() => {
+    if (tracker) confirmAssetMounted(tracker, url);
+    onMounted?.(url);
+  }, [tracker, onMounted, url]);
   // Clone and style together: restyling the same clone after an accent
   // change would hit the idempotency flag before the old dispose ran.
   const { scene, dispose } = useMemo(() => {

@@ -2,7 +2,7 @@ import { Suspense } from 'react';
 import { renderToString } from 'react-dom/server';
 import { Group } from 'three';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRenderTracker, RenderTrackerContext, type RenderTracker } from '../../src/iso/render-signal';
+import { confirmAssetMounted, createRenderTracker, RenderTrackerContext, type RenderTracker } from '../../src/iso/render-signal';
 import { HolodeckModel, useTrackedGLTF } from './HolodeckModel';
 
 const { load } = vi.hoisted(() => ({ load: vi.fn() }));
@@ -51,6 +51,9 @@ describe('useTrackedGLTF request holds', () => {
     expect(tracker.pending).toBe(1);
     finish();
     await pending;
+    // Loaded but not committed yet: the hold survives until the model mounts.
+    expect(tracker.pending).toBe(1);
+    confirmAssetMounted(tracker, '/slow.glb');
     expect(tracker.pending).toBe(0);
   });
 
@@ -61,6 +64,42 @@ describe('useTrackedGLTF request holds', () => {
     renderReader(tracker, false);
     expect(tracker.pending).toBe(0);
     await pending;
+  });
+});
+
+describe('HolodeckModel host-controlled suspension (GPT review of #197)', () => {
+  it('shows the host Suspense fallback while loading, with and without a tracker', async () => {
+    const pending = Promise.resolve();
+    load.mockImplementation(() => { throw pending; });
+    const render = (tracker: RenderTracker | null) => renderToString(
+      <RenderTrackerContext.Provider value={tracker}>
+        <Suspense fallback={<i>host-loading</i>}>
+          <HolodeckModel url="/slow.glb" />
+        </Suspense>
+      </RenderTrackerContext.Provider>,
+    );
+    expect(render(null)).toContain('host-loading');
+    expect(render(createRenderTracker())).toContain('host-loading');
+    await pending;
+  });
+
+  it('holds the request synchronously by default, in both boundary modes', async () => {
+    for (const ownBoundary of [false, true]) {
+      const tracker = createRenderTracker();
+      let finish!: () => void;
+      const pending = new Promise<void>((resolve) => { finish = resolve; });
+      load.mockImplementation(() => { throw pending; });
+      renderToString(
+        <RenderTrackerContext.Provider value={tracker}>
+          <Suspense fallback={null}>
+            <HolodeckModel url="/slow.glb" ownBoundary={ownBoundary} />
+          </Suspense>
+        </RenderTrackerContext.Provider>,
+      );
+      expect(tracker.pending).toBe(1);
+      finish();
+      await pending;
+    }
   });
 });
 
