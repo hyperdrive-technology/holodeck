@@ -1,0 +1,3 @@
+AWS Architecture Icons, release 07312026, from https://aws.amazon.com/architecture/icons/ . Copyright Amazon.com, Inc. or its affiliates. 'AWS', 'Amazon' and the AWS service names and icons are trademarks of Amazon.com, Inc. or its affiliates. The icons are provided by AWS for creating architecture diagrams and are used here under the AWS Architecture Icons terms and AWS Trademark Guidelines (https://aws.amazon.com/trademark-guidelines/): they are not covered by this package's MIT licence, and their use does not imply sponsorship or endorsement by AWS.
+
+Source: https://d1.awsstatic.com/onedam/marketing-channels/website/public/shared/architecture-icon-release/Icon-package_07312026.5846e92413caa21490223536cc97f1269e44fa92.zip

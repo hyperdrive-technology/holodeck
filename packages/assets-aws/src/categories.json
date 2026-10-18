@@ -1,0 +1,42 @@
+{
+  "compute": {
+    "label": "Compute",
+    "color": "#ED7100"
+  },
+  "containers": {
+    "label": "Containers",
+    "color": "#ED7100"
+  },
+  "database": {
+    "label": "Database",
+    "color": "#C925D1"
+  },
+  "storage": {
+    "label": "Storage",
+    "color": "#7AA116"
+  },
+  "networking": {
+    "label": "Networking & Content Delivery",
+    "color": "#8C4FFF"
+  },
+  "integration": {
+    "label": "Application Integration",
+    "color": "#E7157B"
+  },
+  "analytics": {
+    "label": "Analytics",
+    "color": "#8C4FFF"
+  },
+  "security": {
+    "label": "Security, Identity & Compliance",
+    "color": "#DD344C"
+  },
+  "management": {
+    "label": "Management & Governance",
+    "color": "#E7157B"
+  },
+  "business": {
+    "label": "Business Applications",
+    "color": "#DD344C"
+  }
+}

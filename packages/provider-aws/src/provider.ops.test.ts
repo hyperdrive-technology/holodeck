@@ -218,10 +218,10 @@ describe('discover', () => {
     const h = await open(fake, { regions: ['us-east-1'], discover: { resourceTypes: ['ec2:instance', 's3', 'sqs', 'lambda'], tags: [{ key: 'env', values: ['prod'] }] } });
     const out = await s(h).discover();
     expect(out.map((r) => [r.kind, r.label, r.group, r.partHint])).toEqual([
-      ['aws.ec2.instance', 'web-1', 'eu-west-1', 'aws.ec2'],
-      ['aws.s3.bucket', 'assets', 'eu-west-1', 'aws.s3'],
-      ['aws.sqs.queue', 'jobs', 'eu-west-1', 'aws.sqs'],
-      ['aws.lambda.function', 'f', 'us-east-1', 'aws.lambda'],
+      ['aws.ec2.instance', 'web-1', 'eu-west-1', 'aws:ec2'],
+      ['aws.s3.bucket', 'assets', 'eu-west-1', 'aws:s3'],
+      ['aws.sqs.queue', 'jobs', 'eu-west-1', 'aws:sqs'],
+      ['aws.lambda.function', 'f', 'us-east-1', 'aws:lambda'],
     ]);
     const calls = fake.callsTo('GetResources');
     expect(calls.map((c) => c.region)).toEqual(['eu-west-1', 'eu-west-1', 'us-east-1']);
