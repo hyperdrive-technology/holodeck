@@ -34,7 +34,13 @@ export type ChannelState = 'connecting' | 'live' | 'stale' | 'error';
 
 export interface ChannelSink {
   /** A parsed JSON message (poll response, SSE event data, WebSocket message). */
-  payload(json: unknown, receivedAt: number): void;
+  payload(json: unknown, receivedAt: number, seq?: number): void;
+  /**
+   * Take a sequence number for a request that is about to start (holodeck#97):
+   * pass it back to `payload` so "newest" follows request order, not the
+   * order responses happen to arrive in.
+   */
+  begin(): number;
   state(state: ChannelState, message?: string): void;
   log(level: 'debug' | 'info' | 'warn' | 'error', message: string): void;
 }
@@ -170,6 +176,7 @@ abstract class RetryingChannel implements Channel {
 export class PollChannel extends RetryingChannel {
   protected async attempt(): Promise<void> {
     let json: unknown;
+    const seq = this.deps.sink.begin();
     try {
       json = await fetchJson(this.requestDeps, this.url);
     } catch (error) {
@@ -179,13 +186,14 @@ export class PollChannel extends RetryingChannel {
     }
     if (this.stopped) return;
     this.succeeded();
-    this.deps.sink.payload(json, this.deps.now());
+    this.deps.sink.payload(json, this.deps.now(), seq);
     this.schedule(this.deps.config.intervalMs);
   }
 }
 
 export class SseChannel extends RetryingChannel {
-  private readonly ids = new SseIdTracker();
+  // Same line limit as the parser's buffer, so the two scanners agree on what is too long (#103).
+  private readonly ids = new SseIdTracker(this.deps.config.maxBytes);
   private serverRetryMs: number | undefined;
 
   protected async attempt(): Promise<void> {
@@ -246,8 +254,12 @@ export class SseChannel extends RetryingChannel {
         if (done || this.stopped || signal.aborted) return;
         // `stream: true` keeps a multi-byte character split across chunks intact.
         const text = decoder.decode(value, { stream: true });
-        this.ids.feed(text);
+        // Parser first: if it throws (oversized event), events later in this
+        // chunk were never delivered, so the id tracker must not advance past
+        // them. Resuming from the previous chunk's id replays a few events,
+        // which beats silently skipping them (#103).
         parser.feed(text);
+        this.ids.feed(text);
       }
     } finally {
       await reader.cancel().catch(() => {});

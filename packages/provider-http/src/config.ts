@@ -79,7 +79,8 @@ export interface HttpConnectionConfig {
    * Follow HTTP redirects (default false: a redirect is an error). When true,
    * redirects are followed manually (at most 5 hops): credentials go only to
    * the connection's origin and are dropped for good once a hop leaves it,
-   * and an origin allowlist applies to every hop.
+   * and an origin allowlist applies to every hop. Node/hosts only: browsers
+   * give an opaque response for manual redirects, so `connect` rejects it there.
    */
   followRedirects: boolean;
 }
@@ -441,6 +442,10 @@ export const HTTP_CONFIG_SCHEMA: Record<string, unknown> = Object.freeze({
       },
     },
     maxBytes: { type: 'integer', minimum: 1, default: HTTP_DEFAULTS.maxBytes },
-    followRedirects: { type: 'boolean', default: false },
+    followRedirects: {
+      type: 'boolean',
+      default: false,
+      description: 'Follow HTTP redirects (max 5 hops, credentials stay on the connection origin). Node/hosts only: rejected at connect in browsers.',
+    },
   },
 });

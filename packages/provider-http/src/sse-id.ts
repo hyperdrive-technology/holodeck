@@ -55,6 +55,9 @@ export class SseIdTracker {
     this.partial = '';
     this.skipLeadingLf = false;
     this.first = true;
+    // An id that was never dispatched (the stream dropped before its blank
+    // line) must not be promoted by the next stream's first blank line (#106).
+    this.buffer = this.lastEventId;
   }
 
   private line(line: string): void {
