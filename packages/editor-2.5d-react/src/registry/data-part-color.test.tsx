@@ -28,4 +28,21 @@ describe('data-only model colour bindings', () => {
     delete (placement as { color?: string }).color;
     expect(draw()).toBe('#123456');
   });
+
+  it("an empty colour param (a valid 'no colour' default) doesn't override placement or package colours", () => {
+    const def: IsoPartDefinition = {
+      id: 'cloud:server', label: 'Server', footprint: { w: 2, h: 2 },
+      params: { color: { kind: 'color', default: '' } } as IsoPartDefinition['params'],
+      model: '/server.glb', colors: { accent: '#123456' },
+    };
+    const placement = { id: 'web', object: def.id, x: 0, y: 0, color: '#abcdef' };
+    const draw = () => {
+      model.mockClear();
+      renderToStaticMarkup(<DataPart placement={placement} params={resolveParams(def, placement)} style={HOLODECK_STYLE} def={def} selected={false} />);
+      return (model.mock.calls as unknown as Array<[{ accent: string }]>)[0]?.[0].accent;
+    };
+    expect(draw()).toBe('#abcdef');
+    delete (placement as { color?: string }).color;
+    expect(draw()).toBe('#123456');
+  });
 });

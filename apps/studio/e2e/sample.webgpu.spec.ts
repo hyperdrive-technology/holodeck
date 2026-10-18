@@ -16,10 +16,6 @@ test.afterEach(() => {
 });
 
 test('sample visual baseline and PNG download', async ({ page }, testInfo) => {
-  // holodeck#175: the hosted Linux runner's SwiftShader can't render or export
-  // this scene within minutes. The sample flow is covered on CI by
-  // sample.spec.ts; this baseline runs on real-GPU machines until #175 lands.
-  test.skip(!!process.env.CI, 'sample WebGPU baseline is local-only until holodeck#175');
   const failedAssets: string[] = [];
   page.on('response', (response) => {
     if (/\.(glb|svg)(\?|$)/.test(response.url()) && !response.ok()) failedAssets.push(response.url());
@@ -36,6 +32,12 @@ test('sample visual baseline and PNG download', async ({ page }, testInfo) => {
   const canvas = editor.locator('canvas');
   const bounds = await canvas.boundingBox();
   expect(bounds).not.toBeNull();
+  expect(failedAssets).toEqual([]);
+  // Up to here (WebGPU render reaches ready, every GLB/SVG loads, bound labels
+  // live) runs everywhere, CI included. holodeck#175: the hosted Linux runner's
+  // SwiftShader can't export or screenshot this scene within minutes, so the
+  // 2x export and visual baseline below run on real-GPU machines until #175.
+  if (process.env.CI) return;
 
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   const dialog = page.getByTestId('export-dialog');

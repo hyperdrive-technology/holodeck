@@ -42,8 +42,9 @@ export function DataPart({ placement, params, style, def }: IsoPartProps) {
               params={params}
               style={style}
               // Resolved params include provider bindings (threshold colours in
-              // Studio's cloud sample). They take precedence over static colour.
-              accent={typeof params.color === 'string' ? params.color : placement.color}
+              // Studio's cloud sample). They take precedence over static colour; an empty
+              // string (a valid 'no colour' default) falls back to placement / package colour.
+              accent={typeof params.color === 'string' && params.color !== '' ? params.color : placement.color}
               animation={placement.animation}
             />
           </Suspense>
