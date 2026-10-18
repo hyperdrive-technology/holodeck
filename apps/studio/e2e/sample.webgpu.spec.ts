@@ -37,8 +37,11 @@ test('sample visual baseline and PNG download', async ({ page }, testInfo) => {
   // includes pending GLBs/textures; Playwright also waits for stable screenshots.
   // See README for first capture and updates on the same platform/adapter.
   await expect(editor).toHaveAttribute('data-render-state', 'ready', { timeout: 120_000 });
-  await expect(canvas).toHaveScreenshot('three-tier-web-app.png', {
-    animations: 'disabled', threshold: 0.2, maxDiffPixelRatio: 0.01,
+  // Page screenshot clipped to the canvas, not an element screenshot: the
+  // element path waits for "stable" bounding boxes across animation frames,
+  // which SwiftShader on the CI runner renders too slowly to reach in 30 s.
+  await expect(page).toHaveScreenshot('three-tier-web-app.png', {
+    clip: bounds!, animations: 'disabled', threshold: 0.2, maxDiffPixelRatio: 0.01, timeout: 120_000,
   });
 
   await page.getByRole('button', { name: 'Export', exact: true }).click();
