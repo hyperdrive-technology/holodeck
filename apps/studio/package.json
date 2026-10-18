@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@holodeck/editor-2.5d-react": "file:../../packages/editor-2.5d-react",
+    "@holodeck/library-cloud": "file:../../packages/library-cloud",
     "@holodeck/provider-aws": "file:../../packages/provider-aws",
     "@holodeck/provider-http": "file:../../packages/provider-http",
     "@holodeck/sdk": "file:../../../holodeck-sdk/ts",

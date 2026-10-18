@@ -11,6 +11,9 @@ importers:
       '@holodeck/editor-2.5d-react':
         specifier: file:../../packages/editor-2.5d-react
         version: file:../../packages/editor-2.5d-react(@types/react@19.2.14)(@types/three@0.186.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      '@holodeck/library-cloud':
+        specifier: file:../../packages/library-cloud
+        version: file:../../packages/library-cloud
       '@holodeck/provider-aws':
         specifier: file:../../packages/provider-aws
         version: file:../../packages/provider-aws
@@ -298,6 +301,10 @@ packages:
     peerDependencies:
       react: '>=19.2.0 <19.4'
       react-dom: '>=19.2.0 <19.4'
+
+  '@holodeck/library-cloud@file:../../packages/library-cloud':
+    resolution: {directory: ../../packages/library-cloud, type: directory}
+    engines: {node: '>=26'}
 
   '@holodeck/provider-aws@file:../../packages/provider-aws':
     resolution: {directory: ../../packages/provider-aws, type: directory}
@@ -2245,6 +2252,10 @@ snapshots:
       - expo-gl
       - immer
       - react-native
+
+  '@holodeck/library-cloud@file:../../packages/library-cloud':
+    dependencies:
+      '@holodeck/sdk': file:../../../holodeck-sdk/ts
 
   '@holodeck/provider-aws@file:../../packages/provider-aws':
     dependencies:

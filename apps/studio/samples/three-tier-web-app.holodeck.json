@@ -1,0 +1,794 @@
+{
+  "format": "holodeck.document.v1",
+  "id": "sample-three-tier-web-app",
+  "name": "Three-tier web app",
+  "engine": "holodeck.iso",
+  "engineVersion": "1.0.0",
+  "requires": {
+    "holodeck.iso": "^1.0",
+    "holodeck.cloud": "^0.1",
+    "holodeck.sim": "^1.0"
+  },
+  "theme": "arcentry-light",
+  "connections": [
+    {
+      "id": "demo",
+      "provider": "holodeck.sim",
+      "label": "Demo traffic (simulated)"
+    }
+  ],
+  "body": {
+    "format": "holodeck.iso.scene.v1",
+    "id": "sample-three-tier-web-app",
+    "name": "Three-tier web app",
+    "gridCellSize": 1,
+    "theme": "arcentry-light",
+    "objects": [
+      {
+        "id": "vpc",
+        "object": "area",
+        "x": 11,
+        "y": 3,
+        "width": 32,
+        "height": 28,
+        "z": -3,
+        "params": {
+          "fill": "#eef2f8",
+          "outline": "#94a3b8",
+          "outlineStyle": "dashed",
+          "walled": true,
+          "wallHeight": 0.3
+        }
+      },
+      {
+        "id": "public-subnet",
+        "object": "area",
+        "x": 3,
+        "y": -1,
+        "width": 14,
+        "height": 16,
+        "z": -2,
+        "params": {
+          "fill": "#e0f2fe",
+          "outline": "#7dd3fc"
+        }
+      },
+      {
+        "id": "private-subnet",
+        "object": "area",
+        "x": 19,
+        "y": 3,
+        "width": 14,
+        "height": 24,
+        "z": -1,
+        "params": {
+          "fill": "#ecfdf5",
+          "outline": "#6ee7b7"
+        }
+      },
+      {
+        "id": "title",
+        "object": "label",
+        "x": 2,
+        "y": -15,
+        "size": 1,
+        "params": {
+          "text": "Three-tier web app",
+          "bold": true
+        }
+      },
+      {
+        "id": "vpc-label",
+        "object": "label",
+        "x": 11,
+        "y": -10,
+        "size": 0.65,
+        "params": {
+          "text": "VPC · 10.0.0.0/16",
+          "bold": true
+        }
+      },
+      {
+        "id": "public-label",
+        "object": "label",
+        "x": 3,
+        "y": -8,
+        "size": 0.6,
+        "params": {
+          "text": "Public subnet",
+          "bold": true
+        }
+      },
+      {
+        "id": "private-label",
+        "object": "label",
+        "x": 19,
+        "y": -10,
+        "size": 0.6,
+        "params": {
+          "text": "Private subnet",
+          "bold": true
+        }
+      },
+      {
+        "id": "private-lock",
+        "object": "icon",
+        "x": 25,
+        "y": -10,
+        "params": {
+          "icon": "lock",
+          "color": "#059669",
+          "size": 0.7
+        }
+      },
+      {
+        "id": "users",
+        "object": "cloud:user",
+        "x": -15,
+        "y": 0,
+        "meta": {
+          "tier": "edge",
+          "service": "Users"
+        },
+        "metaHidden": true
+      },
+      {
+        "id": "users-label",
+        "object": "label",
+        "x": -15,
+        "y": 1.9,
+        "size": 0.55,
+        "params": {
+          "text": "Users",
+          "bold": true
+        }
+      },
+      {
+        "id": "cdn",
+        "object": "cloud:cdn",
+        "x": -9,
+        "y": 0,
+        "meta": {
+          "tier": "edge",
+          "service": "CDN"
+        },
+        "metaHidden": true
+      },
+      {
+        "id": "cdn-label",
+        "object": "label",
+        "x": -9,
+        "y": 1.9,
+        "size": 0.55,
+        "params": {
+          "text": "CDN",
+          "bold": true
+        }
+      },
+      {
+        "id": "load-balancer",
+        "object": "cloud:load-balancer",
+        "x": -1,
+        "y": 0,
+        "meta": {
+          "tier": "public",
+          "service": "Load balancer"
+        },
+        "metaHidden": true
+      },
+      {
+        "id": "load-balancer-label",
+        "object": "label",
+        "x": -1,
+        "y": 1.9,
+        "size": 0.55,
+        "params": {
+          "text": "Load balancer",
+          "bold": true
+        }
+      },
+      {
+        "id": "web-1",
+        "object": "cloud:server",
+        "x": 6,
+        "y": -4,
+        "meta": {
+          "tier": "public",
+          "service": "Web 1"
+        },
+        "metaHidden": true,
+        "bindings": {
+          "color": {
+            "connection": "demo",
+            "source": "ramp:8:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": "#22c55e",
+              "steps": [
+                {
+                  "at": 60,
+                  "value": "#f59e0b"
+                },
+                {
+                  "at": 85,
+                  "value": "#ef4444"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "web-1-label",
+        "object": "label",
+        "x": 6,
+        "y": -2.1,
+        "size": 0.55,
+        "params": {
+          "text": "Web 1",
+          "bold": true
+        }
+      },
+      {
+        "id": "web-2",
+        "object": "cloud:server",
+        "x": 6,
+        "y": 4,
+        "meta": {
+          "tier": "public",
+          "service": "Web 2"
+        },
+        "metaHidden": true,
+        "bindings": {
+          "color": {
+            "connection": "demo",
+            "source": "ramp:8:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": "#22c55e",
+              "steps": [
+                {
+                  "at": 60,
+                  "value": "#f59e0b"
+                },
+                {
+                  "at": 85,
+                  "value": "#ef4444"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "web-2-label",
+        "object": "label",
+        "x": 6,
+        "y": 5.9,
+        "size": 0.55,
+        "params": {
+          "text": "Web 2",
+          "bold": true
+        }
+      },
+      {
+        "id": "app-1",
+        "object": "cloud:server",
+        "x": 15,
+        "y": -4,
+        "meta": {
+          "tier": "private",
+          "service": "App 1"
+        },
+        "metaHidden": true,
+        "bindings": {
+          "color": {
+            "connection": "demo",
+            "source": "ramp:8:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": "#22c55e",
+              "steps": [
+                {
+                  "at": 60,
+                  "value": "#f59e0b"
+                },
+                {
+                  "at": 85,
+                  "value": "#ef4444"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "app-1-label",
+        "object": "label",
+        "x": 15,
+        "y": -2.1,
+        "size": 0.55,
+        "params": {
+          "text": "App 1",
+          "bold": true
+        }
+      },
+      {
+        "id": "app-2",
+        "object": "cloud:server",
+        "x": 15,
+        "y": 4,
+        "meta": {
+          "tier": "private",
+          "service": "App 2"
+        },
+        "metaHidden": true,
+        "bindings": {
+          "color": {
+            "connection": "demo",
+            "source": "ramp:8:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": "#22c55e",
+              "steps": [
+                {
+                  "at": 60,
+                  "value": "#f59e0b"
+                },
+                {
+                  "at": 85,
+                  "value": "#ef4444"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "app-2-label",
+        "object": "label",
+        "x": 15,
+        "y": 5.9,
+        "size": 0.55,
+        "params": {
+          "text": "App 2",
+          "bold": true
+        }
+      },
+      {
+        "id": "database",
+        "object": "cloud:database",
+        "x": 23,
+        "y": -4,
+        "meta": {
+          "tier": "private",
+          "service": "Database"
+        },
+        "metaHidden": true
+      },
+      {
+        "id": "database-label",
+        "object": "label",
+        "x": 23,
+        "y": -2.1,
+        "size": 0.55,
+        "params": {
+          "text": "Database",
+          "bold": true
+        }
+      },
+      {
+        "id": "cache",
+        "object": "cloud:cache",
+        "x": 23,
+        "y": 4,
+        "meta": {
+          "tier": "private",
+          "service": "Cache"
+        },
+        "metaHidden": true
+      },
+      {
+        "id": "cache-label",
+        "object": "label",
+        "x": 23,
+        "y": 5.9,
+        "size": 0.55,
+        "params": {
+          "text": "Cache",
+          "bold": true
+        }
+      },
+      {
+        "id": "queue",
+        "object": "cloud:queue",
+        "x": 15,
+        "y": 12,
+        "meta": {
+          "tier": "private",
+          "service": "Queue"
+        },
+        "metaHidden": true
+      },
+      {
+        "id": "queue-label",
+        "object": "label",
+        "x": 15,
+        "y": 13.9,
+        "size": 0.55,
+        "params": {
+          "text": "Queue",
+          "bold": true
+        }
+      },
+      {
+        "id": "worker",
+        "object": "cloud:function",
+        "x": 23,
+        "y": 12,
+        "meta": {
+          "tier": "private",
+          "service": "Async function"
+        },
+        "metaHidden": true
+      },
+      {
+        "id": "worker-label",
+        "object": "label",
+        "x": 23,
+        "y": 13.9,
+        "size": 0.55,
+        "params": {
+          "text": "Async function",
+          "bold": true
+        }
+      },
+      {
+        "id": "users-to-cdn",
+        "object": "connector",
+        "x": 0,
+        "y": 0,
+        "link": {
+          "from": {
+            "object": "users"
+          },
+          "to": {
+            "object": "cdn"
+          }
+        },
+        "params": {
+          "label": "HTTPS",
+          "endTip": "arrow",
+          "route": "auto",
+          "width": 0.07,
+          "labelSize": 0.3
+        }
+      },
+      {
+        "id": "cdn-to-load-balancer",
+        "object": "connector",
+        "x": 0,
+        "y": 0,
+        "link": {
+          "from": {
+            "object": "cdn"
+          },
+          "to": {
+            "object": "load-balancer"
+          }
+        },
+        "params": {
+          "label": "Origin HTTPS",
+          "endTip": "arrow",
+          "route": "auto",
+          "width": 0.07,
+          "labelSize": 0.3
+        }
+      },
+      {
+        "id": "load-balancer-to-web-1",
+        "object": "connector",
+        "x": 0,
+        "y": 0,
+        "link": {
+          "from": {
+            "object": "load-balancer"
+          },
+          "to": {
+            "object": "web-1"
+          }
+        },
+        "params": {
+          "label": "HTTP",
+          "endTip": "arrow",
+          "route": "auto",
+          "width": 0.07,
+          "labelSize": 0.3
+        }
+      },
+      {
+        "id": "load-balancer-to-web-2",
+        "object": "connector",
+        "x": 0,
+        "y": 0,
+        "link": {
+          "from": {
+            "object": "load-balancer"
+          },
+          "to": {
+            "object": "web-2"
+          }
+        },
+        "params": {
+          "label": "HTTP",
+          "endTip": "arrow",
+          "route": "auto",
+          "width": 0.07,
+          "labelSize": 0.3
+        }
+      },
+      {
+        "id": "web-1-to-app-1",
+        "object": "connector",
+        "x": 0,
+        "y": 0,
+        "link": {
+          "from": {
+            "object": "web-1"
+          },
+          "to": {
+            "object": "app-1"
+          }
+        },
+        "params": {
+          "label": "API",
+          "endTip": "arrow",
+          "route": "auto",
+          "width": 0.07,
+          "labelSize": 0.3
+        }
+      },
+      {
+        "id": "web-2-to-app-2",
+        "object": "connector",
+        "x": 0,
+        "y": 0,
+        "link": {
+          "from": {
+            "object": "web-2"
+          },
+          "to": {
+            "object": "app-2"
+          }
+        },
+        "params": {
+          "label": "API",
+          "endTip": "arrow",
+          "route": "auto",
+          "width": 0.07,
+          "labelSize": 0.3
+        }
+      },
+      {
+        "id": "app-1-to-database",
+        "object": "connector",
+        "x": 0,
+        "y": 0,
+        "link": {
+          "from": {
+            "object": "app-1"
+          },
+          "to": {
+            "object": "database"
+          }
+        },
+        "params": {
+          "label": "SQL",
+          "endTip": "arrow",
+          "route": "auto",
+          "width": 0.07,
+          "labelSize": 0.3
+        }
+      },
+      {
+        "id": "app-2-to-database",
+        "object": "connector",
+        "x": 0,
+        "y": 0,
+        "link": {
+          "from": {
+            "object": "app-2"
+          },
+          "to": {
+            "object": "database"
+          }
+        },
+        "params": {
+          "label": "SQL",
+          "endTip": "arrow",
+          "route": "auto",
+          "width": 0.07,
+          "labelSize": 0.3
+        }
+      },
+      {
+        "id": "app-1-to-cache",
+        "object": "connector",
+        "x": 0,
+        "y": 0,
+        "link": {
+          "from": {
+            "object": "app-1"
+          },
+          "to": {
+            "object": "cache"
+          }
+        },
+        "params": {
+          "label": "GET / SET",
+          "endTip": "arrow",
+          "route": "auto",
+          "width": 0.07,
+          "labelSize": 0.3
+        }
+      },
+      {
+        "id": "app-2-to-cache",
+        "object": "connector",
+        "x": 0,
+        "y": 0,
+        "link": {
+          "from": {
+            "object": "app-2"
+          },
+          "to": {
+            "object": "cache"
+          }
+        },
+        "params": {
+          "label": "GET / SET",
+          "endTip": "arrow",
+          "route": "auto",
+          "width": 0.07,
+          "labelSize": 0.3
+        }
+      },
+      {
+        "id": "app-1-to-queue",
+        "object": "connector",
+        "x": 0,
+        "y": 0,
+        "link": {
+          "from": {
+            "object": "app-1"
+          },
+          "to": {
+            "object": "queue"
+          }
+        },
+        "params": {
+          "label": "Enqueue",
+          "endTip": "arrow",
+          "route": "auto",
+          "width": 0.07,
+          "labelSize": 0.3,
+          "dash": "dashed"
+        }
+      },
+      {
+        "id": "app-2-to-queue",
+        "object": "connector",
+        "x": 0,
+        "y": 0,
+        "link": {
+          "from": {
+            "object": "app-2"
+          },
+          "to": {
+            "object": "queue"
+          }
+        },
+        "params": {
+          "label": "Enqueue",
+          "endTip": "arrow",
+          "route": "auto",
+          "width": 0.07,
+          "labelSize": 0.3,
+          "dash": "dashed"
+        }
+      },
+      {
+        "id": "queue-to-worker",
+        "object": "connector",
+        "x": 0,
+        "y": 0,
+        "link": {
+          "from": {
+            "object": "queue"
+          },
+          "to": {
+            "object": "worker"
+          }
+        },
+        "params": {
+          "label": "Consume",
+          "endTip": "arrow",
+          "route": "auto",
+          "width": 0.07,
+          "labelSize": 0.3,
+          "dash": "dashed"
+        }
+      },
+      {
+        "id": "worker-to-database",
+        "object": "connector",
+        "x": 0,
+        "y": 0,
+        "link": {
+          "from": {
+            "object": "worker"
+          },
+          "to": {
+            "object": "database"
+          }
+        },
+        "params": {
+          "label": "Persist",
+          "endTip": "arrow",
+          "route": "auto",
+          "width": 0.07,
+          "labelSize": 0.3,
+          "dash": "dashed"
+        }
+      },
+      {
+        "id": "cpu-label",
+        "object": "label",
+        "x": -10,
+        "y": 10,
+        "size": 0.7,
+        "params": {
+          "text": "CPU fraction {value}",
+          "bold": true,
+          "format": "auto"
+        },
+        "bindings": {
+          "value": {
+            "connection": "demo",
+            "source": "ramp:8:0:100",
+            "transform": {
+              "kind": "scale",
+              "inMin": 0,
+              "inMax": 100,
+              "outMin": 0,
+              "outMax": 1,
+              "clamp": true
+            }
+          }
+        }
+      },
+      {
+        "id": "requests-label",
+        "object": "label",
+        "x": -10,
+        "y": 13,
+        "size": 0.7,
+        "params": {
+          "text": "Requests -- req/s",
+          "bold": true
+        },
+        "bindings": {
+          "text": {
+            "connection": "demo",
+            "source": "ramp:6:100:700",
+            "transform": {
+              "kind": "format",
+              "template": "Requests {value} req/s",
+              "digits": 0
+            }
+          }
+        }
+      }
+    ]
+  }
+}

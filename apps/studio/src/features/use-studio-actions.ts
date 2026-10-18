@@ -6,6 +6,7 @@ import { useCreateDocument, useDeleteDocument, useDocumentList } from '../docume
 import { withDocumentId } from '../documents/document-ops';
 import { notify } from '../layout/ui-state';
 import { useStudio } from '../studio-context';
+import { createSampleDocument } from '../samples/three-tier-web-app';
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -29,6 +30,15 @@ export function useStudioActions() {
       notify({ tone: 'error', title: 'Could not create a document', details: [messageOf(error)] });
     }
   }, [createDocument, list.data, openDocument]);
+
+  const newFromSample = useCallback(async () => {
+    try {
+      const saved = await createDocument(createSampleDocument());
+      await openDocument(saved.document.id);
+    } catch (error) {
+      notify({ tone: 'error', title: 'Could not create a document from the sample', details: [messageOf(error)] });
+    }
+  }, [createDocument, openDocument]);
 
   /** Import every file; opens the last one that succeeded. Returns how many were imported. */
   const importFiles = useCallback(
@@ -77,5 +87,5 @@ export function useStudioActions() {
     [navigate, removeDocument],
   );
 
-  return { newDocument, importFiles, deleteDocument, openDocument };
+  return { newDocument, newFromSample, importFiles, deleteDocument, openDocument };
 }

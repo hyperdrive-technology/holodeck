@@ -5,7 +5,7 @@ import { useStudioActions } from './use-studio-actions';
 
 /** `/`: nothing open yet. */
 export function Welcome() {
-  const { newDocument } = useStudioActions();
+  const { newDocument, newFromSample } = useStudioActions();
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center" data-testid="welcome">
       <h1 className="text-xl font-semibold">Holodeck Studio</h1>
@@ -20,6 +20,9 @@ export function Welcome() {
           <UploadIcon /> Import
         </Button>
       </div>
+      <Button variant="outline" onClick={() => void newFromSample()}>
+        New from sample: Three-tier web app
+      </Button>
     </main>
   );
 }

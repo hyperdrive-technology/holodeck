@@ -15,6 +15,7 @@ import { SidePanel } from '../layout/SidePanel';
 import { notify, panelStore } from '../layout/ui-state';
 import { requiresFor } from '../host/studio-host';
 import { useStudio } from '../studio-context';
+import { LiveValues } from './LiveValues';
 import { activeDocumentStore } from './active-document';
 import { CanvasErrorBoundary } from './CanvasErrorBoundary';
 import { ConflictDialog } from './ConflictDialog';
@@ -396,6 +397,7 @@ function DocumentWorkspace({
             metrics={live.metrics}
           />
         </CanvasErrorBoundary>
+        <LiveValues metrics={live.metrics} />
       </main>
       {inspectorOpen ? (
         <SidePanel side="right" storageKey={INSPECTOR_WIDTH_KEY} bounds={INSPECTOR_BOUNDS} label="Inspector" testId="inspector-panel">

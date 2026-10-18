@@ -9,7 +9,9 @@ PLC or Hyperdrive code: the studio is a plain Holodeck host.
 - **Host**: one `HolodeckHost` (`src/host/studio-host.ts`); engines are
   registered and packages installed through their manifests, as any
   third-party host would. Today: the `holodeck.iso` engine and its built-in
-  package from `@holodeck/editor-2.5d-react`.
+  package from `@holodeck/editor-2.5d-react`, plus `@holodeck/library-cloud`
+  (all 26 cloud archetypes and both Arcentry themes). Cloud assets resolve
+  through Vite URL imports (`src/host/cloud-package.ts`) in dev and production.
 - **Documents** in IndexedDB (`src/documents/db.ts`, `store.ts`): every write
   is validated (envelope via `@holodeck/sdk`, body and installed packages via
   the host). Per-document view state lives in a separate `views` store.
@@ -26,6 +28,10 @@ PLC or Hyperdrive code: the studio is a plain Holodeck host.
   envelopes for any installed engine, or a bare legacy `IsoSceneFile` (wrapped).
   Every problem is listed at once. Re-importing an existing id makes a copy.
   Files can also be dropped anywhere on the window.
+- **New from sample** (header or welcome screen, holodeck#43): creates an
+  independent, editable **Three-tier web app** document with live simulated
+  traffic. The sample can also be imported from
+  [`samples/three-tier-web-app.holodeck.json`](samples/three-tier-web-app.holodeck.json).
 - **Library** sidebar: placeable items of every installed package, grouped by
   package and category, with multi-term search. Click an item to arm the
   canvas place tool (then click the floor); "+" adds it next to the scene.
@@ -80,6 +86,28 @@ PLC or Hyperdrive code: the studio is a plain Holodeck host.
 - **Layout**: T3 Code idioms: resizable, persisted side panels
   (`src/layout/`), TanStack Store for UI state, TanStack Hotkeys for
   shortcuts (`Mod+/` lists them).
+
+## Three-tier web app sample (S3)
+
+The sample uses `holodeck.document.v1`, `holodeck.iso` and `arcentry-light`:
+users → CDN → load balancer → two web servers → two app servers → database
+and cache. The app tier enqueues async work for a function, which persists
+results. Fourteen labelled connectors have arrow tips; dashed lines denote
+async work. Public and private subnet areas sit inside a walled VPC area.
+
+One secret-free `holodeck.sim` connection (`demo`) drives:
+
+| Target | Signal / transform | Behaviour |
+|---|---|---|
+| Web and app accents | `ramp:8:0:100` / `threshold` | green below 60%, amber at 60%, red at 85% |
+| Request-rate label text | `ramp:6:100:700` / `format` | `Requests {value} req/s`, zero decimals |
+| CPU fraction label value | `ramp:8:0:100` / `scale` | normalises 0–100 to 0–1 |
+
+Studio and embeds also expose named text equivalents of live readings for
+assistive technology (`Live values`; no automatic announcements). Rendering
+and PNG export need WebGPU; creating, importing, saving, live text readings
+and JSON / CSV export work without it. The sample uses vendor-neutral cloud
+archetypes and needs no AWS account or credentials.
 
 ## Embed API (`postMessage`)
 
@@ -161,6 +189,9 @@ copied at install time). After changing either, rebuild it and reinstall:
 ```sh
 (cd ../../../holodeck-sdk/ts && pnpm build)
 (cd ../../packages/editor-2.5d-react && pnpm build)
+(cd ../../packages/library-cloud && pnpm install --frozen-lockfile && pnpm build)
+(cd ../../packages/provider-http && pnpm install --frozen-lockfile && pnpm build)
+(cd ../../packages/provider-aws && pnpm install --frozen-lockfile && pnpm build)
 pnpm install
 pnpm dev          # http://localhost:5173
 ```
@@ -177,15 +208,50 @@ E2E browser: `HOLODECK_CHROMIUM=/path/to/chrome`, else a local Google Chrome on
 macOS, else Playwright's Chromium. CI uses the runner's Google Chrome.
 The `chromium` project runs without WebGPU on purpose (see `e2e/studio.spec.ts`);
 rendering is covered by the engine's render tests. The `webgpu` project runs
-only `*.webgpu.spec.ts` (PNG export) with headless-WebGPU flags (SwiftShader on
+only `*.webgpu.spec.ts` (PNG export and sample baseline) with headless-WebGPU flags (SwiftShader on
 Linux CI). The embed spec serves its cross-origin parent page from a local
 server on 127.0.0.1 (Chrome's Local Network Access blocks route-fulfilled
 "public" pages from framing localhost).
 
+### Sample e2e and visual baseline
+
+`e2e/sample.spec.ts` uses the existing `withoutWebGPU` helper and checks sample
+creation/import, placements and connector anchors in downloaded JSON, changing
+formatted text, threshold colours, scaled readings, JSON/CSV downloads,
+persistence and read-only live embed behaviour. `e2e/sample.webgpu.spec.ts`
+checks the sample's 2× PNG download and compares the canvas to a Playwright
+PNG snapshot. It uses the same local WebGPU skip / required-on-CI rule as
+`export-png.webgpu.spec.ts`.
+
+The screenshot fixes `Date.now` at `2026-01-01T00:00:02Z` (CPU 25%, traffic
+300 req/s), keeps normal timers/frames running, waits for the engine's
+`data-render-state="ready"` signal, and captures only the canvas at the
+WebGPU project's 1280×800 viewport / device scale 1. There is no animated
+connector flow. Comparison allows a per-pixel threshold of 0.2 and at most
+1% different pixels for text/edge antialiasing. No pre-existing Studio
+snapshot mechanism was present; this uses Playwright's `toHaveScreenshot`.
+
+Run from `apps/studio`, after building the dependencies above:
+
+```sh
+pnpm build
+pnpm exec playwright test sample.spec.ts --project=chromium
+pnpm exec playwright test sample.webgpu.spec.ts --project=webgpu
+# First capture, or an intentional visual change; inspect the PNG before accepting it:
+pnpm exec playwright test sample.webgpu.spec.ts --project=webgpu --update-snapshots
+```
+
+Playwright stores the reference under
+`e2e/sample.webgpu.spec.ts-snapshots/three-tier-web-app-webgpu-<platform>.png`.
+Capture/review on the same platform and adapter as the comparison run (Linux
+CI uses SwiftShader); include each required platform's PNG in the change.
+A missing reference fails the comparison and writes an initial candidate;
+it never silently passes. Browser-restricted environments can type-check and
+list the tests but cannot capture or approve a reference. The first reference
+capture remains required on a browser-capable runner.
+
 ## Known gaps (follow-ups)
 
-- Connections panel and binding editor (provider config, secrets in session
-  storage, source picker via `browse`): holodeck#101.
 - Adopting another tab's version still remounts the canvas to reset undo
   history (no history-reset action on `ProcessEditor` yet); camera and
   selection are carried over, an in-progress drag is dropped.

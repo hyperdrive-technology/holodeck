@@ -37,7 +37,15 @@ export function DataPart({ placement, params, style, def }: IsoPartProps) {
         // useLoader suspends; the fallback holds the canvas's rendered signal until the model is in.
         <AssetBoundary resetKey={def.model}>
           <Suspense fallback={<PendingAsset />}>
-            <DataModel def={def} params={params} style={style} accent={placement.color} animation={placement.animation} />
+            <DataModel
+              def={def}
+              params={params}
+              style={style}
+              // Resolved params include provider bindings (threshold colours in
+              // Studio's cloud sample). They take precedence over static colour.
+              accent={typeof params.color === 'string' ? params.color : placement.color}
+              animation={placement.animation}
+            />
           </Suspense>
         </AssetBoundary>
       ) : (

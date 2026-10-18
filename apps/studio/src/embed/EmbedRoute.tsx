@@ -23,6 +23,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { documentKeys, useDocument, useDocumentCamera } from '../documents/queries';
 import { useStudio } from '../studio-context';
+import { LiveValues } from '../features/LiveValues';
 import { handleEmbedMessage, type IsoDocument } from './handler';
 import { currentFrameContext, embedOriginPolicy, storedDocumentsVisible, type FrameContext } from './origins';
 import { mergeObjectStates, withObjectState, withoutObjectState, type EmbedInbound, type ObjectStates } from './protocol';
@@ -204,6 +205,7 @@ export function EmbedRoute({
         metrics={metrics}
         camera={storedCamera}
       />
+      <LiveValues metrics={metrics} />
     </div>
   );
 }
