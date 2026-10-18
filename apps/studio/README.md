@@ -215,6 +215,9 @@ server on 127.0.0.1 (Chrome's Local Network Access blocks route-fulfilled
 
 ### Sample e2e and visual baseline
 
+> The sample's WebGPU baseline is skipped on CI until holodeck#175 (the hosted
+> runner's SwiftShader can't render this scene in time); run it locally.
+
 `e2e/sample.spec.ts` uses the existing `withoutWebGPU` helper and checks sample
 creation/import, placements and connector anchors in downloaded JSON, changing
 formatted text, threshold colours, scaled readings, JSON/CSV downloads,

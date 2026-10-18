@@ -16,6 +16,10 @@ test.afterEach(() => {
 });
 
 test('sample visual baseline and PNG download', async ({ page }, testInfo) => {
+  // holodeck#175: the hosted Linux runner's SwiftShader can't render or export
+  // this scene within minutes. The sample flow is covered on CI by
+  // sample.spec.ts; this baseline runs on real-GPU machines until #175 lands.
+  test.skip(!!process.env.CI, 'sample WebGPU baseline is local-only until holodeck#175');
   const failedAssets: string[] = [];
   page.on('response', (response) => {
     if (/\.(glb|svg)(\?|$)/.test(response.url()) && !response.ok()) failedAssets.push(response.url());
