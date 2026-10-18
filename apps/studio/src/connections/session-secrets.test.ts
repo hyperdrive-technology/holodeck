@@ -85,4 +85,29 @@ describe('sessionBoundRegistry (holodeck#166, review of #163)', () => {
     expect(view.get<HolodeckProvider>(HOLODECK_KINDS.provider, 'test.delayed')?.label).toBe('Delayed');
     expect(view.get(HOLODECK_KINDS.provider, 'missing')).toBeUndefined();
   });
+
+  // #171: frozen providers and the full registry interface.
+  it('wraps a frozen provider and still binds its secrets', async () => {
+    const base = new ContributionRegistry();
+    base.registerKind(PROVIDER_KIND);
+    const { provider, received, releaseAll } = delayedProvider();
+    base.install({ id: 'test.pkg', version: '1.0.0', contributions: { [HOLODECK_KINDS.provider]: [Object.freeze(provider)] } });
+    const view = sessionBoundRegistry(base, (_c, _k, fp) => (fp === connectionFingerprint(A) ? 'A-SECRET' : undefined));
+    expect(() => view.get(HOLODECK_KINDS.provider, 'test.delayed')).not.toThrow();
+    const hub = new ProviderHub({ registry: view });
+    hub.setConnections([A]);
+    releaseAll();
+    await hub.settled();
+    expect(received).toEqual([{ url: 'https://a.example', token: 'A-SECRET' }]);
+    await hub.dispose();
+  });
+
+  it('exposes the whole registry interface, bound to the real registry', () => {
+    const { base } = setup();
+    const view = sessionBoundRegistry(base, () => undefined);
+    expect(view.hasKind(HOLODECK_KINDS.provider)).toBe(true);
+    expect(view.ownerOf(HOLODECK_KINDS.provider, 'test.delayed')).toBe('test.pkg');
+    expect(view.installedExtensions().map((e) => e.id)).toEqual(['test.pkg']);
+    expect(typeof view.subscribe(() => undefined)).toBe('function');
+  });
 });

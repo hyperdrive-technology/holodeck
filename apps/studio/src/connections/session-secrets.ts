@@ -27,16 +27,21 @@ export type SessionSecretLookup = (connectionId: string, key: string, fingerprin
  * `ctx.secret`. Wrapped providers are cached per original, so the hub's
  * "provider changed" check (identity) keeps working.
  *
- * Only `get`, `list` and `subscribe` are used by `ProviderHub` (and providers'
- * `ctx.registry`); the cast documents that this is a read-only view.
+ * Everything else (`subscribe`, `ownerOf`, `installedExtensions`, …) is the
+ * real registry's.
  */
 export function sessionBoundRegistry(registry: ContributionRegistry, lookup: SessionSecretLookup): ContributionRegistry {
   const wrapped = new WeakMap<HolodeckProvider, HolodeckProvider>();
   const wrap = (provider: HolodeckProvider): HolodeckProvider => {
     let w = wrapped.get(provider);
     if (!w) {
-      w = Object.assign(Object.create(provider) as HolodeckProvider, {
-        connect: (config: Record<string, unknown>, ctx: Parameters<HolodeckProvider['connect']>[1]) => {
+      w = Object.create(provider) as HolodeckProvider;
+      // defineProperty, not assignment: a frozen provider's inherited
+      // `connect` is non-writable, which makes `w.connect = …` (and
+      // Object.assign) throw, while defining an own property is allowed (#171).
+      Object.defineProperty(w, 'connect', {
+        enumerable: true,
+        value: (config: Record<string, unknown>, ctx: Parameters<HolodeckProvider['connect']>[1]) => {
           // Fixed for this session: computed from the config this session was opened with.
           const fingerprint = connectionFingerprint({ provider: provider.id, config });
           return provider.connect(config, {
@@ -49,16 +54,23 @@ export function sessionBoundRegistry(registry: ContributionRegistry, lookup: Ses
     }
     return w;
   };
-  const view = {
-    get: <T,>(kind: string, id: string): T | undefined => {
-      const item = registry.get(kind, id);
-      return (kind === HOLODECK_KINDS.provider && item ? wrap(item as HolodeckProvider) : item) as T | undefined;
-    },
-    list: <T,>(kind: string): readonly T[] => {
-      const items = registry.list(kind);
-      return (kind === HOLODECK_KINDS.provider ? items.map((p) => wrap(p as HolodeckProvider)) : items) as readonly T[];
-    },
-    subscribe: registry.subscribe.bind(registry),
+  const get = <T,>(kind: string, id: string): T | undefined => {
+    const item = registry.get(kind, id);
+    return (kind === HOLODECK_KINDS.provider && item ? wrap(item as HolodeckProvider) : item) as T | undefined;
   };
-  return view as unknown as ContributionRegistry;
+  const list = <T,>(kind: string): readonly T[] => {
+    const items = registry.list(kind);
+    return (kind === HOLODECK_KINDS.provider ? items.map((p) => wrap(p as HolodeckProvider)) : items) as readonly T[];
+  };
+  // The full registry interface (#171): a Proxy over the real one, with only
+  // `get` / `list` replaced; every other member is the real registry's,
+  // bound to it. Providers receive this as `ctx.registry`.
+  return new Proxy(registry, {
+    get(target, prop) {
+      if (prop === 'get') return get;
+      if (prop === 'list') return list;
+      const value: unknown = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+    },
+  });
 }

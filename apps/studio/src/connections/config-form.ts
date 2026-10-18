@@ -200,7 +200,11 @@ export function formToConfig(form: ConfigForm, state: ConfigFormValues): { confi
       for (const sub of variant.fields) {
         const text = entry[sub.key] ?? '';
         if (text === '') {
-          if (sub.required) problems.push(`${f.label} ${sub.label}: required`);
+          // A required text field is present even when empty (HTTP basic auth
+          // with an empty user name is valid, review of #163): the schema and
+          // the provider decide whether "" is acceptable. Optional ones are left out.
+          if (sub.required && (sub.kind === 'string' || sub.kind === 'enum')) obj[sub.key] = '';
+          else if (sub.required) problems.push(`${f.label} ${sub.label}: required`);
           continue;
         }
         const parsed = parseScalar(sub, text);

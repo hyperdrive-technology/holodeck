@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { CREDENTIAL_CASES } from '../test-support';
-import { connectionConfigProblems, credentialProblems, providerConfigProblems } from './credentials';
+import { CLEAN_CASES, CREDENTIAL_CASES } from '../test-support';
+import { connectionConfigProblems, credentialInText, credentialName, credentialProblems, providerConfigProblems } from './credentials';
 
 describe('connection credentials (holodeck#163 review)', () => {
   it.each(CREDENTIAL_CASES.map((c) => [c.name, c] as const))('refuses %s', (_name, c) => {
@@ -31,5 +31,60 @@ describe('connection credentials (holodeck#163 review)', () => {
 
   it('a problem never repeats the secret value', () => {
     for (const c of CREDENTIAL_CASES) expect(connectionConfigProblems(c).join('\n')).not.toContain('SECRET');
+  });
+
+  it.each(CLEAN_CASES.map((c) => [c.name, c] as const))('accepts %s (no false positive, holodeck#169)', (_name, c) => {
+    expect(credentialProblems(c.config)).toEqual([]);
+  });
+
+  // Table-driven: names (header / query parameter context).
+  it.each([
+    ['Authorization', true], ['Proxy-Authorization', true], ['Cookie', true], ['X-Api-Key', true], ['x-auth-key', true],
+    ['Ocp-Apim-Subscription-Key', true], ['X-Functions-Key', true], ['key', true], ['sig', true], ['code', true], ['auth', true],
+    ['access_token', true], ['client_secret', true], ['refreshToken', true], ['X-Amz-Security-Token', true], ['password', true],
+    ['X-Token-Count', false], ['nextToken', false], ['maxTokens', false], ['page_token', false], ['tokenizer', false],
+    ['secretName', false], ['limit', false], ['Accept', false], ['sortKey', false],
+  ])('credentialName(%j) = %s', (name, expected) => {
+    expect(credentialName(name)).toBe(expected);
+  });
+
+  it('short words are credentials as parameters but not as config keys', () => {
+    for (const word of ['key', 'code', 'auth', 'sig']) {
+      expect(credentialName(word, new Set(), 'param')).toBe(true);
+      expect(credentialName(word, new Set(), 'key')).toBe(false);
+    }
+  });
+
+  // Table-driven: values, with relative URLs resolved against a connection URL.
+  it.each([
+    ['https://u:p@x.test/a', true],
+    ['//admin:p@x.test/w', true],
+    ['https:/admin:p@x.test/w', true],
+    ['https:\\\\admin:p@x.test\\w', true],
+    ['   https://u:p@x.test', true],
+    ['write?api_key=abc', true],
+    ['/api#access_token=abc', true],
+    ['https://x.test/a?sv=1&sig=abc', true],
+    ['https://user@x.test/a', true],
+    ['Bearer abcdefgh12345', true],
+    ['Basic dXNlcjpwYXNz', true],
+    ['AKIAABCDEFGHIJKLMNOP', true],
+    ['ghp_abcdefghijklmnopqrstuvwxyz', true],
+    ['sk_live_abcdefghijklmnop', true],
+    ['AIzaSyA1234567890abcdefghijklmnopqrstu', true],
+    ['eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJl', true],
+    ['https://x.test/a?page_token=2&limit=5', false],
+    ['ssh://git@git.example/x.git', false],
+    ['Basic tier', false],
+    ['write/{source}', false],
+    ['/api/line2#/speed', false],
+    ['ops@example.com', false],
+    ['eu-west-1', false],
+    ['arn:aws:iam::123456789012:role/Reader', false],
+    ['{value} rpm', false],
+  ])('credentialInText(%j) flags: %s', (value, expected) => {
+    const found = credentialInText(value, 'https://x.test/api/');
+    if (expected) expect(found).toEqual(expect.any(String));
+    else expect(found).toBeNull();
   });
 });

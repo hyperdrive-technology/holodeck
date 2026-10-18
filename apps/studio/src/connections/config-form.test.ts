@@ -2,6 +2,7 @@ import { AWS_CONFIG_SCHEMA } from '@holodeck/provider-aws';
 import { HTTP_CONFIG_SCHEMA } from '@holodeck/provider-http';
 import { describe, expect, it } from 'vitest';
 import { configToForm, describeConfig, formToConfig, validateConfig, type VariantField } from './config-form';
+import { connectionConfigProblems } from './credentials';
 
 describe('describeConfig', () => {
   it('HTTP: url/mode/interval as fields, auth as a variant, nested objects as advanced JSON', () => {
@@ -64,10 +65,23 @@ describe('form <-> config', () => {
     expect(formToConfig(form, state).problems.join()).toContain('not valid JSON');
   });
 
-  it('AWS assumeRole variant needs its roleArn', () => {
+  it('AWS assumeRole with an empty roleArn: kept as "" and refused by the provider', () => {
     const form = describeConfig(AWS_CONFIG_SCHEMA);
     const state = configToForm(form, { region: 'eu-west-1', credentials: { type: 'assumeRole' } });
-    expect(formToConfig(form, state).problems).toContain('Credentials Role Arn: required');
+    const { config, problems } = formToConfig(form, state);
+    expect(problems).toEqual([]);
+    expect(config.credentials).toEqual({ type: 'assumeRole', roleArn: '' });
+    expect(connectionConfigProblems({ provider: 'aws.cloudwatch', config }).join()).toContain('roleArn');
+  });
+
+  // Review of #163 @ 7e01b65: an empty basic-auth user name is valid and must survive editing.
+  it('HTTP basic auth with an empty user name round-trips', () => {
+    const form = describeConfig(HTTP_CONFIG_SCHEMA);
+    const config = { url: 'https://x.test/a', auth: { scheme: 'basic', username: '' } };
+    const back = formToConfig(form, configToForm(form, config));
+    expect(back).toEqual({ config, problems: [] });
+    expect(validateConfig(HTTP_CONFIG_SCHEMA, back.config)).toEqual([]);
+    expect(connectionConfigProblems({ provider: 'holodeck.http', config: back.config })).toEqual([]);
   });
 });
 
