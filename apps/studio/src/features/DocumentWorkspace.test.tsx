@@ -106,6 +106,20 @@ function tankDoc() {
 }
 
 describe('DocumentWorkspace <-> ProcessEditor', () => {
+  it('New from sample saves an independent document and streams its label through the workspace', async () => {
+    await store.create(tankDoc());
+    const { router } = await openWorkspace(tankDoc());
+    fireEvent.click(screen.getByRole('button', { name: 'New from sample' }));
+    await waitFor(() => expect(router.state.location.pathname).not.toBe('/d/p'));
+    const id = router.state.location.pathname.split('/').pop()!;
+    const saved = await store.get(id);
+    expect(saved?.document.name).toBe('Three-tier web app');
+    expect(saved?.document.body).toMatchObject({ id, theme: 'arcentry-light' });
+    await waitFor(() => expect(screen.getByLabelText('requests-label.text')).toHaveTextContent(/^Requests \d+ req\/s$/));
+    expect(editor.props?.scene.objects.some((o) => o.object === 'cloud:server')).toBe(true);
+    expect(editor.props?.metrics?.['requests-label']?.text).toMatch(/^Requests \d+ req\/s$/);
+  });
+
   it('hides the engine chrome and opens on the stored camera (holodeck#100)', async () => {
     await store.create(tankDoc());
     await store.saveCamera('p', { zoom: 33, target: [1, 0, 2], yaw: 0.5, topDown: false });

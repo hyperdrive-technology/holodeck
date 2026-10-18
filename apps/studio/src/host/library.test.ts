@@ -19,8 +19,8 @@ describe('library', () => {
     const ids = items.map((i) => i.id);
     expect(ids).toEqual(expect.arrayContaining(['tank', 'valve', 'pipe', 'label', 'area']));
     expect(ids).not.toContain('shaft');
-    expect(new Set(items.map((i) => i.packageId))).toEqual(new Set(['holodeck.iso']));
-    expect(items[0]?.packageName).toBe('Holodeck 2.5D engine');
+    expect(new Set(items.map((i) => i.packageId))).toEqual(new Set(['holodeck.iso', 'holodeck.cloud']));
+    expect(items.find((i) => i.id === 'tank')?.packageName).toBe('Holodeck 2.5D engine');
   });
 
   describe('matchesQuery', () => {

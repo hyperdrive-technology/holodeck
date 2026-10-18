@@ -48,6 +48,8 @@ A part definition needs no React `component`. Without one it renders through `Da
 - `model` (optional): a GLB styled by the active theme (`applyHolodeckStyle`); `colors.body` recolours
   `hd.white`, `colors.accent` recolours `hd.accent` (a placement's `color` beats it), `colors.edge` the
   outlines. Without a model the part is a plain block of the footprint and `blockHeight` (default 1).
+  A model's resolved `params.color` (including a live `bindings.color`, for example a threshold)
+  overrides the placement's static accent colour.
 - `logo`: a textured plane on the model's logo face (the top face unless the GLB's `logo` empty says
   otherwise), grid-aligned, letterboxed to the image's aspect.
   **Logo-plane contract (Blender archetypes, lane A1):** if the GLB has an empty named `logo`, the

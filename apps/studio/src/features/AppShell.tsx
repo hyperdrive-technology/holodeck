@@ -33,7 +33,7 @@ export function AppShell() {
   const sidebarOpen = useSelector(panelStore, (s) => s.sidebarOpen);
   const inspectorOpen = useSelector(panelStore, (s) => s.inspectorOpen);
   const active = useSelector(activeDocumentStore);
-  const { newDocument, importFiles } = useStudioActions();
+  const { newDocument, newFromSample, importFiles } = useStudioActions();
   const [dropping, setDropping] = useState(false);
   const { channel, secrets } = useStudio();
   const client = useQueryClient();
@@ -86,6 +86,9 @@ export function AppShell() {
         <Separator orientation="vertical" className="mx-1 h-5!" />
         <Button variant="ghost" size="sm" onClick={() => void newDocument()} title={`New document (${formatForDisplay('Mod+Alt+N')})`}>
           <PlusIcon /> New
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => void newFromSample()} title="Three-tier web app with simulated live data">
+          New from sample
         </Button>
         <Button variant="ghost" size="sm" onClick={openImportPicker} title={`Import (${formatForDisplay('Mod+O')})`}>
           <UploadIcon /> Import

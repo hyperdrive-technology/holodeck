@@ -236,6 +236,7 @@ jobs:
             holodeck/packages/editor-2.5d-react/pnpm-lock.yaml
             holodeck/packages/provider-http/pnpm-lock.yaml
             holodeck/packages/provider-aws/pnpm-lock.yaml
+            holodeck/packages/library-cloud/pnpm-lock.yaml
             holodeck/apps/studio/pnpm-lock.yaml
 
       - name: Build holodeck-sdk
@@ -251,9 +252,9 @@ jobs:
           pnpm build
 
       # Provider packages the studio installs (holodeck#101); file: deps, copied at install.
-      - name: Build provider-http and provider-aws
+      - name: Build provider-http, provider-aws and library-cloud
         run: |
-          for p in provider-http provider-aws; do
+          for p in provider-http provider-aws library-cloud; do
             (cd holodeck/packages/$p && pnpm install --frozen-lockfile && pnpm build)
           done
 
