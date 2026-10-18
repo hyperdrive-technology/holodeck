@@ -7,7 +7,8 @@
 
 import type { ConnectionState, HolodeckDocument, HolodeckHost, ProviderHub } from '@holodeck/sdk';
 import { connectIsoDocument, useHubMetrics, type IsoMetrics, type IsoSceneFile } from '@holodeck/editor-2.5d-react';
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { connectionFingerprint } from './fingerprint';
 import type { SessionSecretStore } from './secrets';
 
 const NO_CONNECTIONS: Readonly<Record<string, ConnectionState>> = Object.freeze({});
@@ -28,10 +29,19 @@ export function useConnectionHub(
   secrets: SessionSecretStore,
 ): ConnectionHub {
   const [hub, setHub] = useState<ProviderHub | undefined>(undefined);
+  // The hub asks for secrets whenever a session (re)opens; answer with the
+  // connection's CURRENT fingerprint, so a secret entered for another
+  // endpoint is never sent (holodeck#166).
+  const connectionsRef = useRef(doc.connections);
+  connectionsRef.current = doc.connections;
   // Created in an effect (not useMemo) so StrictMode's double mount disposes
   // the first hub instead of reusing a disposed one (same as the embed route).
   useEffect(() => {
-    const created = host.createProviderHub({ secret: secrets.forDocument(doc.id) });
+    const fingerprintOf = (connectionId: string) => {
+      const connection = connectionsRef.current?.find((c) => c.id === connectionId);
+      return connection ? connectionFingerprint(connection) : undefined;
+    };
+    const created = host.createProviderHub({ secret: secrets.forDocument(doc.id, fingerprintOf) });
     setHub(created);
     return () => {
       void created.dispose();

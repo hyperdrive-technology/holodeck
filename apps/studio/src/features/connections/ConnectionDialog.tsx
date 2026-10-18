@@ -6,11 +6,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { connectionIdProblem } from '../../connections/bindings';
+import { connectionConfigProblems } from '../../connections/credentials';
+import { connectionFingerprint } from '../../connections/fingerprint';
 import {
   configToForm,
   describeConfig,
   formToConfig,
-  secretsInConfig,
   validateConfig,
   type ConfigField,
   type ConfigFormValues,
@@ -57,7 +58,8 @@ export function ConnectionDialog({
   existing?: ProviderConnection;
   /** Ids already used in the document (other than `existing`). */
   takenIds: readonly string[];
-  secretIsSet: (key: string) => boolean;
+  /** Is `key` stored for this connection at `fingerprint` (the endpoint as currently filled in)? */
+  secretIsSet: (key: string, fingerprint: string) => boolean;
   onSubmit: (result: ConnectionSubmit) => void;
 }) {
   const providers = host.registry.list<HolodeckProvider>(HOLODECK_KINDS.provider);
@@ -104,12 +106,21 @@ export function ConnectionDialog({
     }
     const { config, problems: formProblems } = formToConfig(formOf(value.provider), value.config);
     problems.push(...formProblems);
-    if (!formProblems.length) problems.push(...validateConfig(provider.configSchema, config), ...secretsInConfig(provider, config));
+    if (!formProblems.length) {
+      problems.push(...validateConfig(provider.configSchema, config));
+      problems.push(...connectionConfigProblems({ provider: provider.id, config }, provider));
+    }
     return problems;
   }
 
-    function renderProviderFields(provider: HolodeckProvider | undefined) {
+    function renderProviderFields(provider: HolodeckProvider | undefined, configState: ConfigFormValues) {
     const described = describeConfig(provider?.configSchema);
+    // Secrets count as set only for the endpoint as currently filled in: point
+    // the connection elsewhere and they must be entered again (holodeck#166).
+    const fingerprint = provider ? connectionFingerprint({ provider: provider.id, config: formToConfig(described, configState).config }) : '';
+    const isSet = (key: string) => !!existing && secretIsSet(key, fingerprint);
+    const endpointChanged =
+      !!existing && !!provider && fingerprint !== connectionFingerprint(existing) && (provider.secrets ?? []).some((spec) => secretIsSet(spec.key, connectionFingerprint(existing)));
     if (!provider) return null;
     return (
       <>
@@ -141,7 +152,12 @@ export function ConnectionDialog({
         </form.Field>
         {provider.secrets?.length ? (
           <fieldset className="flex flex-col gap-3 rounded-md border p-3" data-testid="connection-secrets">
-            <legend className="px-1 text-xs font-semibold">Secrets (this tab only)</legend>
+            <legend className="px-1 text-xs font-semibold">Secrets (this browser tab only)</legend>
+          {endpointChanged ? (
+            <p role="status" data-testid="secrets-endpoint-changed" className="text-xs text-amber-700 dark:text-amber-300">
+              The connection now points somewhere else: secrets entered for the old endpoint will not be sent there. Enter them again.
+            </p>
+          ) : null}
             {provider.secrets.map((spec) => (
               <form.Field key={spec.key} name="secrets">
                 {(field) => (
@@ -153,9 +169,9 @@ export function ConnectionDialog({
                         autoComplete="off"
                         value={field.state.value[spec.key] ?? ''}
                         onChange={(e) => field.handleChange({ ...field.state.value, [spec.key]: e.target.value })}
-                        placeholder={secretIsSet(spec.key) ? '•••••• set (leave empty to keep)' : spec.optional ? 'optional' : 'required'}
+                        placeholder={isSet(spec.key) ? '•••••• set (leave empty to keep)' : spec.optional ? 'optional' : 'required'}
                       />
-                      {secretIsSet(spec.key) ? (
+                      {isSet(spec.key) ? (
                         <form.Field name="clear">
                           {(clear) => (
                             <label className="flex items-center gap-1 text-xs whitespace-nowrap">
@@ -187,8 +203,8 @@ export function ConnectionDialog({
         <DialogHeader>
           <DialogTitle>{existing ? `Edit connection “${existing.label ?? existing.id}”` : 'Add connection'}</DialogTitle>
           <DialogDescription>
-            Settings are saved in the document. Secrets stay in this browser tab only (session storage): they are never saved, exported or
-            embedded.
+            Settings are saved in the document. Secrets stay in this browser tab only (session storage; a duplicated tab gets a copy), bound
+            to the endpoint they were entered for: they are never saved, exported or embedded.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -238,8 +254,8 @@ export function ConnectionDialog({
               </Row>
             )}
           </form.Field>
-          <form.Subscribe selector={(s) => s.values.provider}>
-            {(providerId) => <div key={providerId} className="flex flex-col gap-3">{renderProviderFields(providerOf(providerId))}</div>}
+          <form.Subscribe selector={(s) => [s.values.provider, s.values.config] as const}>
+            {([providerId, configState]) => <div key={providerId} className="flex flex-col gap-3">{renderProviderFields(providerOf(providerId), configState)}</div>}
           </form.Subscribe>
           {problems.length ? (
             <ul role="alert" data-testid="connection-problems" className="list-disc pl-5 text-xs text-destructive">

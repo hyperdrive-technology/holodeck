@@ -42,7 +42,7 @@ describe('useConnectionHub', () => {
     const doc = simDoc();
     const { result } = renderHook(() => useConnectionHub(host, doc, secrets));
     await waitFor(() => expect(result.current.statuses.sim?.status.state).toBe('live'));
-    expect(get).toHaveBeenCalledWith('live');
+    expect(get).toHaveBeenCalledWith('live', expect.any(Function));
     act(() => result.current.reconnect('sim'));
     await waitFor(() => expect(result.current.statuses.sim?.status.state).toBe('live'));
   });

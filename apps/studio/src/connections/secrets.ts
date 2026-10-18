@@ -6,7 +6,14 @@
  * (`ProviderContext.secret`); the UI only ever learns whether one is set.
  *
  * Keys are scoped by document id as well as connection id, so two documents
- * that both have a connection called `api` never share credentials.
+ * that both have a connection called `api` never share credentials. Each
+ * value also records the fingerprint of the endpoint it was entered for
+ * (connections/fingerprint.ts); a lookup with another fingerprint finds
+ * nothing (holodeck#166).
+ *
+ * Note: the browser's "Duplicate tab" copies sessionStorage, so a duplicated
+ * tab starts with the same secrets; closing either tab does not clear the
+ * other.
  */
 
 export const SECRET_PREFIX = 'holodeck-studio:secret:';
@@ -24,23 +31,27 @@ export class SessionSecretStore {
   /** `null`: no storage available (secrets cannot be kept). Default: this tab's `sessionStorage`. */
   constructor(private readonly storage: SecretStorage | null = typeof sessionStorage === 'undefined' ? null : sessionStorage) {}
 
-  get(docId: string, connectionId: string, key: string): string | undefined {
+  /** The secret, if one was entered for this connection while it had `fingerprint`. */
+  get(docId: string, connectionId: string, key: string, fingerprint: string): string | undefined {
     try {
-      return this.storage?.getItem(keyOf(docId, connectionId, key)) ?? undefined;
+      const raw = this.storage?.getItem(keyOf(docId, connectionId, key));
+      if (raw == null) return undefined;
+      const entry = JSON.parse(raw) as { fp?: unknown; v?: unknown };
+      return entry.fp === fingerprint && typeof entry.v === 'string' ? entry.v : undefined;
     } catch {
-      return undefined;
+      return undefined; // Not ours, or from an older format: treat as not set.
     }
   }
 
-  has(docId: string, connectionId: string, key: string): boolean {
-    return this.get(docId, connectionId, key) !== undefined;
+  has(docId: string, connectionId: string, key: string, fingerprint: string): boolean {
+    return this.get(docId, connectionId, key, fingerprint) !== undefined;
   }
 
-  /** Store a secret; an empty value clears it. Throws if storage refuses (quota, privacy mode). */
-  set(docId: string, connectionId: string, key: string, value: string): void {
+  /** Store a secret for the endpoint `fingerprint`; an empty value clears it. Throws if storage refuses (quota, privacy mode). */
+  set(docId: string, connectionId: string, key: string, value: string, fingerprint: string): void {
     if (!this.storage) throw new Error('session storage is not available; secrets cannot be kept in this browser');
     if (value === '') this.storage.removeItem(keyOf(docId, connectionId, key));
-    else this.storage.setItem(keyOf(docId, connectionId, key), value);
+    else this.storage.setItem(keyOf(docId, connectionId, key), JSON.stringify({ fp: fingerprint, v: value }));
     this.changed();
   }
 
@@ -67,9 +78,16 @@ export class SessionSecretStore {
     if (doomed.length) this.changed();
   }
 
-  /** Hub callback for one document (`ProviderHubOptions.secret`). */
-  forDocument(docId: string): (connectionId: string, key: string) => Promise<string | undefined> {
-    return async (connectionId, key) => this.get(docId, connectionId, key);
+  /**
+   * Hub callback for one document (`ProviderHubOptions.secret`).
+   * `fingerprintOf` gives the connection's current fingerprint (undefined for
+   * an unknown connection: no secret).
+   */
+  forDocument(docId: string, fingerprintOf: (connectionId: string) => string | undefined): (connectionId: string, key: string) => Promise<string | undefined> {
+    return async (connectionId, key) => {
+      const fingerprint = fingerprintOf(connectionId);
+      return fingerprint === undefined ? undefined : this.get(docId, connectionId, key, fingerprint);
+    };
   }
 
   subscribe = (listener: () => void): (() => void) => {

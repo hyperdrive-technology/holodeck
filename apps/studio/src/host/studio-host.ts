@@ -25,7 +25,7 @@ import {
   isoPackage,
   loadIsoDocument,
 } from '@holodeck/editor-2.5d-react';
-import { secretsInConfig } from '../connections/config-form';
+import { connectionConfigProblems } from '../connections/credentials';
 import { PROVIDER_PACKAGES } from './provider-packages';
 
 export const STUDIO_HOST_NAME = 'holodeck-studio';
@@ -77,11 +77,13 @@ export function checkHostDocument(host: HolodeckHost, doc: HolodeckDocument): { 
       problems.push(`requires: "${id}" ${range} is needed, ${installed.manifest.version} is installed`);
     }
   }
-  // Secrets never travel in a document (they stay in this tab's
-  // sessionStorage, connections/secrets.ts): refuse configs that carry one.
+  // Credentials never travel in a document (secrets stay in this tab's
+  // sessionStorage, connections/secrets.ts): refuse any config that carries
+  // one, by the provider's own rules and a generic scan (connections/credentials.ts).
+  // This runs on every save (the store's validator), import and embed load.
   for (const connection of doc.connections ?? []) {
     const provider = host.registry.get<HolodeckProvider>(HOLODECK_KINDS.provider, connection.provider);
-    problems.push(...secretsInConfig(provider, connection.config).map((p) => `connections.${connection.id}.config.${p}`));
+    problems.push(...connectionConfigProblems(connection, provider).map((p) => `connections.${connection.id}.config: ${p}`));
   }
   let document: HolodeckDocument = doc;
   try {

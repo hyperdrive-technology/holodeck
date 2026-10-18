@@ -1,7 +1,7 @@
-import { AWS_CONFIG_SCHEMA, AWS_PROVIDER_SECRETS } from '@holodeck/provider-aws';
-import { HTTP_CONFIG_SCHEMA, HTTP_PROVIDER_SECRETS } from '@holodeck/provider-http';
+import { AWS_CONFIG_SCHEMA } from '@holodeck/provider-aws';
+import { HTTP_CONFIG_SCHEMA } from '@holodeck/provider-http';
 import { describe, expect, it } from 'vitest';
-import { configToForm, describeConfig, formToConfig, secretsInConfig, validateConfig, type VariantField } from './config-form';
+import { configToForm, describeConfig, formToConfig, validateConfig, type VariantField } from './config-form';
 
 describe('describeConfig', () => {
   it('HTTP: url/mode/interval as fields, auth as a variant, nested objects as advanced JSON', () => {
@@ -85,11 +85,3 @@ describe('validateConfig (provider schema through Ajv)', () => {
   });
 });
 
-describe('secretsInConfig', () => {
-  it('finds provider secret names anywhere in a config', () => {
-    expect(secretsInConfig({ secrets: HTTP_PROVIDER_SECRETS }, { url: 'x', token: 'abc' })[0]).toContain('"token" is a secret');
-    expect(secretsInConfig({ secrets: AWS_PROVIDER_SECRETS }, { region: 'eu-west-1', nested: [{ SecretAccessKey: 'k' }] })[0]).toContain('nested[0].SecretAccessKey');
-    expect(secretsInConfig({ secrets: HTTP_PROVIDER_SECRETS }, { url: 'x', auth: { scheme: 'bearer' } })).toEqual([]);
-    expect(secretsInConfig(undefined, { token: 'x' })).toEqual([]);
-  });
-});

@@ -4,6 +4,7 @@ import { PencilIcon, PlugIcon, PlusIcon, Trash2Icon } from 'lucide-react';
 import { useState, useSyncExternalStore } from 'react';
 import { Button } from '@/components/ui/button';
 import { connectionUsages } from '../../connections/bindings';
+import { connectionFingerprint } from '../../connections/fingerprint';
 import type { SessionSecretStore } from '../../connections/secrets';
 import { ConnectionDialog, type ConnectionSubmit } from './ConnectionDialog';
 import { StatusBadge } from './StatusBadge';
@@ -41,7 +42,7 @@ export function ConnectionsPanel({
    */
   const missingSecrets = (c: ProviderConnection) => {
     const unset = (host.registry.get<HolodeckProvider>(HOLODECK_KINDS.provider, c.provider)?.secrets ?? []).filter(
-      (s) => !secrets.has(doc.id, c.id, s.key),
+      (s) => !secrets.has(doc.id, c.id, s.key, connectionFingerprint(c)),
     );
     return statuses[c.id]?.status.state === 'error' ? unset : unset.filter((s) => !s.optional);
   };
@@ -111,7 +112,7 @@ export function ConnectionsPanel({
           onOpenChange={(open) => !open && setEditing(null)}
           {...(editing === 'new' ? {} : { existing: editing })}
           takenIds={connections.map((c) => c.id).filter((id) => editing === 'new' || id !== editing.id)}
-          secretIsSet={(key) => editing !== 'new' && secrets.has(doc.id, editing.id, key)}
+          secretIsSet={(key, fingerprint) => editing !== 'new' && secrets.has(doc.id, editing.id, key, fingerprint)}
           onSubmit={(submit) => {
             onSave(submit, editing === 'new');
             setEditing(null);

@@ -1,4 +1,4 @@
-import { withPart } from '../test-support';
+import { CREDENTIAL_CASES, withPart } from '../test-support';
 import { HOLODECK_DOCUMENT_FORMAT, type HolodeckHost } from '@holodeck/sdk';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createStudioHost } from '../host/studio-host';
@@ -66,19 +66,27 @@ describe('import / export', () => {
       ...createIsoDocument('A', 'a'),
       connections: [{ id: 'api', provider: 'holodeck.http', config: { url: 'http://localhost:1/x', token: 'leak' } }],
     };
-    expect(problemsOf(JSON.stringify(doc)).join('\n')).toContain('connections.api.config.token');
+    expect(problemsOf(JSON.stringify(doc)).join('\n')).toMatch(/connections\.api\.config: .*token/);
   });
 
-  it('accepts connections without secrets, also for providers it does not have', () => {
+  it('accepts connections without credentials, also for providers it does not have', () => {
     const doc = {
       ...createIsoDocument('A', 'a'),
       connections: [
         { id: 'sim', provider: 'holodeck.sim' },
         { id: 'aws', provider: 'aws.cloudwatch', config: { region: 'eu-west-1', credentials: { type: 'static' } } },
-        { id: 'other', provider: 'acme.custom', config: { token: 'opaque to us' } },
+        { id: 'other', provider: 'acme.custom', config: { endpoint: 'https://x.test/feed' } },
       ],
     };
     expect(parseDocumentText(JSON.stringify(doc), host).ok).toBe(true);
+  });
+
+  // holodeck#163 review (P1): every credential case is refused on import, for HTTP, AWS and unknown providers.
+  it.each(CREDENTIAL_CASES.map((c) => [c.name, c] as const))('import refuses %s', (_name, c) => {
+    const doc = { ...createIsoDocument('A', 'a'), connections: [{ id: 'c', provider: c.provider, config: c.config }] };
+    const problems = problemsOf(JSON.stringify(doc));
+    expect(problems.join('\n')).toContain('connections.c.config');
+    expect(problems.join('\n')).not.toContain('SECRET');
   });
 
   it('reports invalid JSON', () => {

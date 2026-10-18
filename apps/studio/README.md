@@ -55,9 +55,17 @@ PLC or Hyperdrive code: the studio is a plain Holodeck host.
 - **Secrets** (API tokens, passwords, AWS keys) live in this tab's
   `sessionStorage` only (`connections/secrets.ts`): never in IndexedDB, a
   document, an export or an embed, and never shown again once entered (the UI
-  only says whether one is set). A document whose connection config carries a
-  provider secret is refused. Another tab, or the same document after the tab
-  closes, asks for them again.
+  only says whether one is set). Another tab, or the same document after the
+  tab closes, asks for them again; the browser's Duplicate tab copies them.
+  Each secret is bound to the endpoint it was entered for
+  (`connections/fingerprint.ts`: HTTP origin + auth scheme, AWS region + role /
+  pool, the whole config for other providers): point the connection elsewhere,
+  or import another document under the same id, and it is not sent.
+- **No credentials in documents** (`connections/credentials.ts`): connection
+  configs pass the provider's own validation (`parseHttpConfig`,
+  `parseAwsConfig`: no Authorization / Cookie headers, no `user:pass@` URLs,
+  no AWS key names) and a generic deep scan for credential-looking keys and
+  values, in the connection dialog, on every save and on import / embed load.
 - **Layout**: T3 Code idioms: resizable, persisted side panels
   (`src/layout/`), TanStack Store for UI state, TanStack Hotkeys for
   shortcuts (`Mod+/` lists them).

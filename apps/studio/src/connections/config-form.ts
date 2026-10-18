@@ -11,7 +11,6 @@
  * the provider's schema rejects.
  */
 
-import type { HolodeckProvider } from '@holodeck/sdk';
 import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020';
 
 type Schema = Record<string, unknown>;
@@ -268,24 +267,3 @@ export function validateConfig(schema: unknown, config: unknown): string[] {
   return [...new Set((validate.errors ?? []).map(describeError))];
 }
 
-/**
- * Secrets must never sit in a document: a config key that names one of the
- * provider's secrets (any depth, case-insensitive) is a problem.
- */
-export function secretsInConfig(provider: Pick<HolodeckProvider, 'secrets'> | undefined, config: unknown): string[] {
-  const names = new Set((provider?.secrets ?? []).map((s) => s.key.toLowerCase()));
-  if (names.size === 0) return [];
-  const found: string[] = [];
-  const walk = (value: unknown, path: string) => {
-    if (Array.isArray(value)) value.forEach((v, i) => walk(v, `${path}[${i}]`));
-    else if (isObj(value)) {
-      for (const [k, v] of Object.entries(value)) {
-        const at = path ? `${path}.${k}` : k;
-        if (names.has(k.toLowerCase())) found.push(`${at}: "${k}" is a secret; enter it in the secrets fields, it must not be saved in the document`);
-        walk(v, at);
-      }
-    }
-  };
-  walk(config, '');
-  return found;
-}

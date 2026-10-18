@@ -1,10 +1,11 @@
 import type { ConnectionState, HolodeckHost, ProviderHub, SignalBinding } from '@holodeck/sdk';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { connectionFingerprint } from '../../connections/fingerprint';
 import { SessionSecretStore } from '../../connections/secrets';
 import { createIsoDocument } from '../../documents/new-document';
 import { createStudioHost } from '../../host/studio-host';
-import { withPart } from '../../test-support';
+import { CREDENTIAL_CASES, withPart } from '../../test-support';
 import { BindingDialog } from './BindingDialog';
 import { ConnectionsPanel } from './ConnectionsPanel';
 
@@ -84,6 +85,38 @@ describe('<ConnectionsPanel /> + <ConnectionDialog />', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
+  // holodeck#163 review (P1): the dialog refuses credentials typed into any field or the advanced JSON.
+  it.each(CREDENTIAL_CASES.filter((c) => c.provider !== 'acme.custom').map((c) => [c.name, c] as const))('dialog refuses %s', async (_name, c) => {
+    const { onSave } = panel();
+    fireEvent.click(screen.getByRole('button', { name: /Add/ }));
+    pick('Provider', c.provider);
+    pick('Id', 'leak');
+    const { url, region, mode, ...rest } = c.config as Record<string, unknown>;
+    if (typeof url === 'string') pick('Url *', url);
+    if (typeof region === 'string') pick('Region *', region);
+    if (typeof mode === 'string') pick('Mode', mode);
+    // Fields the form shows as inputs are typed there; everything else goes in the advanced JSON.
+    const formKeys = new Set(['method', 'credentials']);
+    const advanced = Object.fromEntries(Object.entries(rest).filter(([k]) => !formKeys.has(k)));
+    if (rest.method) pick('Method', String(rest.method));
+    if (rest.credentials) {
+      const creds = rest.credentials as Record<string, unknown>;
+      pick('Credentials', String(creds.type));
+      const { type: _t, ...extra } = creds;
+      if (Object.keys(extra).length) advanced.credentials = creds;
+    }
+    if (advanced.credentials) {
+      // credentials is a form field: put the leaky copy in the advanced box under another key to also check the scan.
+      advanced.extra = advanced.credentials;
+      delete advanced.credentials;
+    }
+    if (Object.keys(advanced).length) fireEvent.change(screen.getByLabelText('Advanced'), { target: { value: JSON.stringify(advanced) } });
+    fireEvent.click(within(screen.getByTestId('connection-dialog')).getByRole('button', { name: 'Add' }));
+    expect(await screen.findByTestId('connection-problems')).toBeInTheDocument();
+    expect(screen.getByTestId('connection-problems').textContent).not.toContain('SECRET');
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
   it('AWS: region + credential mode in the form; access keys are secrets', async () => {
     const { onSave } = panel();
     fireEvent.click(screen.getByRole('button', { name: /Add/ }));
@@ -101,8 +134,9 @@ describe('<ConnectionsPanel /> + <ConnectionDialog />', () => {
   });
 
   it('never shows a stored secret: editing shows only that one is set, and can clear it', async () => {
-    const { onSave, secrets } = panel({ connections: [{ id: 'api', provider: 'holodeck.http', config: { url: 'http://x.test/a', auth: { scheme: 'bearer' } } }] });
-    secrets.set('p', 'api', 'token', 'super-secret');
+    const api = { id: 'api', provider: 'holodeck.http', config: { url: 'http://x.test/a', auth: { scheme: 'bearer' } } };
+    const { onSave, secrets } = panel({ connections: [api] });
+    secrets.set('p', 'api', 'token', 'super-secret', connectionFingerprint(api));
     fireEvent.click(screen.getByRole('button', { name: 'Edit connection api' }));
     const token = screen.getByLabelText('API token');
     expect(token).toHaveValue('');
@@ -113,6 +147,21 @@ describe('<ConnectionsPanel /> + <ConnectionDialog />', () => {
     await waitFor(() => expect(onSave).toHaveBeenCalled());
     expect(onSave.mock.calls[0]![0].secrets).toEqual({ token: '' });
     expect(onSave.mock.calls[0]![1]).toBe(false);
+  });
+
+  // holodeck#166: pointing the connection elsewhere un-sets its secrets in the dialog.
+  it('editing the URL to another origin says the secrets must be entered again', () => {
+    const api = { id: 'api', provider: 'holodeck.http', config: { url: 'http://x.test/a', auth: { scheme: 'bearer' } } };
+    const { secrets } = panel({ connections: [api] });
+    secrets.set('p', 'api', 'token', 'super-secret', connectionFingerprint(api));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit connection api' }));
+    expect(screen.getByLabelText('API token')).toHaveAttribute('placeholder', expect.stringContaining('set'));
+    // Same origin, other path: still the same endpoint for secrets.
+    pick('Url *', 'http://x.test/other');
+    expect(screen.queryByTestId('secrets-endpoint-changed')).toBeNull();
+    pick('Url *', 'http://evil.test/a');
+    expect(screen.getByTestId('secrets-endpoint-changed')).toBeInTheDocument();
+    expect(screen.getByLabelText('API token')).not.toHaveAttribute('placeholder', expect.stringContaining('set'));
   });
 
   it('shows status badges and refuses to remove a connection that bindings use', () => {

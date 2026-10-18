@@ -177,3 +177,57 @@ test('holodeck.http public endpoint works in the editor and in the embed (no sec
   await embed.goto(`/embed/${docId}`);
   await expect(embed.getByTestId('embed')).toHaveAttribute('data-connections', 'pub:live');
 });
+
+// holodeck#163 review (P1): credentials typed into settings or imported in a file never get stored.
+test('credentials in connection settings are refused in the dialog and on import', async ({ page }) => {
+  await newDocumentWithTank(page);
+  await page.getByRole('tab', { name: /Connections/ }).click();
+  await page.getByTestId('connections-panel').getByRole('button', { name: /Add/ }).click();
+  const dialog = page.getByTestId('connection-dialog');
+  await dialog.getByLabel('Provider', { exact: true }).selectOption('holodeck.http');
+  await dialog.getByLabel('Id', { exact: true }).fill('leak');
+  await dialog.getByLabel('Url *', { exact: true }).fill(`${FIXTURE}/public`);
+  await dialog.getByLabel('Advanced', { exact: true }).fill('{"headers":{"Authorization":"Bearer LEAKED-SECRET"}}');
+  await dialog.getByRole('button', { name: 'Add' }).click();
+  await expect(dialog.getByTestId('connection-problems')).toContainText('Authorization');
+  await expect(dialog.getByTestId('connection-problems')).not.toContainText('LEAKED-SECRET');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByTestId('connections-panel')).not.toContainText('leak');
+
+  const leaky = {
+    format: 'holodeck.document.v1',
+    id: 'leaky-doc',
+    name: 'Leaky',
+    engine: 'holodeck.iso',
+    connections: [{ id: 'api', provider: 'holodeck.http', config: { url: 'https://user:LEAKED-SECRET@x.test/a' } }],
+    body: { id: 'leaky-doc', name: 'Leaky', gridCellSize: 1, objects: [] },
+  };
+  await page.getByTestId('import-input').setInputFiles({ name: 'leaky.holodeck.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(leaky)) });
+  await expect(page.getByRole('alert').filter({ hasText: 'Could not import leaky.holodeck.json' })).toContainText('connections.api.config');
+  await expect(page.getByTestId('document-list')).not.toContainText('Leaky');
+});
+
+// holodeck#166: a secret is only sent to the endpoint it was entered for.
+test('pointing a connection at another origin stops sending its token', async ({ page }) => {
+  await newDocumentWithTank(page);
+  await addConnection(page, async (dialog) => {
+    await dialog.getByLabel('Provider', { exact: true }).selectOption('holodeck.http');
+    await dialog.getByLabel('Id', { exact: true }).fill('api');
+    await dialog.getByLabel('Url *', { exact: true }).fill(`${FIXTURE}/secure`);
+    await dialog.getByLabel('Interval Ms', { exact: true }).fill('200');
+    await dialog.getByLabel('Auth', { exact: true }).selectOption('bearer');
+    await dialog.getByLabel('API token', { exact: true }).fill('e2e-token');
+  });
+  await expect(page.getByTestId('connection-status-api')).toHaveAttribute('data-state', 'live');
+
+  // Same server, other origin (localhost vs 127.0.0.1): the token must not follow.
+  await page.getByRole('button', { name: 'Edit connection api' }).click();
+  const dialog = page.getByTestId('connection-dialog');
+  await dialog.getByLabel('Url *', { exact: true }).fill('http://localhost:4181/secure');
+  await expect(dialog.getByTestId('secrets-endpoint-changed')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByTestId('connection-status-api')).toHaveAttribute('data-state', 'error');
+  await expect(page.getByTestId('connection-api')).toContainText('Not set in this tab: API token');
+  const session = await page.evaluate(() => JSON.stringify({ ...sessionStorage }));
+  expect(session).not.toContain('e2e-token');
+});

@@ -51,7 +51,34 @@ export function parseSignalValue(text: string): SignalValue {
   return t;
 }
 
-const showValue = (v: SignalValue | undefined) => (v === undefined ? '' : typeof v === 'string' ? v : JSON.stringify(v));
+/**
+ * Text for a signal value in the editor, lossless with `parseSignalValue`
+ * (holodeck#165): a string is shown bare only when reading it back gives the
+ * same string; otherwise (`"7"`, `"true"`, `""`, multi-line, padded, quoted)
+ * it is shown JSON-quoted.
+ */
+export function showValue(v: SignalValue | undefined): string {
+  if (v === undefined) return '';
+  if (typeof v !== 'string') return JSON.stringify(v);
+  return v !== '' && !/[\n\r]/.test(v) && parseSignalValue(v) === v ? v : JSON.stringify(v);
+}
+
+/** A map case key as text: bare unless it has `=`, a line break, padding or a leading quote. */
+function showKey(k: string): string {
+  return k === '' || /[=\n\r"]/.test(k) || k.trim() !== k ? JSON.stringify(k) : k;
+}
+
+function readKey(text: string): string {
+  if (text.startsWith('"')) {
+    try {
+      const v: unknown = JSON.parse(text);
+      if (typeof v === 'string') return v;
+    } catch {
+      // Fall through: the raw text.
+    }
+  }
+  return text;
+}
 
 export function transformToForm(t: ValueTransform | undefined): TransformForm {
   if (!t) return EMPTY_TRANSFORM_FORM;
@@ -61,7 +88,7 @@ export function transformToForm(t: ValueTransform | undefined): TransformForm {
     case 'threshold':
       return { ...EMPTY_TRANSFORM_FORM, kind: 'threshold', lines: t.steps.map((s) => `${s.at} = ${showValue(s.value)}`).join('\n'), fallback: showValue(t.below) };
     case 'map':
-      return { ...EMPTY_TRANSFORM_FORM, kind: 'map', lines: Object.entries(t.cases).map(([k, v]) => `${k} = ${showValue(v)}`).join('\n'), fallback: showValue(t.default) };
+      return { ...EMPTY_TRANSFORM_FORM, kind: 'map', lines: Object.entries(t.cases).map(([k, v]) => `${showKey(k)} = ${showValue(v)}`).join('\n'), fallback: showValue(t.default) };
     case 'format':
       return { ...EMPTY_TRANSFORM_FORM, kind: 'format', template: t.template, digits: t.digits === undefined ? '' : String(t.digits) };
   }
@@ -73,7 +100,10 @@ function pairs(lines: string): Array<[string, string]> {
     .map((l) => l.trim())
     .filter(Boolean)
     .map((l) => {
-      const i = l.indexOf('=');
+      // A JSON-quoted key may itself contain `=`: split after its closing quote.
+      const quoted = l.startsWith('"') ? /^"(?:[^"\\]|\\.)*"/.exec(l)?.[0] : undefined;
+      const from = quoted ? quoted.length : 0;
+      const i = l.indexOf('=', from);
       return i < 0 ? [l, ''] : [l.slice(0, i).trim(), l.slice(i + 1).trim()];
     });
 }
@@ -99,7 +129,7 @@ export function formToTransform(f: TransformForm): { transform?: ValueTransform;
     case 'map':
       t = {
         kind: 'map',
-        cases: Object.fromEntries(pairs(f.lines).map(([k, v]) => [k, parseSignalValue(v)])),
+        cases: Object.fromEntries(pairs(f.lines).map(([k, v]) => [readKey(k), parseSignalValue(v)])),
         ...(f.fallback.trim() ? { default: parseSignalValue(f.fallback) } : {}),
       };
       break;

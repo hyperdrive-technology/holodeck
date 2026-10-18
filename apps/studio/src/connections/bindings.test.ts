@@ -24,6 +24,17 @@ describe('transforms as forms', () => {
     expect(formToTransform(transformToForm(t))).toEqual({ transform: t, problems: [] });
   });
 
+  // holodeck#165: editing an existing transform must not change its values.
+  const lossy: ValueTransform[] = [
+    { kind: 'map', cases: { '1': '7', '2': 'true', '3': 'null', '4': '', '5': 'two\nlines', '6': ' padded ', '7': '"quoted"' }, default: '' },
+    { kind: 'map', cases: { 'a=b': 'x', '': 'empty key', ' sp': 'y', 'line\nkey': 'z' } },
+    { kind: 'threshold', steps: [{ at: 0, value: '42' }, { at: 10, value: 'false' }], below: '' },
+    { kind: 'map', cases: { on: 1, off: 0, unknown: null, flag: true } },
+  ];
+  it.each(lossy.map((t) => [t]))('round-trips string values losslessly %j', (t) => {
+    expect(formToTransform(transformToForm(t))).toEqual({ transform: t, problems: [] });
+  });
+
   it('none is no transform', () => {
     expect(formToTransform(EMPTY_TRANSFORM_FORM)).toEqual({ problems: [] });
     expect(transformToForm(undefined).kind).toBe('none');

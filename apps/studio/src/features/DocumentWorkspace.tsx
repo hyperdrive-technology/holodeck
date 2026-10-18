@@ -21,6 +21,7 @@ import { ConflictDialog } from './ConflictDialog';
 import { inspectorActions, libraryAddActions } from './editor-commands';
 import { downloadBlob, downloadComponentsCsv, downloadDocument } from './file-io';
 import { imageFileName } from '../documents/io';
+import { connectionFingerprint } from '../connections/fingerprint';
 import { useConnectionHub } from '../connections/use-connection-hub';
 import { ConnectionsPanel } from './connections/ConnectionsPanel';
 import type { ConnectionSubmit } from './connections/ConnectionDialog';
@@ -289,17 +290,22 @@ function DocumentWorkspace({
   const saveConnection = useCallback(
     ({ connection, secrets: secretUpdates }: ConnectionSubmit, isNew: boolean) => {
       const current = docRef.current.connections ?? [];
+      const previous = current.find((c) => c.id === connection.id);
       const connections = isNew ? [...current, connection] : current.map((c) => (c.id === connection.id ? connection : c));
+      const fingerprint = connectionFingerprint(connection);
+      // Pointed elsewhere: secrets entered for the old endpoint are dropped,
+      // not carried over (they would be ignored anyway, holodeck#166).
+      if (previous && connectionFingerprint(previous) !== fingerprint) secrets.clear(docRef.current.id, connection.id);
       const next: IsoDoc = { ...docRef.current, connections };
       docRef.current = next;
       setDoc(next);
       saveWorkingCopy();
       try {
-        for (const [key, value] of Object.entries(secretUpdates)) secrets.set(next.id, connection.id, key, value);
+        for (const [key, value] of Object.entries(secretUpdates)) secrets.set(next.id, connection.id, key, value, fingerprint);
       } catch (error) {
         notify({ tone: 'error', title: 'Could not keep the secrets in this tab', details: [error instanceof Error ? error.message : String(error)] });
       }
-      if (Object.keys(secretUpdates).length) live.reconnect(connection.id);
+      if (Object.keys(secretUpdates).length || (previous && connectionFingerprint(previous) !== fingerprint)) live.reconnect(connection.id);
     },
     [live, saveWorkingCopy, secrets],
   );
