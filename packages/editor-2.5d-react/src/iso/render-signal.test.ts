@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { confirmAssetMounted, createRenderTracker, holdPendingAsset, MOUNT_HANDOFF_TIMEOUT_MS, holdUntilMounted, MOUNT_WARN_MS, nextRevision, RenderGate, renderState } from './render-signal';
+import { confirmAssetMounted, createRenderTracker, holdPendingAsset, MOUNT_HANDOFF_TIMEOUT_MS, holdUntilMounted, MOUNT_WARN_MS, noteAssetRendered, RETRY_GRACE_MS, nextRevision, RenderGate, renderState } from './render-signal';
 
 describe('createRenderTracker', () => {
   it('counts overlapping holds and releases each once', () => {
@@ -96,23 +96,70 @@ describe('holdPendingAsset mount handoff (keyed)', () => {
     expect(tracker.pending).toBe(0);
   });
 
-  it('warns and releases an unowned model that never mounts, only after the load settled', async () => {
+  it('one hold per key: retries of an instance add nothing, other instances of the same promise get their own', () => {
+    const tracker = createRenderTracker();
+    const load = new Promise<void>(() => {});
+    holdPendingAsset(tracker, load, 'a');
+    holdPendingAsset(tracker, load, 'a');
+    holdPendingAsset(tracker, load, 'b');
+    expect(tracker.pending).toBe(2);
+    confirmAssetMounted(tracker, 'a');
+    expect(tracker.pending).toBe(1);
+  });
+
+  it('an instance removed before React retried it releases RETRY_GRACE_MS after the load settled, never earlier', async () => {
     vi.useFakeTimers();
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const tracker = createRenderTracker();
       let finish!: () => void;
       const load = new Promise<void>((done) => { finish = done; });
       holdPendingAsset(tracker, load, 'a.glb');
-      vi.advanceTimersByTime(MOUNT_HANDOFF_TIMEOUT_MS * 5); // a slow request is never timed out
+      vi.advanceTimersByTime(RETRY_GRACE_MS * 5); // a slow request is never timed out
       expect(tracker.pending).toBe(1);
       finish();
       await load;
+      vi.advanceTimersByTime(RETRY_GRACE_MS - 1);
+      expect(tracker.pending).toBe(1);
+      vi.advanceTimersByTime(1);
+      expect(tracker.pending).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('an instance that rendered again waits for its commit, and only warns+releases after the handoff timeout', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const tracker = createRenderTracker();
+      const load = Promise.resolve();
+      holdPendingAsset(tracker, load, 'a.glb');
+      await load;
+      noteAssetRendered(tracker, 'a.glb');
+      vi.advanceTimersByTime(RETRY_GRACE_MS * 2);
+      expect(tracker.pending).toBe(1);
       vi.advanceTimersByTime(MOUNT_HANDOFF_TIMEOUT_MS);
       expect(tracker.pending).toBe(0);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('a.glb'));
     } finally {
       warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('confirming cancels the timers (no late double release into a newer hold of the same key)', async () => {
+    vi.useFakeTimers();
+    try {
+      const tracker = createRenderTracker();
+      const load = Promise.resolve();
+      holdPendingAsset(tracker, load, 'a');
+      await load;
+      confirmAssetMounted(tracker, 'a');
+      expect(tracker.pending).toBe(0);
+      holdPendingAsset(tracker, new Promise(() => {}), 'a'); // the same instance loads again
+      vi.advanceTimersByTime(RETRY_GRACE_MS * 10);
+      expect(tracker.pending).toBe(1);
+    } finally {
       vi.useRealTimers();
     }
   });

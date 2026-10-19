@@ -5,27 +5,34 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { applyHolodeckStyle, type ApplyStyleOverrides } from './apply-style';
 import { useHolodeckStyle } from './style-context';
 import type { HolodeckStyle } from './style';
-import { confirmAssetMounted, holdPendingAsset, RenderTrackerContext, useMountHold } from '../../src/iso/render-signal';
+import { assetHoldKey, confirmAssetMounted, holdPendingAsset, noteAssetRendered, RenderTrackerContext, useMountHold } from '../../src/iso/render-signal';
 
 /**
  * `useLoader(GLTFLoader, url)` that holds IsoCanvas's rendered signal while
  * the request is pending. Exported for parts that read the parsed scene
  * themselves (DataPart's logo anchor); the loader cache is shared, so a
- * second call for the same URL is a cache hit. The request hold is keyed by
- * `url` and ends on `confirmAssetMounted(tracker, url)` (the model mounted, or
- * a committed owner took over). Pass `holdRequest: false` only when a
- * committed `PendingAsset` fallback already holds for the load.
+ * second call for the same URL is a cache hit.
+ *
+ * The hold is per INSTANCE: `owner` is a per-instance string (the placement
+ * id) and the hold key is `assetHoldKey(owner, url)`. It is registered
+ * synchronously while rendering, so a host's `Suspense fallback={null}` or a
+ * shared boundary whose other child is still suspended (nothing here commits)
+ * cannot let the canvas report ready; it ends when that instance commits
+ * (`confirmAssetMounted`), is removed or fails. Anonymous callers (no `owner`)
+ * share one hold per URL.
  */
-export function useTrackedGLTF(url: string, { holdRequest = true }: { holdRequest?: boolean } = {}) {
+export function useTrackedGLTF(url: string, { owner }: { owner?: string } = {}) {
   const tracker = useContext(RenderTrackerContext);
+  const key = assetHoldKey(owner, url);
   try {
-    return useLoader(GLTFLoader, url);
+    const gltf = useLoader(GLTFLoader, url);
+    // React's retry of an instance that suspended: it is alive, wait for its commit.
+    if (tracker) noteAssetRendered(tracker, key);
+    return gltf;
   } catch (pending) {
     // useLoader throws its cached promise before React commits any effects.
-    // Register synchronously so a null Suspense fallback cannot report ready
-    // while the request is parked. Loaded cache hits need no hold.
-    if (holdRequest && tracker && pending && typeof (pending as PromiseLike<unknown>).then === 'function') {
-      holdPendingAsset(tracker, pending as PromiseLike<unknown>, url);
+    if (tracker && pending && typeof (pending as PromiseLike<unknown>).then === 'function') {
+      holdPendingAsset(tracker, pending as PromiseLike<unknown>, key);
     }
     throw pending;
   }
@@ -55,6 +62,12 @@ interface ModelProps {
    * suspension stays host-controlled.
    */
   ownBoundary?: boolean;
+  /**
+   * Per-instance id (the placement id) for the render-signal hold. Models of
+   * the same URL with different keys never release each other's holds
+   * (holodeck#199). Omitted: instances of one URL share a hold.
+   */
+  instanceKey?: string;
 }
 
 /**
@@ -69,15 +82,17 @@ interface ModelProps {
  * loading works normally; hosts must still supply a Suspense boundary.
  */
 export function HolodeckModel({ ownBoundary = false, ...props }: ModelProps) {
-  return ownBoundary ? <OwnedHolodeckModel {...props} /> : <HolodeckModelBody {...props} />;
+  // An owned model keys its request hold apart from default models of the same URL.
+  const holdOwner = ownBoundary ? `own|${props.instanceKey ?? ''}` : props.instanceKey;
+  return ownBoundary ? <OwnedHolodeckModel {...props} holdOwner={holdOwner} /> : <HolodeckModelBody {...props} holdOwner={holdOwner} />;
 }
 
-function OwnedHolodeckModel(props: Omit<ModelProps, 'ownBoundary'>) {
+function OwnedHolodeckModel(props: BodyProps) {
   // The wrapper's effects run even while the body suspends below its own
   // boundary, so it can own the hold: until the body has mounted, and released
   // when the model is removed or its load fails (the wrapper unmounts).
   const [mountedUrl, setMountedUrl] = useState<string | null>(null);
-  useMountHold(props.url, mountedUrl);
+  useMountHold(props.url, mountedUrl, assetHoldKey(props.holdOwner, props.url));
   return (
     <Suspense fallback={null}>
       <HolodeckModelBody {...props} onMounted={setMountedUrl} />
@@ -85,8 +100,11 @@ function OwnedHolodeckModel(props: Omit<ModelProps, 'ownBoundary'>) {
   );
 }
 
+type BodyProps = Omit<ModelProps, 'ownBoundary'> & { holdOwner: string | undefined };
+
 function HolodeckModelBody({
   url,
+  holdOwner,
   onMounted,
   position,
   rotationY = 0,
@@ -96,16 +114,16 @@ function HolodeckModelBody({
   edgeColor,
   style: styleProp,
   onReady,
-}: Omit<ModelProps, 'ownBoundary'> & { onMounted?: (url: string) => void }) {
+}: BodyProps & { onMounted?: (url: string) => void }) {
   const contextStyle = useHolodeckStyle();
   const style = styleProp ?? contextStyle;
-  const gltf = useTrackedGLTF(url);
+  const gltf = useTrackedGLTF(url, { owner: holdOwner });
   const tracker = useContext(RenderTrackerContext);
   // The request hold (or the owner wrapper's) ends only once this body is committed.
   useLayoutEffect(() => {
-    if (tracker) confirmAssetMounted(tracker, url);
+    if (tracker) confirmAssetMounted(tracker, assetHoldKey(holdOwner, url));
     onMounted?.(url);
-  }, [tracker, onMounted, url]);
+  }, [tracker, onMounted, url, holdOwner]);
   // Clone and style together: restyling the same clone after an accent
   // change would hit the idempotency flag before the old dispose ran.
   const { scene, dispose } = useMemo(() => {

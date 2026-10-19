@@ -6,7 +6,7 @@ import { useTrackedGLTF } from '../../assets/process/HolodeckModel';
 import { createFinishMaterial } from '../../assets/process/materials';
 import type { HolodeckStyle } from '../../assets/process/style';
 import { gridToWorld } from '../iso/grid';
-import { PendingAsset } from '../iso/render-signal';
+import { assetHoldKey, PendingAsset } from '../iso/render-signal';
 import { AssetBoundary, useTrackedTexture } from '../objects/assets';
 import { fitAspect, logoAnchorForBlock, logoAnchorFromModel, logoPlaneQuaternion, type LogoAnchor } from '../objects/logo';
 import { partScale } from './part-scale';
@@ -36,8 +36,9 @@ export function DataPart({ placement, params, style, def }: IsoPartProps) {
       {def.model ? (
         // useLoader suspends; the fallback holds the canvas's rendered signal until the model is in.
         <AssetBoundary resetKey={def.model}>
-          <Suspense fallback={<PendingAsset />}>
+          <Suspense fallback={<PendingAsset requestKey={assetHoldKey(placement.id, def.model)} />}>
             <DataModel
+              owner={placement.id}
               def={def}
               params={params}
               style={style}
@@ -50,26 +51,28 @@ export function DataPart({ placement, params, style, def }: IsoPartProps) {
           </Suspense>
         </AssetBoundary>
       ) : (
-        <DataBlock def={def} style={style} />
+        <DataBlock def={def} style={style} owner={placement.id} />
       )}
     </group>
   );
 }
 
 function DataModel({
+  owner,
   def,
   params,
   style,
   accent,
   animation,
 }: {
+  owner: string;
   def: IsoPartDefinition;
   params: Record<string, unknown>;
   style: HolodeckStyle;
   accent: string | undefined;
   animation: IsoPartProps['placement']['animation'];
 }) {
-  const gltf = useTrackedGLTF(def.model!, { holdRequest: false }); // the <PendingAsset/> fallback holds
+  const gltf = useTrackedGLTF(def.model!, { owner });
   const scale = partScale(def);
   // Measured on the cached, never-rendered source scene: placement-independent.
   const anchor = useMemo(() => logoAnchorFromModel(gltf.scene), [gltf]);
@@ -77,6 +80,7 @@ function DataModel({
     <>
       <HolodeckModel
         url={def.model!}
+        instanceKey={owner}
         // The surrounding group carries position and yaw.
         position={[0, 0, 0]}
         scale={scale}
@@ -88,12 +92,12 @@ function DataModel({
         params={params}
         animation={animation}
       />
-      {def.logo && anchor ? <LogoPlane logo={def.logo} anchor={anchor} scale={scale} /> : null}
+      {def.logo && anchor ? <LogoPlane logo={def.logo} anchor={anchor} scale={scale} owner={owner} /> : null}
     </>
   );
 }
 
-function DataBlock({ def, style }: { def: IsoPartDefinition; style: HolodeckStyle }) {
+function DataBlock({ def, style, owner }: { def: IsoPartDefinition; style: HolodeckStyle; owner: string }) {
   const { w, h } = def.footprint;
   const height = def.blockHeight ?? DATA_BLOCK_HEIGHT;
   const material = useMemo(
@@ -107,24 +111,25 @@ function DataBlock({ def, style }: { def: IsoPartDefinition; style: HolodeckStyl
         <boxGeometry args={[w, height, h]} />
         <Edges color={def.colors?.edge} />
       </mesh>
-      {def.logo ? <LogoPlane logo={def.logo} anchor={logoAnchorForBlock(w, h, height)} scale={1} /> : null}
+      {def.logo ? <LogoPlane logo={def.logo} anchor={logoAnchorForBlock(w, h, height)} scale={1} owner={owner} /> : null}
     </>
   );
 }
 
 /** The logo plane, in the part group's frame. Loads lazily; a bad URL draws nothing. */
-export function LogoPlane({ logo, anchor, scale }: { logo: IsoPartLogo; anchor: LogoAnchor; scale: number }) {
+export function LogoPlane({ logo, anchor, scale, owner }: { logo: IsoPartLogo; anchor: LogoAnchor; scale: number; owner?: string }) {
+  const logoOwner = owner === undefined ? undefined : `${owner}:logo`;
   return (
     <AssetBoundary resetKey={logo.url}>
-      <Suspense fallback={<PendingAsset />}>
-        <LogoMesh logo={logo} anchor={anchor} scale={scale} />
+      <Suspense fallback={<PendingAsset requestKey={assetHoldKey(logoOwner, `texture:${logo.url}`)} />}>
+        <LogoMesh logo={logo} anchor={anchor} scale={scale} owner={logoOwner} />
       </Suspense>
     </AssetBoundary>
   );
 }
 
-function LogoMesh({ logo, anchor, scale }: { logo: IsoPartLogo; anchor: LogoAnchor; scale: number }) {
-  const texture = useTrackedTexture(logo.url);
+function LogoMesh({ logo, anchor, scale, owner }: { logo: IsoPartLogo; anchor: LogoAnchor; scale: number; owner?: string }) {
+  const texture = useTrackedTexture(logo.url, owner);
   const quaternion = useMemo(() => logoPlaneQuaternion(anchor), [anchor]);
   if (!texture) return null;
   const image = texture.image as { width?: number; height?: number } | undefined;

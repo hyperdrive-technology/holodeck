@@ -8,7 +8,7 @@ import { Suspense, useEffect, useMemo } from 'react';
 import { CanvasTexture, DoubleSide, SRGBColorSpace, type Texture } from 'three';
 import { FaceCamera, FloorText } from '../../assets/process/Label';
 import { annotationStyle, type HolodeckStyle } from '../../assets/process/style';
-import { PendingAsset } from '../iso/render-signal';
+import { assetHoldKey, PendingAsset } from '../iso/render-signal';
 import { AssetBoundary, useTrackedTexture } from './assets';
 import { retainImageAspect, setImageAspect } from './image-aspect';
 import { drawIcon, ICON_TEXTURE_PX } from './icons';
@@ -94,19 +94,19 @@ export function IconMark({
   return <MarkPlane x={x} z={z} w={size} h={size} orient={orient} texture={texture} userData={{ hdIcon: glyph || icon }} />;
 }
 
-export function ImageMark(props: { x: number; z: number; src: string; width: number; height: number; orient: MarkOrient }) {
+export function ImageMark(props: { x: number; z: number; src: string; width: number; height: number; orient: MarkOrient; owner?: string }) {
   if (!props.src) return null;
   return (
     <AssetBoundary resetKey={props.src}>
-      <Suspense fallback={<PendingAsset />}>
+      <Suspense fallback={<PendingAsset requestKey={assetHoldKey(props.owner, `texture:${props.src}`)} />}>
         <ImageMarkLoaded {...props} />
       </Suspense>
     </AssetBoundary>
   );
 }
 
-function ImageMarkLoaded({ x, z, src, width, height, orient }: { x: number; z: number; src: string; width: number; height: number; orient: MarkOrient }) {
-  const texture = useTrackedTexture(src);
+function ImageMarkLoaded({ x, z, src, width, height, orient, owner }: { x: number; z: number; src: string; width: number; height: number; orient: MarkOrient; owner?: string }) {
+  const texture = useTrackedTexture(src, owner);
   const image = texture?.image as { width?: number; height?: number } | undefined;
   const loaded = Boolean(image?.width && image?.height);
   const aspect = loaded ? image!.width! / image!.height! : 1;

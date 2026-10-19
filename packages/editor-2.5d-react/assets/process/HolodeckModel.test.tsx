@@ -2,7 +2,7 @@ import { Suspense } from 'react';
 import { renderToString } from 'react-dom/server';
 import { Group } from 'three';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { confirmAssetMounted, createRenderTracker, RenderTrackerContext, type RenderTracker } from '../../src/iso/render-signal';
+import { assetHoldKey, confirmAssetMounted, createRenderTracker, RenderTrackerContext, type RenderTracker } from '../../src/iso/render-signal';
 import { HolodeckModel, useTrackedGLTF } from './HolodeckModel';
 
 const { load } = vi.hoisted(() => ({ load: vi.fn() }));
@@ -19,16 +19,16 @@ function renderModel(tracker: RenderTracker | null) {
   );
 }
 
-function Reader({ holdRequest }: { holdRequest?: boolean }) {
-  useTrackedGLTF('/slow.glb', holdRequest === undefined ? {} : { holdRequest });
+function Reader({ owner }: { owner?: string }) {
+  useTrackedGLTF('/slow.glb', owner === undefined ? {} : { owner });
   return null;
 }
 
-function renderReader(tracker: RenderTracker, holdRequest?: boolean) {
+function renderReader(tracker: RenderTracker, owner?: string) {
   return renderToString(
     <RenderTrackerContext.Provider value={tracker}>
       <Suspense fallback={null}>
-        <Reader holdRequest={holdRequest} />
+        <Reader owner={owner} />
       </Suspense>
     </RenderTrackerContext.Provider>,
   );
@@ -53,17 +53,22 @@ describe('useTrackedGLTF request holds', () => {
     await pending;
     // Loaded but not committed yet: the hold survives until the model mounts.
     expect(tracker.pending).toBe(1);
-    confirmAssetMounted(tracker, '/slow.glb');
+    confirmAssetMounted(tracker, assetHoldKey(undefined, '/slow.glb'));
     expect(tracker.pending).toBe(0);
   });
 
-  it('holdRequest: false leaves the hold to a committed component (holodeck#58)', async () => {
+  it('holds are per instance, not per URL: another instance of the same pending URL keeps its own (holodeck#199)', async () => {
     const tracker = createRenderTracker();
-    const pending = Promise.resolve();
+    const pending = new Promise<void>(() => {});
     load.mockImplementation(() => { throw pending; });
-    renderReader(tracker, false);
+    renderReader(tracker, 'a');
+    renderReader(tracker, 'b');
+    renderReader(tracker, 'a'); // a render retry of the same instance is not a second hold
+    expect(tracker.pending).toBe(2);
+    confirmAssetMounted(tracker, assetHoldKey('a', '/slow.glb'));
+    expect(tracker.pending).toBe(1);
+    confirmAssetMounted(tracker, assetHoldKey('b', '/slow.glb'));
     expect(tracker.pending).toBe(0);
-    await pending;
   });
 });
 

@@ -1,6 +1,6 @@
-import { Component, useContext, type ReactNode } from 'react';
+import { Component, useContext, useLayoutEffect, type ReactNode } from 'react';
 import { SRGBColorSpace, TextureLoader, type Texture } from 'three';
-import { holdPendingAsset, RenderTrackerContext } from '../iso/render-signal';
+import { assetHoldKey, confirmAssetMounted, holdPendingAsset, noteAssetRendered, RenderTrackerContext } from '../iso/render-signal';
 import { assetUrlProblem } from './validate';
 
 type TextureEntry =
@@ -62,8 +62,13 @@ export function resetTextureCache(): void {
  * PNG export never captures a logo-less frame). Returns null when the image
  * cannot be loaded.
  */
-export function useTrackedTexture(url: string): Texture | null {
+export function useTrackedTexture(url: string, owner?: string): Texture | null {
   const tracker = useContext(RenderTrackerContext);
+  const holdKey = assetHoldKey(owner, `texture:${url}`);
+  // Runs only once the instance commits, i.e. after its load settled: ends its own hold.
+  useLayoutEffect(() => {
+    if (tracker) confirmAssetMounted(tracker, holdKey);
+  }, [tracker, holdKey]);
   // One choke point for every image URL, including ones that never went
   // through parseSceneFile (inspector edits, host metrics, pack definitions
   // built in code): a disallowed URL is never fetched (holodeck#96).
@@ -77,9 +82,12 @@ export function useTrackedTexture(url: string): Texture | null {
   }
   const entry = textureEntry(url);
   if (entry.status === 'pending') {
-    if (tracker) holdPendingAsset(tracker, entry.promise); // the <PendingAsset/> fallback holds until the logo mounts
+    // Per-instance, registered at render time: a shared boundary whose other
+    // child is suspended cannot commit the <PendingAsset/> fallback.
+    if (tracker) holdPendingAsset(tracker, entry.promise, holdKey);
     throw entry.promise;
   }
+  if (tracker) noteAssetRendered(tracker, holdKey);
   return entry.status === 'ready' ? entry.texture : null;
 }
 
