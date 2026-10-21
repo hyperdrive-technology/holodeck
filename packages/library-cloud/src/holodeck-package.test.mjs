@@ -6,8 +6,8 @@ import entry, { CLOUD_PACKAGE_MANIFEST, cloudPackage, createCloudExtension } fro
 import { CLOUD_PART_DEFINITIONS, createCloudParts } from './parts';
 import { ARCENTRY_LIGHT, ARCENTRY_DARK, CLOUD_THEMES } from './themes';
 // Pure engine contracts only: no React, renderer or editor installation required in this CI job.
-import { ISO_KINDS, isIsoPartDefinition, isIsoTheme } from '../../editor-2.5d-react/src/registry/kinds';
-import { HOLODECK_STYLE } from '../../editor-2.5d-react/assets/process/style';
+// (the editor's ./contracts entry; vitest.config.ts maps it to source, holodeck#137).
+import { HOLODECK_STYLE, ISO_KINDS, isIsoPartDefinition, isIsoTheme } from '@holodeck/editor-2.5d-react/contracts';
 
 const manifestUrl = 'https://assets.example.test/packs/cloud/holodeck.package.json';
 const assetBase = 'https://assets.example.test/packs/cloud/assets/';

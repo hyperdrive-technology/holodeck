@@ -8,6 +8,7 @@ export {
 } from './iso-engine';
 export type { IsoEngineOptions } from './iso-engine';
 export { collectIsoBindings, isoBindingProblems, placementBindingProblems } from './bindings';
+export { ISO_PARTS_INSTALLED_CHECK, ISO_PARTS_INSTALLED_CHECK_ID } from './document-check';
 export { IsoDocumentError, loadIsoDocument, toIsoDocument } from './document';
 export type { IsoDocument, IsoDocumentOptions, LoadedIsoDocument } from './document';
 export { connectIsoDocument, hubMetricsStore, useHubMetrics } from './live';

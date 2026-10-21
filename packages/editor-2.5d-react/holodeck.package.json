@@ -6,7 +6,7 @@
   "version": "1.0.0",
   "license": "MIT",
   "engine": { "id": "holodeck.iso", "apiVersion": "1.0.0", "documentFormat": "holodeck.iso.scene.v1" },
-  "contributes": ["holodeck.iso.part", "holodeck.iso.theme", "holodeck.iso.animator", "holodeck.iso.inspector"],
+  "contributes": ["holodeck.iso.part", "holodeck.iso.theme", "holodeck.iso.animator", "holodeck.iso.inspector", "holodeck.document.check"],
   "engines": { "holodeck.iso": "^1.0" },
   "entry": "dist/holodeck-package.mjs",
   "assets": "dist/models",

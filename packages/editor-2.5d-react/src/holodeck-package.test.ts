@@ -12,6 +12,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import manifestJson from '../holodeck.package.json';
 import sceneJson from '../tests/scene.json';
+import { ISO_PARTS_INSTALLED_CHECK } from './engine/document-check';
 import { isoEngine } from './engine/iso-engine';
 import { loadIsoDocument, toIsoDocument } from './engine/document';
 import isoPackageDefault, { ISO_PACKAGE_MANIFEST, createIsoPackageExtension, isoPackage } from './holodeck-package';
@@ -37,13 +38,14 @@ describe('holodeck.package.json', () => {
       apiVersion: isoEngine.apiVersion,
       documentFormat: isoEngine.documentFormat,
     });
-    expect(ISO_PACKAGE_MANIFEST.contributes).toEqual(ISO_KINDS.map((k) => k.kind));
+    // The four engine kinds, plus the host kind for the parts-installed check (holodeck#61).
+    expect(ISO_PACKAGE_MANIFEST.contributes).toEqual([...ISO_KINDS.map((k) => k.kind), HOLODECK_KINDS.documentCheck]);
     expect(ISO_PACKAGE_MANIFEST.engines).toEqual({ 'holodeck.iso': '^1.0' });
     expect(satisfiesRange(isoEngine.apiVersion, ISO_PACKAGE_MANIFEST.engines!['holodeck.iso']!)).toBe(true);
   });
 
-  it('is indexed as an engine, theme and library package', () => {
-    expect(packageRoles(ISO_PACKAGE_MANIFEST)).toEqual(['engine', 'theme', 'library']);
+  it('is indexed as an engine, theme, library and check package', () => {
+    expect(packageRoles(ISO_PACKAGE_MANIFEST)).toEqual(['engine', 'theme', 'library', 'check']);
   });
 
   it('names no host product (Holodeck stays host-agnostic)', () => {
@@ -72,6 +74,28 @@ describe('build and publish wiring for the entry module', () => {
     expect(pkg.files).toContain('holodeck.package.json');
     expect(pkg.files).toContain('dist/**/*');
   });
+
+  it('publishes built files only: no src/ or assets/ next to dist/ (holodeck#27)', () => {
+    // assets/models/*.glb is copied to dist/models by the build; shipping both doubled every GLB.
+    expect(pkg.files.filter((f: string) => /^(src|assets)\b/.test(f))).toEqual([]);
+    // The manifest's asset dir must be one the tarball has (smoke-holodeck-package.mjs checks npm pack).
+    expect(ISO_PACKAGE_MANIFEST.assets).toBe('dist/models');
+  });
+
+  it('builds both CJS entries from one shared chunk (holodeck#60)', () => {
+    const tsup = readFileSync(join(PKG_DIR, 'tsup.config.ts'), 'utf8');
+    expect(tsup).toMatch(/^\s*splitting:\s*true,/m);
+  });
+
+  it('exports and builds the dependency-light ./contracts entry (holodeck#137)', () => {
+    expect(pkg.exports['./contracts']).toEqual({
+      types: './dist/contracts.d.ts',
+      import: './dist/contracts.mjs',
+      require: './dist/contracts.js',
+    });
+    const tsup = readFileSync(join(PKG_DIR, 'tsup.config.ts'), 'utf8');
+    expect(tsup).toMatch(/entry:\s*\[[^\]]*'src\/contracts\.ts'/);
+  });
 });
 
 describe('entry module', () => {
@@ -94,6 +118,9 @@ describe('entry module', () => {
       ext.contributions[kind]!.forEach((item, i) => expect(item).toBe(items[i]));
       expect(ext.contributions[kind]).not.toBe(items);
     }
+    // The parts-installed document check is package-only (holodeck#61).
+    expect(ext.contributions[HOLODECK_KINDS.documentCheck]).toEqual([ISO_PARTS_INSTALLED_CHECK]);
+    expect(BUILTIN_ISO_EXTENSION.contributions[HOLODECK_KINDS.documentCheck]).toBeUndefined();
     expect(checkExtensionMatchesManifest(ISO_PACKAGE_MANIFEST, ext)).toEqual([]);
   });
 

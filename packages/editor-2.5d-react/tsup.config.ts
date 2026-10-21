@@ -57,7 +57,8 @@ const OUT_DIR = 'dist';
 export default defineConfig({
   // `holodeck-package` is the Holodeck package entry named in holodeck.package.json
   // (`entry`); hosts load it by path, so it is a separate file, not just an export.
-  entry: ['src/index.ts', 'src/holodeck-package.ts'],
+  // `contracts` is the dependency-light validators + style entry (holodeck#137).
+  entry: ['src/index.ts', 'src/holodeck-package.ts', 'src/contracts.ts'],
   format: ['cjs', 'esm'],
   // Code splitting for BOTH formats (tsup splits ESM by default, CJS only when
   // asked). Without it dist/holodeck-package.js (CJS) inlined a second copy of
