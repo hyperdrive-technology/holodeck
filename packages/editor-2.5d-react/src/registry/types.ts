@@ -154,6 +154,13 @@ export interface IsoPartDefinition extends Contribution {
    */
   ports?: Record<string, IsoPartPort>;
   /**
+   * Along-pipe body length (grid cells) when the part sits inline on a pipe,
+   * measured along its local x axis. Reroute keeps carried parts this far
+   * apart (plus a margin) and clear of bends and retained endpoint parts
+   * (routing/inline.ts `inlineBodyLength`). Absent = the footprint's longer side.
+   */
+  inlineLength?: number;
+  /**
    * Fixed cut-away window (degrees, Tank's wall-angle frame: windowYaw 0 = +y,
    * 90 = +x), for parts whose window is not a `windowYaw` / `windowDeg` param.
    * Pipes that run into it are clipped at the wall (routing/vessel-ports.ts).
