@@ -20,7 +20,9 @@ jobs:
         # src/index.ts (its build entry), and depends on @holodeck/sdk from the npm
         # registry, which is not published. Add it once it is revived.
         # library-cloud follows provider-http's type/test/build/package smoke
-        # path; its shipped GLBs are checked without requiring Blender in CI.
+        # path; its shipped GLBs are checked without requiring Blender here.
+        # The byte-for-byte Blender rebuild runs in blender-drift.yml
+        # (path-filtered + weekly, holodeck#136).
         # assets-aws checks its icons (sanitised SVG), vendored archetype models and the
         # provider-aws part hints from source; it needs no network or AWS credentials.
         # provider-aws runs the real AWS SDK against an in-process fake backend
@@ -183,6 +185,20 @@ jobs:
         working-directory: holodeck/packages/${{ matrix.package }}
         timeout-minutes: 15
         run: pnpm check:vite-consumer
+
+  # Tests for the repo-level scripts the package jobs run (smoke-dist.mjs,
+  # vite-consumer-check helpers): node:test, no install, no build.
+  scripts:
+    name: scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - name: node --test
+        run: node --test "scripts/**/*.test.mjs"
 
   # Holodeck Studio (apps/studio): a Vite app that consumes the BUILT
   # editor-2.5d-react package (file: dependency, copied at install time), so

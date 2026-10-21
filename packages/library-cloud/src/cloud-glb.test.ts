@@ -154,6 +154,11 @@ describe.each(CLOUD_PART_DEFINITIONS)('$id GLB', (part) => {
 });
 
 const blender = findBlender();
+// HOLODECK_REQUIRE_BLENDER=1 (set by .github/workflows/blender-drift.yml, holodeck#136): the job
+// exists to run the rebuild below, so a missing Blender must fail it, not skip it quietly.
+it.runIf(process.env.HOLODECK_REQUIRE_BLENDER === '1')('finds Blender when HOLODECK_REQUIRE_BLENDER=1', () => {
+  expect(blender, 'Blender not found: set $BLENDER or put blender on PATH').toBeTruthy();
+});
 describe.skipIf(!blender)('deterministic Blender rebuild (requires Blender)', () => {
   const directory = mkdtempSync(join(tmpdir(), 'holodeck-cloud-'));
   afterAll(() => rmSync(directory, { recursive: true, force: true }));

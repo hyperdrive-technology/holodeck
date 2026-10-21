@@ -149,6 +149,12 @@ describe('assets/models/valve.glb', () => {
 
 const blender = findBlender() as string | null;
 
+// HOLODECK_REQUIRE_BLENDER=1 (set by .github/workflows/blender-drift.yml, holodeck#136): the job
+// exists to run the rebuild below, so a missing Blender must fail it, not skip it quietly.
+it.runIf(process.env.HOLODECK_REQUIRE_BLENDER === '1')('finds Blender when HOLODECK_REQUIRE_BLENDER=1', () => {
+  expect(blender, 'Blender not found: set $BLENDER or put blender on PATH').toBeTruthy();
+});
+
 describe.skipIf(!blender)('valve.glb rebuild (needs Blender)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'hd-parts-'));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
