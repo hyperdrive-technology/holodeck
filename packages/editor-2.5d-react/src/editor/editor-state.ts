@@ -4,7 +4,7 @@ import { getDefaultIsoRegistry } from '../registry/default';
 import type { IsoPartDefinition } from '../registry/types';
 import { rotateOffset, type Heading } from '../routing/grid';
 import { resolveRouteEnd } from '../routing/ports';
-import { carryHostedParts, chainFrom, hostPipeOf, INLINE_PART_LENGTH, isPipePlacement, positionOnPipe, segOf, splitChainAtParts, withAttachment } from '../routing/inline';
+import { carryHostedParts, chainFrom, hostPipeOf, inlineBodyLength, isPipePlacement, positionOnPipe, segOf, splitChainAtParts, withAttachment } from '../routing/inline';
 import { headingOf, pipeArmsAt } from '../routing/elbows';
 import { findRun, isInlinePart } from '../routing/run';
 import { routeToPlacements, type GridPoint } from './routing';
@@ -413,18 +413,23 @@ function rerouteSelected(state: EditorState): EditorState {
   const reservedObjects = state.scene.objects.filter((o) => !ids.has(o.id));
   const placements: IsoPlacement[] = [];
   const carried: IsoPlacement[] = [];
+  const bodyLength = (part: IsoPlacement) =>
+    inlineBodyLength(state.registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, part.object), part);
   for (const [i, section] of sections.entries()) {
     const first = section[0]!;
     const last = section[section.length - 1]!;
     const without = { objects: [...rest, ...placements] };
-    const from = i === 0 ? resolveRouteEnd(without, state.registry, run.start) : {
-      cell: first.from,
-      heading: headingOf(first.to.x - first.from.x, first.to.y - first.from.y) ?? undefined,
-    };
-    const to = i === sections.length - 1 ? resolveRouteEnd(without, state.registry, run.end) : {
-      cell: last.to,
-      heading: headingOf(last.from.x - last.to.x, last.from.y - last.to.y) ?? undefined,
-    };
+    // Outward headings of the ORIGINAL run at this section's two ends.
+    const firstOut = headingOf(first.to.x - first.from.x, first.to.y - first.from.y) ?? undefined;
+    const lastOut = headingOf(last.from.x - last.to.x, last.from.y - last.to.y) ?? undefined;
+    // `prefer` disambiguates coincident declared ports (holodeck#47): a part
+    // with east and west ports both at its centre keeps the side the run used.
+    const from = i === 0
+      ? resolveRouteEnd(without, state.registry, run.start, { prefer: firstOut })
+      : { cell: first.from, heading: firstOut };
+    const to = i === sections.length - 1
+      ? resolveRouteEnd(without, state.registry, run.end, { prefer: lastOut })
+      : { cell: last.to, heading: lastOut };
     if (i === 0) from.heading ??= run.startHeading;
     if (i === sections.length - 1) to.heading ??= run.endHeading;
     const route = routeToPlacements(without, state.registry, from, to, nextId, {
@@ -438,13 +443,19 @@ function rerouteSelected(state: EditorState): EditorState {
     if (route.fallback && (fixed.length > 0 || from.heading !== undefined || to.heading !== undefined)) {
       return { ...state, notice: RETAINED_CONNECTIONS_NO_ROUTE_NOTICE };
     }
-    const endpointLength = (cell: GridPoint) => rest.some((o) => sameCell(o, cell) && isInlinePart(o, state.registry))
-      ? INLINE_PART_LENGTH : 0;
+    // Per-part body lengths (holodeck#54): retained endpoint parts and carried
+    // parts each reserve their own inline length, not the built-in valve's.
+    const endpointLength = (cell: GridPoint) => Math.max(0, ...rest
+      .filter((o) => sameCell(o, cell) && isInlinePart(o, state.registry))
+      .map(bodyLength));
     const parts = carryHostedParts(
       movable.filter((part) => section.some((seg) => seg.id === part.onPipe && positionOnPipe(seg, part.x, part.y) !== null)),
       section,
       route.placements.filter(isPipePlacement).map(segOf),
       { start: endpointLength(from.cell), end: endpointLength(to.cell) },
+      // Snap: land carried parts where a click can hit them, so a branch
+      // drawn to one connects and pins it on the next reroute (holodeck#53).
+      { bodyLength, snap: true },
     );
     // A failed plan (even one offering an obstructed L) must not replace a
     // working run; invalid resolved ports can also produce no geometry.

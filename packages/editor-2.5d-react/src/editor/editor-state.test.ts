@@ -5,7 +5,10 @@ import { parseSceneFile, type IsoPlacement } from '../iso/scene';
 import { PROCESS_SCENE } from '../iso/load-process-scene';
 import { INLINE_PART_LENGTH, positionOnPipe, segOf } from '../routing/inline';
 import { pipeArmsAt } from '../routing/elbows';
-import type { Heading } from '../routing/grid';
+import { rotateHeading, type Heading } from '../routing/grid';
+import { headingOf } from '../routing/elbows';
+import { coincidentPortRegistry } from '../routing/test-helpers';
+import { snapPoint } from './snap';
 import { INLINE_PARTS_NO_ROUTE_NOTICE, NO_ROUTE_NOTICE, REROUTE_FAILED_NOTICE, RETAINED_CONNECTIONS_NO_ROUTE_NOTICE, committedScene, createEditorState, editorReducer, emptyScene, nextId, stamp } from './editor-state';
 
 const registry = getDefaultIsoRegistry();
@@ -407,6 +410,7 @@ describe('auto-routed pipes', () => {
         ...s,
         scene: { ...s.scene, objects: [...s.scene.objects, stamp(registry, 'tank', 5, 0, 'tank-1')] },
       });
+      const sameXY = (a: { x: number; y: number }, b: { x: number; y: number }) => a.x === b.x && a.y === b.y;
       const onRoute = (objects: readonly IsoPlacement[], v: IsoPlacement) => {
         const host = objects.find((o) => o.id === v.onPipe);
         expect(host?.object).toBe('pipe');
@@ -854,6 +858,99 @@ describe('auto-routed pipes', () => {
         expect(r.scene).not.toBe(s.scene);
       });
 
+      // holodeck#53: carried parts must land where a click can hit them, so a
+      // branch drawn to one is kept by the next reroute.
+      it('reroute -> draw a branch to the carried valve -> reroute keeps the branch', () => {
+        let s = drawPipe(blank(), [0, 0], [10, 0]);
+        s = place(s, 'valve', 2, 0);
+        s = withTankAcross({ ...editorReducer(s, { type: 'select', id: 'pipe-1' }), mode: 'select' });
+        let r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBeNull();
+        const valve = r.scene.objects.find((o) => o.id === 'valve-1')!;
+        onRoute(r.scene.objects, valve);
+        expect(Number.isInteger(valve.x) && Number.isInteger(valve.y), `${valve.x},${valve.y}`).toBe(true);
+        // A click on the valve snaps exactly onto it.
+        expect(snapPoint(valve.x + 0.1, valve.y - 0.2)).toEqual({ x: valve.x, y: valve.y });
+        // Draw a branch perpendicular to the valve's host pipe.
+        const host = r.scene.objects.find((o) => o.id === valve.onPipe)!;
+        const vertical = host.x === host.toX;
+        const tip = vertical ? { x: valve.x - 3, y: valve.y } : { x: valve.x, y: valve.y - 3 };
+        r = editorReducer(r, { type: 'pipe-mode' });
+        r = editorReducer(r, { type: 'floor-click', ...snapPoint(valve.x + 0.1, valve.y - 0.2) });
+        r = editorReducer(r, { type: 'floor-click', ...tip });
+        r = editorReducer(r, { type: 'cancel' });
+        const branch = r.scene.objects.find((o) => o.object === 'pipe' && (sameXY(o, tip) || sameXY({ x: o.toX!, y: o.toY! }, tip)))!;
+        expect(branch).toBeDefined();
+        expect(pipeArmsAt([branch], valve)).toHaveLength(1);
+        // Reroute the main run again: the branch pins the valve, which stays connected.
+        const mainId = r.scene.objects.find((o) => o.object === 'pipe' && o.id !== branch.id && pipeArmsAt([o], { x: 0, y: 0 }).length > 0)!.id;
+        r = editorReducer({ ...r, mode: 'select', selectedId: mainId }, { type: 'reroute-selected' });
+        expect(r.notice).toBeNull();
+        const after = r.scene.objects.find((o) => o.id === 'valve-1')!;
+        expect(after).toMatchObject({ x: valve.x, y: valve.y });
+        expect(r.scene.objects.find((o) => o.id === branch.id)).toEqual(branch);
+        expect(pipeArmsAt(r.scene.objects, after)).toHaveLength(3);
+      });
+
+      // holodeck#54: a big inline part keeps its own body clear, not the valve's.
+      it('reserves a large retained endpoint part by its own inline length', () => {
+        const reg = createIsoRegistryWithBuiltins();
+        reg.install({ id: 'test.meter', version: '1', contributions: { [HOLODECK_KINDS.isoPart]: [{
+          id: 'test:meter', label: 'Meter', footprint: { w: 1, h: 1 }, inlineLength: 1.6,
+          params: {}, component: () => null,
+        } as Record<string, unknown> & { id: string }] } });
+        const base = endpointRun();
+        const objects = base.scene.objects.map((o) => o.id === 'start' ? { ...o, object: 'test:meter' } : o);
+        const s = editorReducer(createEditorState({ ...base.scene, objects }, { registry: reg }), { type: 'select', id: 'a' });
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBeNull();
+        const hosted = r.scene.objects.find((o) => o.id === 'hosted-0')!;
+        onRoute(r.scene.objects, hosted);
+        expect(Math.hypot(hosted.x, hosted.y)).toBeGreaterThanOrEqual(1.6 / 2 + INLINE_PART_LENGTH / 2 + 0.1 - 1e-9);
+      });
+
+      it('spaces carried pack parts by their own inline length', () => {
+        const reg = createIsoRegistryWithBuiltins();
+        reg.install({ id: 'test.meter2', version: '1', contributions: { [HOLODECK_KINDS.isoPart]: [{
+          id: 'test:meter', label: 'Meter', footprint: { w: 1, h: 1 }, inlineLength: 2,
+          params: {}, component: () => null,
+        } as Record<string, unknown> & { id: string }] } });
+        const objects: IsoPlacement[] = [
+          { id: 'a', object: 'pipe', x: 0, y: 0, toX: 0, toY: 10 },
+          { id: 'b', object: 'pipe', x: 0, y: 10, toX: 6, toY: 10 },
+          { id: 'm', object: 'test:meter', x: 0, y: 4, onPipe: 'a', at: 0.4 },
+          { id: 'v', object: 'valve', x: 0, y: 5, onPipe: 'a', at: 0.5 },
+        ];
+        const s = { ...createEditorState({ ...emptyScene(), objects }, { registry: reg }), selectedId: 'a' };
+        // Reroute to a straight (no obstacles between the ends' L): carried parts must not overlap.
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBeNull();
+        const [m, v] = ['m', 'v'].map((id) => r.scene.objects.find((o) => o.id === id)!);
+        expect(Math.hypot(m!.x - v!.x, m!.y - v!.y)).toBeGreaterThanOrEqual(1 + 0.3 + 0.1 - 1e-9);
+      });
+
+      // holodeck#57: a directional part on a leg travelling WEST keeps facing
+      // along travel after the reroute, whatever axis it lands on.
+      it.each([0, Math.PI])('keeps a carried directional part facing the same way along travel (rotation %s)', (rotation) => {
+        const objects: IsoPlacement[] = [
+          { id: 'a', object: 'pipe', x: 0, y: 0, toX: 10, toY: 0 },
+          { id: 'b', object: 'pipe', x: 10, y: 0, toX: 10, toY: 3 },
+          { id: 'c', object: 'pipe', x: 10, y: 3, toX: 2, toY: 3 },
+          { id: 'check', object: 'valve', x: 6, y: 3, rotation, onPipe: 'c', at: 0.5 },
+          stamp(registry, 'tank', 1, 1, 'tank'),
+        ];
+        const s = { ...createEditorState({ ...emptyScene(), objects }), selectedId: 'a' };
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBeNull();
+        const part = r.scene.objects.find((o) => o.id === 'check')!;
+        const host = r.scene.objects.find((o) => o.id === part.onPipe)!;
+        // Pipes come out oriented from the run start, so from->to is travel.
+        const travel = headingOf(host.toX! - host.x, host.toY! - host.y)!;
+        // Before: on a west-travelling leg, rotation 0 faced AGAINST travel (east), pi faced along it.
+        const faces = rotateHeading('e', part.rotation ?? 0);
+        expect(faces).toBe(rotation === 0 ? rotateHeading(travel, Math.PI) : travel);
+      });
+
       it('rotates a carried valve onto a perpendicular straight', () => {
         let s = drawPipe(blank(), [0, 0], [10, 0]);
         s = place(s, 'valve', 1.5, 0);
@@ -866,8 +963,9 @@ describe('auto-routed pipes', () => {
         const r = editorReducer(s, { type: 'reroute-selected' });
         const valve = r.scene.objects.find((o) => o.id === 'valve-1')!;
         const host = r.scene.objects.find((o) => o.id === valve.onPipe)!;
-        const vertical = host.x === host.toX;
-        expect(valve.rotation ?? 0).toBeCloseTo(vertical ? Math.PI / 2 : 0);
+        // Faces along travel like before (east), on whichever axis it landed (holodeck#57).
+        const travel = headingOf(host.toX! - host.x, host.toY! - host.y)!;
+        expect(rotateHeading('e', valve.rotation ?? 0)).toBe(travel);
       });
     });
 
@@ -948,6 +1046,48 @@ describe('auto-routed pipes', () => {
         expect(pipeArmsAt(r.scene.objects, joint).map((arm) => arm.heading).sort()).toEqual(vertical ? ['n', 's'] : ['e', 'w']);
         expect(pipeArmsAt(rerouted, point(id === 'pipe-a' ? 0 : far))).toHaveLength(1);
       });
+    });
+
+    // holodeck#47 (b): a part whose east and west ports coincide used to
+    // resolve to whichever was declared first, overriding the pipe's side.
+    describe.each([[['east', 'west']], [['west', 'east']]] as const)('coincident declared ports (declared %j)', (order) => {
+      it.each([false, true])('keeps the original west heading (pipe stored reversed: %s)', (reversed) => {
+        const reg = coincidentPortRegistry(order);
+        const main: IsoPlacement = reversed
+          ? { id: 'main', object: 'pipe', x: -6, y: 0, toX: 0, toY: 0 }
+          : { id: 'main', object: 'pipe', x: 0, y: 0, toX: -6, toY: 0 };
+        const objects: IsoPlacement[] = [
+          { id: 'part', object: 'test:coincident', x: 0, y: 0 },
+          main,
+          { id: 'retained', object: 'pipe', x: 0, y: 0, toX: 4, toY: 0 },
+          stamp(reg, 'tank', -3, 0, 'tank'),
+        ];
+        const s = { ...createEditorState({ ...emptyScene(), objects }, { registry: reg }), selectedId: 'main' };
+        const r = editorReducer(s, { type: 'reroute-selected' });
+        expect(r.notice).toBeNull();
+        expect(r.revision).toBe(s.revision + 1);
+        const rerouted = r.scene.objects.filter((o) => o.object === 'pipe' && o.id !== 'retained');
+        expect(rerouted.length).toBeGreaterThan(1); // really went around the tank
+        expect(pipeArmsAt(rerouted, { x: 0, y: 0 }).map((arm) => arm.heading)).toEqual(['w']);
+        expect(pipeArmsAt(r.scene.objects, { x: 0, y: 0 }).map((arm) => arm.heading).sort()).toEqual(['e', 'w']);
+      });
+    });
+
+    // holodeck#47 (a), the review repro: a half-cell run whose far end meets a
+    // retained valve. The heading-blind L fallback would re-enter it from the
+    // north; the reroute must refuse instead of publishing that.
+    it('refuses the heading-blind half-cell fallback into a retained valve (review repro)', () => {
+      const objects: IsoPlacement[] = [
+        { id: 'a', object: 'pipe', x: 0.5, y: 0, toX: 0.5, toY: 6 },
+        { id: 'b', object: 'pipe', x: 0.5, y: 6, toX: 6.5, toY: 6 },
+        stamp(registry, 'valve', 6.5, 6, 'valve'),
+        { id: 'retained', object: 'pipe', x: 6.5, y: 6, toX: 9.5, toY: 6 },
+      ];
+      const s = { ...createEditorState({ ...emptyScene(), objects }), selectedId: 'a' };
+      const r = editorReducer(s, { type: 'reroute-selected' });
+      expect(r.notice).toBe(RETAINED_CONNECTIONS_NO_ROUTE_NOTICE);
+      expect(r.scene).toBe(s.scene);
+      expect(committedScene(s, r)).toBeNull();
     });
 
     it.each([false, true])('rejects fallbacks at retained inline endpoints (off-grid: %s)', (offGrid) => {

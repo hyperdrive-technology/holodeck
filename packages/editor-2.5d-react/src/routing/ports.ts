@@ -17,7 +17,7 @@
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoSceneFile } from '../iso/scene';
 import type { IsoPartDefinition } from '../registry/types';
-import { rotateHeading, rotateOffset, type GridPoint } from './grid';
+import { rotateHeading, rotateOffset, type GridPoint, type Heading } from './grid';
 import { footprintContains, rotatedFootprint } from './occupancy';
 import type { RouteEnd } from './astar';
 
@@ -31,7 +31,17 @@ export function resolveRouteEnd(
   scene: Pick<IsoSceneFile, 'objects'>,
   registry: ContributionRegistry,
   cell: GridPoint,
-  opts: { exclude?: ReadonlySet<string> } = {},
+  opts: {
+    exclude?: ReadonlySet<string>;
+    /**
+     * Tie-break between COINCIDENT ports (several resolving to the same
+     * world cell): prefer the one whose (rotated) outward heading is this.
+     * Reroute passes the original pipe's heading, so a part with east and
+     * west ports both at local (0,0) keeps the side the run actually used
+     * (holodeck#47). Never beats a nearer port or one at another cell.
+     */
+    prefer?: Heading;
+  } = {},
 ): ResolvedRouteEnd {
   // Later objects draw on top, so they win ties: iterate in reverse.
   for (let i = scene.objects.length - 1; i >= 0; i -= 1) {
@@ -52,14 +62,14 @@ export function resolveRouteEnd(
       const px = Math.round(obj.x + off.x);
       const py = Math.round(obj.y + off.y);
       const dist = Math.abs(px - cell.x) + Math.abs(py - cell.y);
-      if (dist < bestDist) {
+      const heading = rotateHeading(port.dir, obj.rotation);
+      // Only COINCIDENT ports (same world cell as the current best) are
+      // re-ranked by `prefer`; equidistant ports elsewhere keep declaration order.
+      const coincident = bestEnd !== null && bestEnd.cell.x === px && bestEnd.cell.y === py;
+      const preferred = coincident && opts.prefer !== undefined && heading === opts.prefer && bestEnd?.heading !== opts.prefer;
+      if (dist < bestDist || preferred) {
         bestDist = dist;
-        bestEnd = {
-          cell: { x: px, y: py },
-          heading: rotateHeading(port.dir, obj.rotation),
-          partId: obj.id,
-          port: name,
-        };
+        bestEnd = { cell: { x: px, y: py }, heading, partId: obj.id, port: name };
       }
     }
     if (bestEnd) return bestEnd;

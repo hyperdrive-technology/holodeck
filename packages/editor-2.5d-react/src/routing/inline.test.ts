@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { IsoPlacement } from '../iso/scene';
+import type { IsoPartDefinition } from '../registry/types';
 import { ELBOW_RADIUS } from '../../assets/process/pipe-math';
 import {
   carryHostedParts,
@@ -9,6 +10,7 @@ import {
   hostPipeOf,
   INLINE_PART_LENGTH,
   INLINE_PART_MARGIN,
+  inlineBodyLength,
   placeOnRoute,
   positionOnPipe,
   segOf,
@@ -16,7 +18,9 @@ import {
   withAttachment,
   type PipeSeg,
 } from './inline';
-import { pipe } from './test-helpers';
+import { rotateHeading, type Heading } from './grid';
+import { headingOf } from './elbows';
+import { pipe, registry } from './test-helpers';
 
 const seg = (id: string, x: number, y: number, toX: number, toY: number): PipeSeg => segOf(pipe(id, x, y, toX, toY));
 const valve = (id: string, x: number, y: number, extra: Partial<IsoPlacement> = {}): IsoPlacement => ({ id, object: 'valve', x, y, ...extra });
@@ -169,10 +173,12 @@ describe('carryHostedParts', () => {
     const route = [seg('n1', 0, 0, 0, 5), seg('n2', 0, 5, 5, 5)];
     const [v] = carryHostedParts([valve('v', 2, 0, { onPipe: 'old', at: 0.2 })], old, route)!;
     expect(v).toMatchObject({ x: 0, y: 2, onPipe: 'n1' });
-    expect(v!.rotation).toBeCloseTo(Math.PI / 2);
-    // A yawed part keeps its own offset from the axis.
+    // Travel turned east -> south (+y): local east must now face south (holodeck#57).
+    expect(v!.rotation).toBeCloseTo(-Math.PI / 2);
+    expect(rotateHeading('e', v!.rotation)).toBe('s');
+    // A yawed part keeps its own offset from the travel direction.
     const [w] = carryHostedParts([valve('w', 2, 0, { onPipe: 'old', rotation: Math.PI / 2 })], old, route)!;
-    expect(w!.rotation).toBeCloseTo(Math.PI);
+    expect(w!.rotation ?? 0).toBeCloseTo(0);
   });
   it('uses the pipe geometry, not a stale `at`', () => {
     const [v] = carryHostedParts([valve('v', 5, 0, { onPipe: 'old', at: 0.9 })], old, [seg('new', 0, 0, 10, 0)])!;
@@ -265,5 +271,144 @@ describe('carryHostedParts', () => {
     const bodies = { start: 0.6, end: 0.6 };
     expect(carryHostedParts(parts, old, [seg('new', 0, 0, 1.4, 0)], bodies)![0]!.x).toBeCloseTo(0.7);
     expect(carryHostedParts(parts, old, [seg('new', 0, 0, 1.39, 0)], bodies)).toBeNull();
+  });
+});
+
+const travel = (s: PipeSeg): Heading => headingOf(s.to.x - s.from.x, s.to.y - s.from.y)!;
+
+// holodeck#57: rotation used axisOf(new) - axisOf(old), so a directional part
+// (check valve, flow meter) could come out with inlet/outlet swapped.
+describe('carryHostedParts keeps directional parts facing the flow', () => {
+  // Old run: east, south, then back WEST. The part on the west leg faces west (rotation pi).
+  const uChain = [seg('a', 0, 0, 10, 0), seg('b', 10, 0, 10, 3), seg('c', 10, 3, 2, 3)];
+  const check = valve('check', 5, 3, { onPipe: 'c', rotation: Math.PI });
+
+  it('a part on a reversed leg lands on an eastward straight facing east', () => {
+    const route = [seg('n1', 0, 0, 0, 3), seg('n2', 0, 3, 8, 3)]; // south, then EAST
+    const [moved] = carryHostedParts([check], uChain, route)!;
+    const host = route.find((s) => s.id === moved!.onPipe)!;
+    expect(rotateHeading('e', moved!.rotation ?? 0)).toBe(travel(host));
+    expect(rotateHeading('e', moved!.rotation ?? 0)).toBe('e');
+  });
+
+  it.each([
+    ['east', [seg('n', 0, 0, 12, 0)]],
+    ['west', [seg('n', 0, 0, -12, 0)]],
+    ['north', [seg('n', 0, 0, 0, -12)]],
+    ['south', [seg('n', 0, 0, 0, 12)]],
+  ] as const)('keeps inlet/outlet relative to travel on a straight heading %s', (_name, route) => {
+    // Part faces along travel on the old east leg (rotation 0), and against it (rotation pi).
+    for (const [rotation, sense] of [[0, 1], [Math.PI, -1]] as const) {
+      const part = valve('dir', 4, 0, { onPipe: 'a', rotation });
+      const [moved] = carryHostedParts([part], uChain, route)!;
+      const faces = rotateHeading('e', moved!.rotation ?? 0);
+      const along = travel(route[0]!);
+      expect(faces).toBe(sense === 1 ? along : rotateHeading(along, Math.PI));
+    }
+  });
+
+  it('leaves rotation untouched when travel does not turn', () => {
+    const [moved] = carryHostedParts([valve('v', 4, 0, { onPipe: 'a' })], uChain, [seg('n', 0, 0, 30, 0)])!;
+    expect(moved).not.toHaveProperty('rotation');
+  });
+});
+
+// holodeck#54: inline clearance used the built-in valve's 0.6 body for every part.
+describe('per-part inline body lengths', () => {
+  it('inlineBodyLength reads explicit metadata, else the footprint', () => {
+    const def = (extra: Record<string, unknown>) => ({ footprint: { w: 1, h: 1 }, ...extra });
+    expect(inlineBodyLength(registry.get<IsoPartDefinition>('holodeck.iso.part', 'valve'))).toBe(INLINE_PART_LENGTH);
+    expect(inlineBodyLength(registry.get<IsoPartDefinition>('holodeck.iso.part', 'end-cap'))).toBe(INLINE_PART_LENGTH);
+    expect(inlineBodyLength(def({ inlineLength: 1.6 }))).toBe(1.6);
+    expect(inlineBodyLength(def({}))).toBe(1);
+    expect(inlineBodyLength({ footprint: { w: 0.5, h: 0.8 } })).toBe(0.8);
+    for (const bad of [-1, NaN, Infinity]) expect(inlineBodyLength(def({ inlineLength: bad }))).toBe(1);
+    expect(inlineBodyLength(undefined)).toBe(1); // unknown part: 1x1 like footprint()
+  });
+
+  const lengths: Record<string, number> = { meter: 2, small: 0.6 };
+  const bodyLength = (p: IsoPlacement) => lengths[p.object] ?? INLINE_PART_LENGTH;
+  const old = [seg('old', 0, 0, 10, 0)];
+
+  it('clears the route start by the large part\'s own half-length', () => {
+    const meter = { id: 'm', object: 'meter', x: 0.5, y: 0, onPipe: 'old' };
+    const [moved] = carryHostedParts([meter], old, [seg('n', 0, 0, 10, 0)], {}, { bodyLength })!;
+    expect(moved!.x).toBeGreaterThanOrEqual(1 + INLINE_PART_MARGIN - 1e-9);
+  });
+
+  it('spaces mixed-size neighbours by both half-lengths plus the margin', () => {
+    const parts = [
+      { id: 'm', object: 'meter', x: 5, y: 0, onPipe: 'old' },
+      { id: 's', object: 'small', x: 5.5, y: 0, onPipe: 'old' },
+    ];
+    const [m, s] = carryHostedParts(parts, old, [seg('n', 0, 0, 10, 0)], {}, { bodyLength })!;
+    expect(s!.x - m!.x).toBeGreaterThanOrEqual(1 + 0.3 + INLINE_PART_MARGIN - 1e-9);
+  });
+
+  it('keeps a large part off a bend by its own half-length', () => {
+    const route = [seg('a', 0, 0, 0, 4), seg('b', 0, 4, 6, 4)];
+    const meter = { id: 'm', object: 'meter', x: 3.9, y: 0, onPipe: 'old' };
+    const [moved] = carryHostedParts([meter], old, route, {}, { bodyLength })!;
+    const fromBend = moved!.onPipe === 'a' ? 4 - moved!.y : moved!.x;
+    expect(fromBend).toBeGreaterThanOrEqual(ELBOW_RADIUS + 1 + INLINE_PART_MARGIN - 1e-9);
+  });
+
+  it('rejects a large part a short straight could fit at valve size', () => {
+    const meter = { id: 'm', object: 'meter', x: 5, y: 0, onPipe: 'old' };
+    expect(carryHostedParts([meter], old, [seg('n', 0, 0, 1.5, 0)], {}, { bodyLength })).toBeNull();
+    expect(carryHostedParts([{ ...meter, object: 'small' }], old, [seg('n', 0, 0, 1.5, 0)], {}, { bodyLength })).not.toBeNull();
+  });
+});
+
+// holodeck#53: carried parts landed on arbitrary coordinates (e.g. 0.98) that
+// no click can hit, so a branch drawn to the part missed it.
+describe('carryHostedParts snap mode', () => {
+  const old = [seg('old', 0, 0, 10, 0)];
+  const snap = { snap: true } as const;
+  const onHalfGrid = (v: number) => Number.isInteger(v * 2);
+
+  it('lands on whole grid nodes when they fit', () => {
+    const [v] = carryHostedParts([valve('v', 4.9, 0, { onPipe: 'old' })], old, [seg('n', 0, 0, 0, 13)], {}, snap)!;
+    expect(v).toMatchObject({ x: 0, y: 6, onPipe: 'n' });
+    expect(positionOnPipe(seg('n', 0, 0, 0, 13), v!.x, v!.y)).toBeCloseTo(v!.at!);
+  });
+
+  it('keeps several parts on whole nodes with clearance, in order', () => {
+    const parts = [1, 1.3, 1.6].map((x, i) => valve(`v${i}`, x, 0, { onPipe: 'old' }));
+    const route = [seg('a', 0, 0, 0, 4), seg('b', 0, 4, 9, 4)];
+    const moved = carryHostedParts(parts, old, route, {}, snap)!;
+    for (const p of moved) {
+      expect(Number.isInteger(p.x) && Number.isInteger(p.y), `${p.id} ${p.x},${p.y}`).toBe(true);
+    }
+    for (let i = 1; i < moved.length; i += 1) {
+      expect(Math.hypot(moved[i]!.x - moved[i - 1]!.x, moved[i]!.y - moved[i - 1]!.y)).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('falls back to half cells when no whole node clears the bends', () => {
+    const [v] = carryHostedParts([valve('v', 5, 0, { onPipe: 'old' })], old, [seg('n', 0, 0, 1, 0)], {}, snap)!;
+    expect(v).toMatchObject({ x: 0.5, y: 0 });
+  });
+
+  it('refuses a fit that only works off the half-cell grid', () => {
+    // Continuous: 0.4 and 1.1. Half cells in [0.4, 1.1] are 0.5 and 1.0: too close for two bodies.
+    const route = [seg('n', 0, 0, 1.5, 0)];
+    const parts = [valve('a', 4, 0, { onPipe: 'old' }), valve('b', 6, 0, { onPipe: 'old' })];
+    expect(carryHostedParts(parts, old, route)!.map((p) => p.x)).toEqual([expect.closeTo(0.4), expect.closeTo(1.1)]);
+    expect(carryHostedParts(parts, old, route, {}, snap)).toBeNull();
+  });
+
+  it('keeps continuous placement on hand-authored off-grid routes (no snappable spot exists)', () => {
+    const route = [seg('n', 0.25, 0.25, 6.25, 0.25)];
+    const [v] = carryHostedParts([valve('v', 5, 0, { onPipe: 'old' })], old, route, {}, snap)!;
+    expect(v!.y).toBe(0.25);
+    expect(v!.x).toBeCloseTo(3.25);
+  });
+
+  it('snaps on half-cell routes', () => {
+    const route = [seg('n', 0.5, 0, 0.5, 6)];
+    const [v] = carryHostedParts([valve('v', 4.1, 0, { onPipe: 'old' })], old, route, {}, snap)!;
+    expect(onHalfGrid(v!.x) && onHalfGrid(v!.y)).toBe(true);
+    expect(v!.x).toBe(0.5);
   });
 });

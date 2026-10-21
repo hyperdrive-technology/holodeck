@@ -96,8 +96,9 @@ export class GeometryRangeError extends RangeError {
 
 /** Inclusive integer node range covering [lo, hi]; throws GeometryRangeError when unbounded. */
 function nodeRange(lo: number, hi: number, what: string, limit = MAX_GRID_COORD): [number, number] {
-  const a = Math.ceil(lo - EPS);
-  const b = Math.floor(hi + EPS);
+  // `+ 0` normalises -0 (Math.ceil(0 - EPS) is -0) so callers can compare cells with toEqual.
+  const a = Math.ceil(lo - EPS) + 0;
+  const b = Math.floor(hi + EPS) + 0;
   if (!Number.isFinite(a) || !Number.isFinite(b) || Math.abs(a) > limit || Math.abs(b) > limit) {
     throw new GeometryRangeError(`${what} [${lo}, ${hi}] is outside +-${limit} grid cells`);
   }
@@ -164,12 +165,20 @@ export function runCells(o: Pick<IsoPlacement, 'x' | 'y' | 'toX' | 'toY'>): Grid
   const { x, y } = o;
   const toX = o.toX ?? x;
   const toY = o.toY ?? y;
+  // holodeck#56: validate the ORIGINAL origin/endpoint, the same rule scene
+  // validation applies. nodeRange only sees rounded node bounds, so an
+  // endpoint like 16384.5 (rounds in to 16384) used to slip through.
+  for (const v of [x, y, toX, toY]) {
+    if (!Number.isFinite(v) || Math.abs(v) > MAX_GRID_COORD) {
+      throw new GeometryRangeError(`run endpoint ${v} must be finite and within +-${MAX_GRID_COORD}`);
+    }
+  }
   const [x0, x1] = nodeRange(Math.min(x, toX), Math.max(x, toX), 'run x');
   const [y0, y1] = nodeRange(Math.min(y, toY), Math.max(y, toY), 'run y');
   if (x !== toX && y !== toY) {
     return [
-      { x: Math.round(x), y: Math.round(y) },
-      { x: Math.round(toX), y: Math.round(toY) },
+      { x: Math.round(x) + 0, y: Math.round(y) + 0 },
+      { x: Math.round(toX) + 0, y: Math.round(toY) + 0 },
     ];
   }
   const out: GridPoint[] = [];

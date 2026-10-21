@@ -38,6 +38,7 @@ import {
 } from '../../assets/process/tank-params';
 import { ELBOW_BEND_MODES, ELBOW_BEND_PARAM } from '../routing/elbows';
 import { DEFAULT_TANK_CUTOUT } from '../routing/vessel-ports';
+import { INLINE_PART_LENGTH } from '../routing/inline';
 import type { HolodeckStyle } from '../../assets/process/style';
 import { BUILTIN_ISO_ANIMATORS } from '../anim/animators';
 import { gridToWorld } from '../iso/grid';
@@ -296,6 +297,8 @@ export const BUILTIN_ISO_PARTS: readonly IsoPartDefinition[] = [
     hint: 'handwheel',
     category: PIPING,
     footprint: { w: 1, h: 1 },
+    // Along-pipe body for reroute clearance (routing/inline.ts); the 1x1 footprint is the halo.
+    inlineLength: INLINE_PART_LENGTH,
     // Declared so hosts can bind it and GLB valves can animate on it; the
     // code-built valve has no moving parts.
     params: { open: { type: 'boolean', label: 'Open', default: true } },
@@ -339,6 +342,8 @@ export const BUILTIN_ISO_PARTS: readonly IsoPartDefinition[] = [
     hint: 'pipe terminator',
     category: PIPING,
     footprint: { w: 1, h: 1 },
+    // Along-pipe body for reroute clearance (routing/inline.ts); the 1x1 footprint is the halo.
+    inlineLength: INLINE_PART_LENGTH,
     params: {},
     instanced: true,
     instancedRenderer: CapPool,
