@@ -70,7 +70,7 @@ jobs:
           path: holodeck-sdk
 
       # pnpm 10.26+ understands the SDK's pnpm-workspace.yaml (`allowBuilds`).
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.33.2
 
@@ -242,7 +242,7 @@ jobs:
           ref: ${{ steps.sdk.outputs.ref }}
           path: holodeck-sdk
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.33.2
 
