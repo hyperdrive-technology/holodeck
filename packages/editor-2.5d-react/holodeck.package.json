@@ -9,7 +9,7 @@
   "contributes": ["holodeck.iso.part", "holodeck.iso.theme", "holodeck.iso.animator", "holodeck.iso.inspector"],
   "engines": { "holodeck.iso": "^1.0" },
   "entry": "dist/holodeck-package.mjs",
-  "assets": "assets",
+  "assets": "dist/models",
   "homepage": "https://github.com/hyperdrive-technology/holodeck/tree/main/packages/editor-2.5d-react#readme",
   "repository": "github:hyperdrive-technology/holodeck",
   "keywords": ["engine", "isometric", "r3f", "process"]

@@ -66,12 +66,36 @@ try {
 } catch (err) {
   fail(`import ${pkg.name}/holodeck-package threw: ${err.stack ?? err}`);
 }
+/**
+ * holodeck#60: an entry that inlines its own copy of the built-ins hands a
+ * host part objects that are not the ones the main entry exports (class
+ * identity, registry collisions when both are mixed). Both entries of one
+ * format must share them: ESM through a shared chunk, CJS likewise
+ * (tsup.config.ts `splitting: true`).
+ */
+function checkSharedParts(label, main, entry) {
+  const ours = new Set(main.BUILTIN_ISO_PARTS ?? []);
+  const theirs = entry?.default?.createExtension?.().contributions?.['holodeck.iso.part'] ?? [];
+  if (ours.size === 0 || theirs.length === 0) {
+    fail(`${label}: no built-in parts to compare (main ${ours.size}, entry ${theirs.length})`);
+    return;
+  }
+  const copies = theirs.filter((part) => !ours.has(part)).map((part) => part.id);
+  if (copies.length) fail(`${label}: ./holodeck-package carries its own copy of ${copies.length} built-in part(s), e.g. ${copies.slice(0, 3)} (holodeck#60)`);
+  else console.log(`${label}: ./holodeck-package shares all ${theirs.length} part objects with the main entry`);
+}
+
 try {
-  // The CJS build bundles its own copy of the parts, so it installs into a host
-  // with the CJS SDK; mixing it with the ESM engine is not a supported setup.
+  checkSharedParts('esm', mainEsm, await import(`${pkg.name}/holodeck-package`));
+} catch (err) {
+  fail(`esm shared-parts check threw: ${err.stack ?? err}`);
+}
+
+try {
   const cjsSdk = require('@holodeck/sdk');
   const cjsMain = require(pkg.name);
   const cjsEntry = require(`${pkg.name}/holodeck-package`);
+  checkSharedParts('cjs', cjsMain, cjsEntry);
   const host = new cjsSdk.HolodeckHost({ name: 'smoke-cjs' });
   host.registerEngine(cjsMain.isoEngine);
   const report = await host.installPackage(manifest, cjsEntry.default);
@@ -86,6 +110,12 @@ const pack = JSON.parse(
 const packed = new Set(pack[0].files.map((f) => f.path));
 for (const file of ['holodeck.package.json', manifest.entry, 'dist/holodeck-package.js', 'dist/holodeck-package.d.ts']) {
   if (!packed.has(file)) fail(`npm pack would not publish ${file}`);
+}
+// The manifest's `assets` dir must be published too: a host resolving
+// assetUrl() against it would otherwise 404 (holodeck#27 moved it to the
+// built dist/models when assets/ left the tarball).
+if (manifest.assets !== undefined && ![...packed].some((f) => f.startsWith(`${manifest.assets}/`))) {
+  fail(`npm pack publishes nothing under the manifest's assets dir "${manifest.assets}"`);
 }
 
 if (failures.length) {

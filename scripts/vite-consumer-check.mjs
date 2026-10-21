@@ -15,7 +15,8 @@
  *   build                   `vite build` + `vite preview`                          -> must pass
  *   dev, no exclude         the bug repro (URLs rewritten to /node_modules/.vite/deps/models/ -> 404)
  *                           Informational only: prints a warning if Vite stops
- *                           breaking so the README caveat can be revisited.
+ *                           breaking so the README caveat can be revisited, and
+ *                           only a warning if the run itself throws (holodeck#48).
  *
  * Needs a Chromium for Playwright (`pnpm exec playwright install chromium`, or
  * point HOLODECK_CHROMIUM at an existing binary).
@@ -26,6 +27,7 @@ import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { runInformational } from './lib/informational.mjs';
 
 const pkgArg = process.argv[2];
 if (!pkgArg) {
@@ -139,9 +141,13 @@ try {
     await new Promise((r) => pv.httpServer.close(r));
   }
 
-  rmSync(join(root, '.vite-cache'), { recursive: true, force: true });
-  const repro = await runDev(browser, root, 'dev (no exclude, expected to break)', {});
-  if (repro.length === 0) {
+  // Informational only: a timeout or rejected fetch here must not fail the
+  // run once both required checks above have passed (holodeck#48).
+  const repro = await runInformational('dev (no exclude, expected to break)', async () => {
+    rmSync(join(root, '.vite-cache'), { recursive: true, force: true });
+    return runDev(browser, root, 'dev (no exclude, expected to break)', {});
+  });
+  if (repro.ok && repro.value.length === 0) {
     console.warn('WARNING: dev without optimizeDeps.exclude now works; the README caveat may be obsolete.');
   }
 } finally {

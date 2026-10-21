@@ -22,8 +22,6 @@
   },
   "files": [
     "dist/**/*",
-    "src/**/*",
-    "assets/**/*",
     "schema/**/*",
     "holodeck.package.json",
     "README.md",

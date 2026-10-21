@@ -59,6 +59,14 @@ export default defineConfig({
   // (`entry`); hosts load it by path, so it is a separate file, not just an export.
   entry: ['src/index.ts', 'src/holodeck-package.ts'],
   format: ['cjs', 'esm'],
+  // Code splitting for BOTH formats (tsup splits ESM by default, CJS only when
+  // asked). Without it dist/holodeck-package.js (CJS) inlined a second copy of
+  // the built-in parts/registry, so a CJS host mixing the two entries got two
+  // sets of part objects (holodeck#60). With it both CJS entries require one
+  // shared chunk, like the ESM build; smoke-holodeck-package.mjs checks the
+  // part objects are identical. Chunks land in dist/ next to the entries, so
+  // glbUrlPlugin's `./models/x.glb` URLs still resolve from inside a chunk.
+  splitting: true,
   outDir: OUT_DIR,
   dts: true,
   clean: true,
