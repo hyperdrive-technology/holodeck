@@ -127,7 +127,7 @@ jobs:
       # inspecting a CI run: artifacts/visual + artifacts/render (gitignored).
       - name: Upload render artifacts
         if: always() && matrix.package == 'editor-2.5d-react'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: render-artifacts
           path: holodeck/packages/editor-2.5d-react/artifacts/
@@ -306,7 +306,7 @@ jobs:
 
       - name: Upload e2e report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: studio-e2e
           path: |
