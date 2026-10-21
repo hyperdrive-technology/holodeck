@@ -4,9 +4,9 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { findBlender } from '../../editor-2.5d-react/scripts/build-parts.mjs';
+import { compareGlb, findBlender } from '../../editor-2.5d-react/scripts/build-parts.mjs';
 
-export { findBlender };
+export { compareGlb, findBlender };
 export const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const PARTS_DIR = resolve(PACKAGE_DIR, '../../blender/parts/cloud');
 export const DEFAULT_OUT_DIR = join(PACKAGE_DIR, 'assets/models');

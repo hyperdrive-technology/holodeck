@@ -1,7 +1,7 @@
 name: Blender drift
 
 # Rebuilds the committed GLBs from their Blender scripts with headless Blender
-# and fails if any byte differs (holodeck#136). The main CI has no Blender, so
+# and fails if they drifted (holodeck#136). The main CI has no Blender, so
 # there the rebuild tests skip (`describe.skipIf(!blender)`) and drift between
 # blender/parts/**/*.py and the shipped GLBs was only caught on a dev machine.
 #
@@ -13,6 +13,12 @@ name: Blender drift
 # official Linux build pinned to the version the GLBs are authored with
 # (blender/README.md: 5.2.2 LTS), checksum-verified and cached; not apt's,
 # which lags and would change the exporter output.
+#
+# "Drifted": geometry (the GLB BIN chunk) must be byte-identical and the glTF
+# JSON equal within 1e-6. Not every byte: the GLBs are authored on macOS arm64
+# and Blender's matrix -> quaternion step rounds node rotations 1 float32 ULP
+# differently on Linux x86-64 (cdn, valve, fermenter; reproduced in a
+# linux/amd64 container). Details: packages/editor-2.5d-react/scripts/glb-compare.mjs.
 #
 # HOLODECK_REQUIRE_BLENDER=1 turns "no Blender, skip" into a failing test, so
 # a broken install cannot leave this job green while checking nothing.
@@ -51,7 +57,7 @@ env:
 
 jobs:
   rebuild:
-    name: GLBs rebuild byte-identical
+    name: GLBs rebuild from Blender scripts
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
