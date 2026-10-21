@@ -13,11 +13,18 @@
  *    required by name; for them the CJS leg is Node's `require(esm)` of the
  *    `import` target by path, which proves the build has no top-level await.
  * 2. Both formats must expose the same, non-empty set of exports.
- * 3. If the package exports `BUILTIN_MODEL_URLS` (editor-2.5d-react), every
- *    entry must be a `file:` URL to an existing GLB under dist/ that is
- *    byte-identical to `assets/models/<name>.glb`, and the map must cover
- *    every GLB in assets/models.
- * 4. `npm pack --dry-run` must include every entry point (and the GLBs).
+ * 3. Exports listed in REQUIRED_EXPORTS for the package (or passed as
+ *    `--require-export <name>`) must be present in both formats. For
+ *    editor-2.5d-react that is `BUILTIN_MODEL_URLS`: without the requirement,
+ *    dropping it from both entries silently skipped every model check
+ *    (holodeck#26).
+ * 4. If the package exports `BUILTIN_MODEL_URLS`, every entry must be a
+ *    `file:` URL to an existing GLB under dist/ that is byte-identical to
+ *    `assets/models/<name>.glb`, and the map must cover every GLB in
+ *    assets/models.
+ * 5. `npm pack --dry-run` must include every entry point (and the GLBs), and
+ *    must not publish one GLB twice under two paths (holodeck#27: `files`
+ *    listed both assets/** and dist/**, shipping every model twice).
  *
  * Bundler-only side-effect imports (editor-2d-react pulls in
  * `@xyflow/react/dist/style.css`) are stubbed by smoke-dist-hooks.mjs; Node
@@ -28,9 +35,26 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const pkgArg = process.argv[2];
-if (!pkgArg) {
-  console.error('usage: node scripts/smoke-dist.mjs <package-dir>');
+/**
+ * Exports a package must have, by package name. Explicit rather than inferred
+ * from assets/models/: library-cloud and assets-aws ship GLBs through their
+ * Holodeck package `assets/` dir instead of a BUILTIN_MODEL_URLS map.
+ */
+const REQUIRED_EXPORTS = {
+  '@holodeck/editor-2.5d-react': ['BUILTIN_MODEL_URLS'],
+};
+
+const args = process.argv.slice(2);
+const extraRequired = [];
+let pkgArg;
+let badArgs = false;
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--require-export' && args[i + 1] !== undefined) extraRequired.push(args[++i]);
+  else if (!args[i].startsWith('--') && pkgArg === undefined) pkgArg = args[i];
+  else badArgs = true; // unknown flag, flag without value, or a second package dir
+}
+if (!pkgArg || badArgs) {
+  console.error('usage: node scripts/smoke-dist.mjs <package-dir> [--require-export <name>]...');
   process.exit(2);
 }
 const PKG_DIR = resolve(pkgArg);
@@ -106,6 +130,12 @@ for (const format of ['esm', 'cjs']) {
     fail(`${format}: loading ${pkg.name} threw:\n${err.stderr || err.message}`);
   }
 }
+const required = [...new Set([...(REQUIRED_EXPORTS[pkg.name] ?? []), ...extraRequired])];
+for (const format of ['esm', 'cjs']) {
+  if (!loaded[format]) continue;
+  const missing = required.filter((name) => !loaded[format].keys.includes(name));
+  if (missing.length) fail(`${format}: required export(s) missing: ${missing.join(', ')}`);
+}
 if (loaded.esm && loaded.cjs && JSON.stringify(loaded.esm.keys) !== JSON.stringify(loaded.cjs.keys)) {
   const only = (a, b) => a.keys.filter((k) => !b.keys.includes(k));
   fail(`ESM/CJS export sets differ: esm-only ${only(loaded.esm, loaded.cjs)}; cjs-only ${only(loaded.cjs, loaded.esm)}`);
@@ -128,6 +158,18 @@ const pack = JSON.parse(
 );
 const packed = new Set(pack[0].files.map((f) => f.path));
 for (const file of mustPublish) if (!packed.has(file)) fail(`npm pack would not publish ${file}`);
+// Same file name and size under two paths = one model published twice. A
+// dry-run reports no content hashes; name + size is enough to catch a `files`
+// list that ships a source folder next to its built copy.
+const glbs = new Map();
+for (const f of pack[0].files) {
+  if (!f.path.endsWith('.glb')) continue;
+  const key = `${f.path.split('/').pop()}:${f.size}`;
+  glbs.set(key, [...(glbs.get(key) ?? []), f.path]);
+}
+for (const paths of glbs.values()) {
+  if (paths.length > 1) fail(`npm pack would publish one GLB ${paths.length} times: ${paths.sort().join(', ')} (narrow package.json "files")`);
+}
 console.log(`npm pack: ${packed.size} files, ${mustPublish.size} required present-checked`);
 
 if (failures.length) {

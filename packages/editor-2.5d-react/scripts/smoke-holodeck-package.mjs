@@ -66,12 +66,36 @@ try {
 } catch (err) {
   fail(`import ${pkg.name}/holodeck-package threw: ${err.stack ?? err}`);
 }
+/**
+ * holodeck#60: an entry that inlines its own copy of the built-ins hands a
+ * host part objects that are not the ones the main entry exports (class
+ * identity, registry collisions when both are mixed). Both entries of one
+ * format must share them: ESM through a shared chunk, CJS likewise
+ * (tsup.config.ts `splitting: true`).
+ */
+function checkSharedParts(label, main, entry) {
+  const ours = new Set(main.BUILTIN_ISO_PARTS ?? []);
+  const theirs = entry?.default?.createExtension?.().contributions?.['holodeck.iso.part'] ?? [];
+  if (ours.size === 0 || theirs.length === 0) {
+    fail(`${label}: no built-in parts to compare (main ${ours.size}, entry ${theirs.length})`);
+    return;
+  }
+  const copies = theirs.filter((part) => !ours.has(part)).map((part) => part.id);
+  if (copies.length) fail(`${label}: ./holodeck-package carries its own copy of ${copies.length} built-in part(s), e.g. ${copies.slice(0, 3)} (holodeck#60)`);
+  else console.log(`${label}: ./holodeck-package shares all ${theirs.length} part objects with the main entry`);
+}
+
 try {
-  // The CJS build bundles its own copy of the parts, so it installs into a host
-  // with the CJS SDK; mixing it with the ESM engine is not a supported setup.
+  checkSharedParts('esm', mainEsm, await import(`${pkg.name}/holodeck-package`));
+} catch (err) {
+  fail(`esm shared-parts check threw: ${err.stack ?? err}`);
+}
+
+try {
   const cjsSdk = require('@holodeck/sdk');
   const cjsMain = require(pkg.name);
   const cjsEntry = require(`${pkg.name}/holodeck-package`);
+  checkSharedParts('cjs', cjsMain, cjsEntry);
   const host = new cjsSdk.HolodeckHost({ name: 'smoke-cjs' });
   host.registerEngine(cjsMain.isoEngine);
   const report = await host.installPackage(manifest, cjsEntry.default);
@@ -80,12 +104,62 @@ try {
   fail(`require ${pkg.name}/holodeck-package failed: ${err.stack ?? err}`);
 }
 
+// ./contracts (holodeck#137): loads by name in both formats without React or
+// three, and hands out the main entry's own objects.
+for (const [label, load] of [
+  ['esm', async () => [await import(`${pkg.name}/contracts`), mainEsm]],
+  ['cjs', async () => [require(`${pkg.name}/contracts`), require(pkg.name)]],
+]) {
+  try {
+    const [contracts, main] = await load();
+    const names = ['ISO_KINDS', 'isIsoPartDefinition', 'isIsoTheme', 'HOLODECK_STYLE'];
+    const missing = names.filter((n) => contracts[n] === undefined);
+    const copies = names.filter((n) => contracts[n] !== undefined && contracts[n] !== main[n]);
+    if (missing.length) fail(`${label} ./contracts: missing ${missing}`);
+    if (copies.length) fail(`${label} ./contracts: ${copies} are copies, not the main entry's objects`);
+    if (!missing.length && !copies.length) console.log(`${label} ./contracts: ${Object.keys(contracts).length} exports, shared with the main entry`);
+  } catch (err) {
+    fail(`${label} ./contracts failed to load: ${err.stack ?? err}`);
+  }
+}
+// Every package the built ESM contracts entry reaches, through its chunks.
+{
+  const seen = new Set();
+  const packages = new Set();
+  const queue = ['contracts.mjs'];
+  while (queue.length) {
+    const file = queue.pop();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    const code = readFileSync(join(PKG_DIR, 'dist', file), 'utf8');
+    // esbuild emits static imports at line start; dynamic import() would show up as `import(`.
+    const specs = [
+      ...code.matchAll(/^(?:import|export)\b[^;]*?\bfrom\s*["']([^"']+)["']/gm),
+      ...code.matchAll(/^import\s*["']([^"']+)["']/gm),
+      ...code.matchAll(/\bimport\(\s*["']([^"']+)["']\s*\)/g),
+    ];
+    for (const [, spec] of specs) {
+      if (spec.startsWith('./')) queue.push(spec.slice(2));
+      else packages.add(spec);
+    }
+  }
+  const heavy = [...packages].filter((p) => p !== '@holodeck/sdk');
+  if (heavy.length) fail(`dist/contracts.mjs reaches ${heavy} through ${[...seen]} (must stay @holodeck/sdk-only)`);
+  else console.log(`dist/contracts.mjs reaches only ${[...packages]} through ${seen.size} file(s)`);
+}
+
 const pack = JSON.parse(
   execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts', '--loglevel=error'], { cwd: PKG_DIR, encoding: 'utf8' }),
 );
 const packed = new Set(pack[0].files.map((f) => f.path));
-for (const file of ['holodeck.package.json', manifest.entry, 'dist/holodeck-package.js', 'dist/holodeck-package.d.ts']) {
+for (const file of ['holodeck.package.json', manifest.entry, 'dist/holodeck-package.js', 'dist/holodeck-package.d.ts', 'dist/contracts.mjs', 'dist/contracts.js', 'dist/contracts.d.ts']) {
   if (!packed.has(file)) fail(`npm pack would not publish ${file}`);
+}
+// The manifest's `assets` dir must be published too: a host resolving
+// assetUrl() against it would otherwise 404 (holodeck#27 moved it to the
+// built dist/models when assets/ left the tarball).
+if (manifest.assets !== undefined && ![...packed].some((f) => f.startsWith(`${manifest.assets}/`))) {
+  fail(`npm pack publishes nothing under the manifest's assets dir "${manifest.assets}"`);
 }
 
 if (failures.length) {

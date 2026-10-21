@@ -16,14 +16,17 @@
       "import": "./dist/holodeck-package.mjs",
       "require": "./dist/holodeck-package.js"
     },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "import": "./dist/contracts.mjs",
+      "require": "./dist/contracts.js"
+    },
     "./holodeck.package.json": "./holodeck.package.json",
     "./package.json": "./package.json",
     "./schema/holodeck-iso-scene.v1.schema.json": "./schema/holodeck-iso-scene.v1.schema.json"
   },
   "files": [
     "dist/**/*",
-    "src/**/*",
-    "assets/**/*",
     "schema/**/*",
     "holodeck.package.json",
     "README.md",

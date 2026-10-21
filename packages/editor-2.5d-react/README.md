@@ -212,7 +212,16 @@ This package is the `holodeck.iso` engine of the Holodeck packaging contract
 `1.0.0`, document format `holodeck.iso.scene.v1`, kinds `holodeck.iso.{part,theme,animator,inspector}`.
 `validateBody` never throws; it checks structure (via `parseSceneFile`) and bindings, but not
 whether parts are installed, because the host installs libraries after registering the engine.
-For that check too, register `createIsoEngine({ registry: host.registry })` instead.
+That check is the package's `holodeck.document.check` `holodeck.iso.parts-installed`
+(`ISO_PARTS_INSTALLED_CHECK`): with `isoPackage` installed, `host.checkDocument(doc)` reports
+one `UNKNOWN_PART` error per placement whose part no installed package provides, against the
+host's live registry (holodeck#61). `createIsoEngine({ registry: host.registry })` still makes
+`validateBody` strict too; with both, an uninstalled part is reported twice.
+
+**Validators without React.** `@holodeck/editor-2.5d-react/contracts` exports the kind
+descriptors and validators (`ISO_KINDS`, `isIsoPartDefinition`, `isIsoTheme`, …) and
+`HOLODECK_STYLE`, and loads nothing but `@holodeck/sdk` at runtime: for library packages'
+tests, CLIs and indexers (holodeck#137; `src/contracts.test.ts` keeps it that way).
 
 **Built-ins as a package.** `holodeck.package.json` (id `holodeck.iso`, version `1.0.0`) with
 entry `dist/holodeck-package.mjs` (also `@holodeck/editor-2.5d-react/holodeck-package`, and
@@ -245,7 +254,11 @@ registry directly. Use one or the other in a registry: together they collide on 
 `holodeck.document.v1` envelope for saving. `loadIsoDocument(raw, registry?)` accepts an
 envelope or a bare legacy `IsoSceneFile`, and returns `{ document, scene }`. It throws one
 `IsoDocumentError` whose `problems` list every problem: envelope fields, engine and major
-version, the body, and bindings to connections the document does not have. The envelope
+version, the body, and bindings to connections the document does not have. A bare scene has
+no connections, so a bare scene *with bindings* is rejected (with a hint to save it through
+`toIsoDocument(scene, { connections })`), exactly like an envelope whose bindings name a missing
+connection; loading it with dangling bindings would show dead values with no explanation
+(decided in holodeck#61). The envelope
 `theme` wins over `body.theme`, and the envelope `id` is always the loaded `scene.id`
 (`toIsoDocument(scene, { id })` writes it into the body too). `ProcessEditor` resets undo/redo
 on `scene.id`, so two documents saved from one scene must never share it.

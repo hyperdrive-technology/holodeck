@@ -145,6 +145,15 @@ function loadEnvelope(raw: Record<string, unknown>, registry: ContributionRegist
   return { document, scene };
 }
 
+/**
+ * Decision (holodeck#61): a bare scene that carries bindings is rejected, not
+ * loaded with unresolved bindings. A bare file has no `connections`, so every
+ * binding in it is dangling, the same case as an envelope whose bindings name
+ * a missing connection (also rejected). Bindings postdate envelopes, so such a
+ * file can only come from code that should have saved an envelope; the
+ * problem list says how to fix it. Revisit if a real producer of bare files
+ * with bindings appears.
+ */
 function loadBareScene(raw: Record<string, unknown>, registry: ContributionRegistry): LoadedIsoDocument {
   const body = checkBody(raw, undefined, registry, '');
   const problems = [...body.problems];
