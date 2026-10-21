@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { confirmAssetMounted, createRenderTracker, holdPendingAsset, MOUNT_HANDOFF_TIMEOUT_MS, nextRevision, RenderGate, renderState } from './render-signal';
+import { confirmAssetMounted, createRenderTracker, holdPendingAsset, MOUNT_HANDOFF_TIMEOUT_MS, holdUntilMounted, MOUNT_WARN_MS, noteAssetRendered, RETRY_GRACE_MS, nextRevision, RenderGate, renderState } from './render-signal';
 
 describe('createRenderTracker', () => {
   it('counts overlapping holds and releases each once', () => {
@@ -62,7 +62,7 @@ describe('holdPendingAsset', () => {
   });
 });
 
-describe('holdPendingAsset mount handoff', () => {
+describe('holdPendingAsset mount handoff (keyed)', () => {
   it('keeps the hold after a successful load until the model mounts', async () => {
     const tracker = createRenderTracker();
     const load = Promise.resolve();
@@ -77,6 +77,17 @@ describe('holdPendingAsset mount handoff', () => {
     expect(tracker.pending).toBe(0);
   });
 
+  it('a committed owner can take the hold over while the request is still pending', () => {
+    const tracker = createRenderTracker();
+    holdPendingAsset(tracker, new Promise(() => {}), 'a.glb');
+    expect(tracker.pending).toBe(1);
+    const owner = tracker.hold(); // the owner's own hold first, then the takeover: never 0 in between
+    confirmAssetMounted(tracker, 'a.glb');
+    expect(tracker.pending).toBe(1);
+    owner();
+    expect(tracker.pending).toBe(0);
+  });
+
   it('releases a failed load immediately', async () => {
     const tracker = createRenderTracker();
     const load = Promise.reject(new Error('GLB failed'));
@@ -85,16 +96,114 @@ describe('holdPendingAsset mount handoff', () => {
     expect(tracker.pending).toBe(0);
   });
 
-  it('releases an abandoned mount after the safety timeout', async () => {
+  it('one hold per key: retries of an instance add nothing, other instances of the same promise get their own', () => {
+    const tracker = createRenderTracker();
+    const load = new Promise<void>(() => {});
+    holdPendingAsset(tracker, load, 'a');
+    holdPendingAsset(tracker, load, 'a');
+    holdPendingAsset(tracker, load, 'b');
+    expect(tracker.pending).toBe(2);
+    confirmAssetMounted(tracker, 'a');
+    expect(tracker.pending).toBe(1);
+  });
+
+  it('an instance removed before React retried it releases RETRY_GRACE_MS after the load settled, never earlier', async () => {
     vi.useFakeTimers();
+    try {
+      const tracker = createRenderTracker();
+      let finish!: () => void;
+      const load = new Promise<void>((done) => { finish = done; });
+      holdPendingAsset(tracker, load, 'a.glb');
+      vi.advanceTimersByTime(RETRY_GRACE_MS * 5); // a slow request is never timed out
+      expect(tracker.pending).toBe(1);
+      finish();
+      await load;
+      vi.advanceTimersByTime(RETRY_GRACE_MS - 1);
+      expect(tracker.pending).toBe(1);
+      vi.advanceTimersByTime(1);
+      expect(tracker.pending).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('an instance that rendered again waits for its commit, and only warns+releases after the handoff timeout', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const tracker = createRenderTracker();
       const load = Promise.resolve();
       holdPendingAsset(tracker, load, 'a.glb');
       await load;
+      noteAssetRendered(tracker, 'a.glb');
+      vi.advanceTimersByTime(RETRY_GRACE_MS * 2);
       expect(tracker.pending).toBe(1);
       vi.advanceTimersByTime(MOUNT_HANDOFF_TIMEOUT_MS);
       expect(tracker.pending).toBe(0);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('a.glb'));
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('confirming cancels the timers (no late double release into a newer hold of the same key)', async () => {
+    vi.useFakeTimers();
+    try {
+      const tracker = createRenderTracker();
+      const load = Promise.resolve();
+      holdPendingAsset(tracker, load, 'a');
+      await load;
+      confirmAssetMounted(tracker, 'a');
+      expect(tracker.pending).toBe(0);
+      holdPendingAsset(tracker, new Promise(() => {}), 'a'); // the same instance loads again
+      vi.advanceTimersByTime(RETRY_GRACE_MS * 10);
+      expect(tracker.pending).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('holdUntilMounted (holodeck#58, #63)', () => {
+  it('holds until released, once, and releasing twice is a no-op', () => {
+    const tracker = createRenderTracker();
+    const release = holdUntilMounted(tracker, 'a.glb', () => {});
+    expect(tracker.pending).toBe(1);
+    release();
+    release();
+    expect(tracker.pending).toBe(0);
+  });
+
+  it('never reports ready on its own: past the timeout it warns and keeps holding', () => {
+    vi.useFakeTimers();
+    try {
+      const tracker = createRenderTracker();
+      const warn = vi.fn();
+      const release = holdUntilMounted(tracker, 'a.glb', warn);
+      vi.advanceTimersByTime(MOUNT_WARN_MS - 1);
+      expect(warn).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]![0]).toContain('a.glb');
+      expect(tracker.pending).toBe(1);
+      vi.advanceTimersByTime(MOUNT_WARN_MS * 10);
+      expect(tracker.pending).toBe(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      release(); // removal / mount still releases a long-held model
+      expect(tracker.pending).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('release cancels the pending warning', () => {
+    vi.useFakeTimers();
+    try {
+      const warn = vi.fn();
+      holdUntilMounted(createRenderTracker(), 'a.glb', warn)();
+      vi.advanceTimersByTime(MOUNT_WARN_MS * 2);
+      expect(warn).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

@@ -102,6 +102,42 @@ function Harness() {
         proto.mapAsync = original;
       }
     },
+    /**
+     * holodeck#191: the retry branch of `exportImage` with the editor MOUNTED.
+     * The first `changes` GPU readbacks each see a scene change (selection
+     * toggles, so the revision moves) while in flight; later ones are quiet.
+     * Two exports are queued so the release of the queue is observable.
+     * Waits on the revision attribute, not on timers.
+     */
+    async changeDuringReadbacks(changes: number) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const proto = (window as any).GPUBuffer.prototype;
+      const original = proto.mapAsync;
+      const revisionNow = () => document.querySelector('[data-holodeck-revision]')!.getAttribute('data-holodeck-revision');
+      let calls = 0;
+      let changed = 0;
+      proto.mapAsync = async function (this: unknown, ...args: unknown[]) {
+        calls++;
+        if (changed < changes) {
+          const before = revisionNow();
+          editorRef.current!.dispatch({ type: 'select', id: changed % 2 === 0 ? 'pump-1' : null });
+          changed++;
+          for (let frame = 0; revisionNow() === before; frame++) {
+            if (frame > 300) throw new Error('the scene change never produced a new revision');
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+          }
+        }
+        return original.apply(this, args);
+      };
+      try {
+        const settled = await Promise.allSettled([editorRef.current!.exportImage({ scale: 1 }), editorRef.current!.exportImage({ scale: 1 })]);
+        const describeResult = (r: PromiseSettledResult<{ tiles: number }>) =>
+          r.status === 'fulfilled' ? `ok:${r.value.tiles}` : `${(r.reason as Error).name}: ${(r.reason as Error).message}`;
+        return { changed, calls, results: settled.map(describeResult) };
+      } finally {
+        proto.mapAsync = original;
+      }
+    },
     select(id: string | null) {
       editorRef.current!.dispatch({ type: 'select', id });
     },

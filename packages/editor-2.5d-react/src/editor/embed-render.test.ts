@@ -139,6 +139,70 @@ describe.skipIf(!CHROMIUM)('ProcessEditor embedded in a host', () => {
     }
   }, 90_000);
 
+  it('a model removed while its GLB request is still pending stops holding the signal (holodeck#58)', async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      const logs = collectPageLog(page);
+      let requested!: () => void;
+      const glbRequested = new Promise<void>((resolve) => { requested = resolve; });
+      // The request is parked and never completes before the assertions: an abandoned load.
+      await page.route((url) => url.pathname.endsWith('/pump.glb') && !url.search.includes('import'), async (route) => {
+        requested();
+        await released;
+        await route.abort();
+      });
+      await page.goto(`${harness.origin}/embed.html?layout=box&canvas&directModel=removable&ownBoundary`);
+      const canvas = page.locator('[data-render-state]');
+      await canvas.waitFor();
+      await glbRequested;
+      await animationFrames(page, 10);
+      expect(await canvas.getAttribute('data-render-state'), logs.join('\n')).toBe('pending');
+      await page.evaluate(() => (window as any).__embed.removeModel());
+      // Ready without the request ever settling.
+      await waitForRendered(canvas, 15_000);
+      expect(await page.evaluate(() => (window as any).__embed.modelReady)).toBe(false);
+    } finally {
+      release();
+      await page.close();
+    }
+  }, 90_000);
+
+  for (const mode of ['', '&ownBoundary']) {
+    it(`a shared Suspense boundary with another suspended sibling keeps the signal pending until the GLB loads (${mode || 'default'}; GPT review of #197)`, async () => {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => { release = resolve; });
+      try {
+        let requested!: () => void;
+        const glbRequested = new Promise<void>((resolve) => { requested = resolve; });
+        await page.route((url) => url.pathname.endsWith('/pump.glb') && !url.search.includes('import'), async (route) => {
+          requested();
+          await released;
+          await route.continue();
+        });
+        await page.goto(`${harness.origin}/embed.html?layout=box&canvas&directModel&sibling${mode}`);
+        const canvas = page.locator('[data-render-state]');
+        await canvas.waitFor();
+        await glbRequested;
+        await animationFrames(page, 30);
+        expect(await canvas.getAttribute('data-render-state')).toBe('pending');
+        // The sibling resolving alone does not make the canvas ready: the GLB is still parked.
+        await page.evaluate(() => (window as any).__embed.releaseSibling());
+        await animationFrames(page, 30);
+        expect(await canvas.getAttribute('data-render-state')).toBe('pending');
+        release();
+        await waitForRendered(canvas);
+        expect(await page.evaluate(() => (window as any).__embed.modelReady)).toBe(true);
+        expect(await page.evaluate(() => (window as any).__embed.renderedBeforeModel)).toBe(false);
+      } finally {
+        release();
+        await page.close();
+      }
+    }, 90_000);
+  }
+
   it('fits the first placement in an initially empty document and reaches ready', async () => {
     const { page, editor } = await open('layout=flex&mode=edit&empty', { width: 1440, height: 900 });
     try {

@@ -139,6 +139,7 @@ describe.skipIf(!CHROMIUM)('editing UX in the editor (E3)', () => {
     try {
       const toScreen = await openTopDown(page, 'scene=editing');
       await clickCell(page, toScreen, 0, 0);
+      await settle(page);
       expect(await selected(page)).toBe('tank-a');
       // Edit > Cut fires only the 'cut' ClipboardEvent: no keydown reaches the editor.
       const written = await page.evaluate(() => {
@@ -152,7 +153,13 @@ describe.skipIf(!CHROMIUM)('editing UX in the editor (E3)', () => {
       expect((await sceneOf(page)).objects.some((o) => o.id === 'tank-a')).toBe(false);
 
       // Keyboard cut still deletes exactly once (keydown + its native cut event).
+      // holodeck#141: the menu-cut re-rendered the scene; wait for that frame to
+      // be presented before the next pointer click (a click on a stale picture
+      // can miss the tank), and fail on the click, not the cut, if it still does.
+      await settle(page);
       await clickCell(page, toScreen, 6, 0);
+      await page.waitForFunction(() => document.querySelector('[data-testid="process-editor"]')?.getAttribute('data-selected-ids') === 'tank-b');
+      expect(await selected(page)).toBe('tank-b');
       await page.keyboard.press('ControlOrMeta+x');
       await page.waitForFunction(() => (window as unknown as { __scene: IsoSceneFile }).__scene.objects.length === 2);
       await animationFrames(page, 10);
