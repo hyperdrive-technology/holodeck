@@ -20,7 +20,7 @@ export {
   MAX_URL_LENGTH,
   MAX_Z,
 } from './validate';
-export type { IsoLayer, IsoLink, IsoLinkEnd, IsoMetaValue } from './validate';
+export type { IsoLayer, IsoLink, IsoLinkEnd, IsoMetaValue, IsoPipeAttach, IsoPipeEnds } from './validate';
 export {
   connectorExtent,
   freeConnectorPath,
