@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { ContributionRegistry } from '@holodeck/sdk';
 import { useIsoParts } from '../registry/react';
 import type { IsoPartDefinition } from '../registry/types';
@@ -24,18 +24,74 @@ export function paletteGroups(
   return Array.from(groups, ([category, items]) => ({ category, items }));
 }
 
+/** Pointer travel (px) that turns a press on a palette item into a drag. */
+export const PALETTE_DRAG_THRESHOLD = 4;
+
+/**
+ * Drag a part from the palette onto the canvas (drag-and-drop building).
+ * Pointer events, not HTML5 drag and drop: during a native drag the browser
+ * stops sending pointer moves to the canvas, so the editor's own ghost (grid
+ * snap, port snap) could not follow the pointer. Past the threshold the part
+ * is armed (`onDragStart`, the same as a click); on release `onDrop` gets
+ * whether the pointer is over the canvas. A press that never moves stays a
+ * click (arm the tool for click-to-place).
+ */
+function usePaletteDrag(onDragStart?: (partId: string) => void, onDrop?: (partId: string, overCanvas: boolean) => void) {
+  const cleanup = useRef<(() => void) | null>(null);
+  useEffect(() => () => cleanup.current?.(), []);
+  return (event: ReactPointerEvent<HTMLElement>, partId: string) => {
+    if (event.button !== 0 || !onDragStart || !onDrop) return;
+    cleanup.current?.();
+    // Touch / pen capture the pointer to the pressed element implicitly; release
+    // it so moves reach the canvas under the finger.
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    const start = { x: event.clientX, y: event.clientY };
+    let active = false;
+    const move = (e: PointerEvent) => {
+      if (active || Math.hypot(e.clientX - start.x, e.clientY - start.y) < PALETTE_DRAG_THRESHOLD) return;
+      active = true;
+      onDragStart(partId);
+    };
+    const up = (e: PointerEvent) => {
+      cleanup.current?.();
+      if (!active) return;
+      const target = document.elementFromPoint(e.clientX, e.clientY);
+      onDrop(partId, target instanceof HTMLCanvasElement);
+    };
+    const cancel = () => {
+      cleanup.current?.();
+      if (active) onDrop(partId, false);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    cleanup.current = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      cleanup.current = null;
+    };
+  };
+}
+
 export function Palette({
   registry,
   placing,
   drawing,
   onPick,
+  onDragStart,
+  onDrop,
 }: {
   registry: ContributionRegistry;
   placing: string | null;
   drawing: boolean;
   onPick: (partId: string) => void;
+  /** Drag-and-drop from the palette (see `usePaletteDrag`); omit both to keep click-to-place only. */
+  onDragStart?: (partId: string) => void;
+  onDrop?: (partId: string, overCanvas: boolean) => void;
 }) {
   const [query, setQuery] = useState('');
+  const startDrag = usePaletteDrag(onDragStart, onDrop);
   const parts = useIsoParts(registry);
   const groups = useMemo(() => paletteGroups(parts, query), [parts, query]);
   return (
@@ -67,8 +123,8 @@ export function Palette({
                 <button
                   key={item.id}
                   type="button"
-                  draggable
-                  onDragStart={() => onPick(item.id)}
+                  data-part={item.id}
+                  onPointerDown={(event) => startDrag(event, item.id)}
                   onClick={() => onPick(item.id)}
                   style={{
                     display: 'block',

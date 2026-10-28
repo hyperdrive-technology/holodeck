@@ -490,6 +490,19 @@ export function ProcessEditor({
     if (moveFrame.current !== null) cancelAnimationFrame(moveFrame.current);
   }, []);
 
+  // Palette drag-and-drop: the drag armed the part (place mode), the canvas
+  // ghost followed the pointer; releasing over the canvas stamps one part at
+  // the ghost and returns to the select tool with it selected. Released
+  // anywhere else, the drag is cancelled. Run parts (pipe) only arm their
+  // tool: a pipe is drawn click-click.
+  const dropFromPalette = useCallback((partId: string, overCanvas: boolean) => {
+    const s = stateRef.current;
+    if (s.mode === 'draw-pipe') return;
+    if (s.mode !== 'place' || s.placing !== partId) return;
+    if (overCanvas && s.cursor) dispatch({ type: 'floor-click', x: s.cursor.x, y: s.cursor.y });
+    dispatch({ type: 'select-mode' });
+  }, []);
+
   useImperativeHandle(
     editorRef,
     () => ({
@@ -937,6 +950,8 @@ export function ProcessEditor({
                         placing={state.placing}
                         drawing={state.mode === 'draw-pipe'}
                         onPick={(id) => dispatch({ type: 'place-mode', object: id })}
+                        onDragStart={(id) => dispatch({ type: 'place-mode', object: id })}
+                        onDrop={dropFromPalette}
                       />
                     ) : (
                       <LayersPanel scene={state.scene} activeLayer={state.activeLayer} hasSelection={state.selectedIds.length > 0} onAction={act} />

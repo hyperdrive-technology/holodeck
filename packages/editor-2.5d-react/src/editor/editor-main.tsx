@@ -49,6 +49,21 @@ function followScene(): IsoSceneFile {
 }
 
 /**
+ * `?scene=palette`: tank a with a pipe stub on its east port ending free at
+ * (6, 0), for dragging a tank from the palette onto that free end.
+ */
+function paletteScene(): IsoSceneFile {
+  return {
+    ...emptyScene('palette'),
+    objects: [
+      { id: 'tank-a', object: 'tank', x: 0, y: 0, height: 3.05, params: { level: 0.6 } },
+      { id: 'stub', object: 'pipe', x: 1, y: 0, toX: 6, toY: 0, band: '#e74c3c' },
+      { id: 'tank-c', object: 'tank', x: 4, y: 5, height: 3.05, params: { level: 0.4 } },
+    ],
+  };
+}
+
+/**
  * `?image=<url>`: add an `image` placement (width 2, `height` from
  * `?imageHeight=`, default 0 = keep the loaded aspect) at grid (3, -10), for
  * the late-aspect refit browser test (holodeck#108 / #127).
@@ -67,6 +82,7 @@ function initialScene(): IsoSceneFile {
 function baseScene(): IsoSceneFile {
   if (params.get('scene') === 'editing') return editingScene();
   if (params.get('scene') === 'follow') return followScene();
+  if (params.get('scene') === 'palette') return paletteScene();
   if (params.get('scene') !== 'routing') {
     return PROCESS_SCENE;
   }

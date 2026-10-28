@@ -24,6 +24,12 @@ groups (`placement.group`, Mod+G), z-order (Mod+`[` / `]`), layers (`scene.layer
 click a part, port or cell, then another; drag a selected connector's end handles to
 re-anchor; "+" midpoint handles add waypoints, double-click removes one). Every edit is one undo step. Press `?` for the shortcut list (`editor/shortcuts.ts`).
 
+Drag-and-drop building: dragging or nudging a vessel re-routes the pipes attached to its
+ports live (a run between two moved vessels is translated), as one undo step; Esc cancels the
+drag, Alt moves the part alone. Parts can be dragged from the palette onto the canvas, and a
+port dropped next to a free pipe end snaps onto it. Pipe ends record what they connect to in
+`placement.attach` (inferred for older scenes). Design notes: [docs/routing.md](docs/routing.md#pipes-follow-a-dragged-part-drag-and-drop-building).
+
 ### Host props (Studio, holodeck#100)
 
 ```tsx

@@ -22,6 +22,7 @@ import { stamp, type EditorState, type LinkEndName, type ResizeHandle } from './
 import { canInsertWaypoint, connectorEndPoint, linkEndPoint, waypointInsertHandles } from './connect';
 import { isPlacementEditable, visibleObjects } from './layers';
 import { isClickSized, marqueeHits, rectFromPoints, type ScreenRect } from './marquee';
+import { freePipeEnds, snapNewPlacement } from './port-snap';
 
 /** Raycast override for meshes the pointer must see through (previews, a handle being dragged). */
 const NO_RAYCAST = () => undefined;
@@ -242,7 +243,7 @@ export function EditorLayer({
           : null}
       </group>
       {!readOnly && state.mode === 'place' && state.placing && state.cursor ? (
-        <Ghost kind={state.placing} x={state.cursor.x} y={state.cursor.y} registry={registry} />
+        <Ghost kind={state.placing} x={state.cursor.x} y={state.cursor.y} registry={registry} objects={state.scene.objects} />
       ) : null}
       {!readOnly && state.drag && state.drag.blocked.length > 0 ? <BlockedRunsPreview blocked={state.drag.blocked} /> : null}
       {!readOnly && state.mode === 'draw-pipe' && state.pipeStart && state.cursor ? (
@@ -258,26 +259,36 @@ export function EditorLayer({
   );
 }
 
+/**
+ * The part about to be placed (place tool / palette drag), where a click or
+ * drop would put it: the cursor cell, pulled onto a free pipe end when one of
+ * its ports is close (port-snap.ts; placeAt applies the same snap). Free ends
+ * are computed once per scene, not per pointer move.
+ */
 function Ghost({
   kind,
   x,
   y,
   registry,
+  objects,
 }: {
   kind: NonNullable<EditorState['placing']>;
   x: number;
   y: number;
   registry: ContributionRegistry;
+  objects: readonly IsoPlacement[];
 }) {
-  const [wx, , wz] = gridToWorld(x, y);
+  const ends = useMemo(() => freePipeEnds(objects, registry), [objects, registry]);
+  const ghost = useMemo(() => snapNewPlacement(stamp(registry, kind, x, y, '__ghost'), objects, registry, ends), [registry, kind, x, y, objects, ends]);
+  const [wx, , wz] = gridToWorld(ghost.x, ghost.y);
   const { w, h } = footprint(registry, kind);
   return (
-    <group>
+    <group name="place-ghost">
       <mesh position={[wx, 0.04, wz]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[w, h]} />
         <meshBasicMaterial color="#18BAE6" transparent opacity={0.28} />
       </mesh>
-      <SceneObjectView object={stamp(registry, kind, x, y, '__ghost')} registry={registry} />
+      <SceneObjectView object={ghost} registry={registry} />
     </group>
   );
 }

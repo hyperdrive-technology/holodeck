@@ -52,8 +52,8 @@ function looseEnds(objects: IsoPlacement[]): string[] {
   return out;
 }
 
-async function open(page: Page, topDown: boolean): Promise<GridToScreen> {
-  await page.goto(`${harness.origin}/editor.html?scene=follow`);
+async function open(page: Page, topDown: boolean, scene = 'follow'): Promise<GridToScreen> {
+  await page.goto(`${harness.origin}/editor.html?scene=${scene}`);
   await page.getByTestId('process-editor').waitFor();
   await waitForRendered(page);
   if (topDown) {
@@ -180,6 +180,61 @@ describe.skipIf(!CHROMIUM)('pipes follow a dragged vessel (browser)', () => {
       await settle(page);
       await page.screenshot({ path: path.join(shots, 'follow-iso-after.png'), type: 'png' });
       expect(looseEnds(await committed(page))).toEqual([]);
+      expect(log.filter((l) => l.startsWith('pageerror'))).toEqual([]);
+    } finally {
+      await browser.close();
+    }
+  }, 180_000);
+
+  it('drags a tank from the palette onto a free pipe end: ghost follows, port snaps, the pipe then follows it', async () => {
+    const browser = await launchRenderBrowser();
+    const page = await browser.newPage({ viewport: { width: 1280, height: 760 } });
+    const log = collectPageLog(page);
+    try {
+      const toScreen = await open(page, true, 'palette');
+      const item = page.locator('button[data-part="tank"]');
+      const box = (await item.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      // Off the item and across the canvas: past the threshold the tank is armed and its ghost follows.
+      const target = toScreen(7.5, 0.5);
+      await page.mouse.move(target.x, target.y, { steps: 12 });
+      await moveToCell(page, toScreen, 7.5, 0.5);
+      await animationFrames(page, 3);
+      const armed = await page.evaluate(() => (window as unknown as Win).__editor.getState());
+      expect(armed.mode).toBe('place');
+      expect(armed.placing).toBe('tank');
+      await settle(page);
+      await page.screenshot({ path: path.join(shots, 'palette-drag-ghost.png'), type: 'png' });
+      await page.mouse.up();
+      await page.waitForFunction(() => (window as unknown as Win).__scene.objects.some((o) => o.id === 'tank-1'));
+      const placed = (await committed(page)).find((o) => o.id === 'tank-1')!;
+      // Cursor (7.5, 0.5); the west port snapped onto the stub's free end at (6, 0).
+      expect(placed).toMatchObject({ x: 7, y: 0 });
+      const after = await page.evaluate(() => (window as unknown as Win).__editor.getState());
+      expect(after.mode).toBe('select');
+      expect(after.selectedIds).toEqual(['tank-1']);
+
+      // The stub is attached now: dragging the new tank re-routes it from tank-a.
+      await dragFrom(page, toScreen, [7, 0], [6, 3]);
+      await page.waitForFunction(() => (window as unknown as Win).__scene.objects.find((o) => o.id === 'tank-1')!.y === 3);
+      const moved = await committed(page);
+      expect(looseEnds(moved)).toEqual([]);
+      expect(pipes(moved).some((p) => p.toX === 5 && p.toY === 3)).toBe(true);
+      await page.mouse.move(5, 5);
+      await settle(page);
+      await page.screenshot({ path: path.join(shots, 'palette-drop-follow.png'), type: 'png' });
+
+      // A palette drag released off the canvas places nothing and drops the tool.
+      const count = (await committed(page)).length;
+      const valve = (await page.locator('button[data-part="valve"]').boundingBox())!;
+      await page.mouse.move(valve.x + valve.width / 2, valve.y + valve.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(valve.x + valve.width / 2 + 40, valve.y + valve.height / 2 + 30, { steps: 4 });
+      await page.mouse.up();
+      await animationFrames(page, 2);
+      expect((await committed(page)).length).toBe(count);
+      expect((await page.evaluate(() => (window as unknown as Win).__editor.getState())).mode).toBe('select');
       expect(log.filter((l) => l.startsWith('pageerror'))).toEqual([]);
     } finally {
       await browser.close();

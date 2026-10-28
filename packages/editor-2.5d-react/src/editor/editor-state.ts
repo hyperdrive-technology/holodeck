@@ -8,6 +8,7 @@ import { withPipeAttach } from '../routing/attach';
 import { isPipePlacement, withAttachment } from '../routing/inline';
 import { findRun, isInlinePart } from '../routing/run';
 import { applyFollow, blockedNotice, FOLLOW_BLOCKED_NOTICE, FOLLOW_PARTS_NOTICE, FOLLOW_CANCELLED_NOTICE, FOLLOW_LOCKED_NOTICE, FOLLOW_SNAPPED_NOTICE, followsAnything, planFollow, sameObjects, type BlockedRun, type FollowPlan } from './follow';
+import { moveSnapTargets, snapMoveDelta, snapNewPlacement, type MoveSnapTargets } from './port-snap';
 import { replanRun } from './replan';
 import { routeToPlacements, type GridPoint } from './routing';
 import { sameCell } from './snap';
@@ -102,6 +103,8 @@ export interface EditorState {
     valid: IsoPlacement[] | null;
     /** Runs that cannot follow at the current frame, with the ghost to draw. */
     blocked: BlockedRun[];
+    /** Port / free pipe end pairs the move can snap together (port-snap.ts); with `plan`. */
+    snap?: MoveSnapTargets;
   } | null;
   /**
    * Live resize drag (radius / height handle). `param` is the number param
@@ -324,7 +327,8 @@ function placeAt(state: EditorState, x: number, y: number): EditorState {
     return state;
   }
   const id = nextId(state.placing, state.scene.objects);
-  const stamped = stamp(state.registry, state.placing, x, y, id);
+  // A port dropped next to a free pipe end lands on it (port-snap.ts), so the pipe attaches.
+  const stamped = snapNewPlacement(stamp(state.registry, state.placing, x, y, id), state.scene.objects, state.registry);
   // A single-node part dropped inside a pipe records that pipe (holodeck#22).
   const added = withLayer(
     isInlinePart(stamped, state.registry) ? withAttachment(stamped, state.scene.objects) : stamped,
@@ -661,13 +665,16 @@ function dragMove(state: EditorState, x: number, y: number, detach: boolean): Ed
   const editable = (o: IsoPlacement) => isPlacementEditable(state.scene, o);
   const moving = new Set([drag.id, ...drag.others.map((o) => o.origin.id)]);
   const plan = drag.plan ?? planFollow(drag.base, state.registry, moving, editable);
-  const snap = followsAnything(plan) && !detach;
-  const dx = snap ? Math.round(x - drag.grab.x) : x - drag.grab.x;
-  const dy = snap ? Math.round(y - drag.grab.y) : y - drag.grab.y;
+  const targets = drag.snap ?? moveSnapTargets(drag.base, state.registry, moving, new Set(plan.runs.flatMap((r) => r.run.ids)));
+  const whole = followsAnything(plan) && !detach;
+  let dx = whole ? Math.round(x - drag.grab.x) : x - drag.grab.x;
+  let dy = whole ? Math.round(y - drag.grab.y) : y - drag.grab.y;
+  // A port within a cell of a free pipe end snaps onto it (Alt: no snapping, like most editors).
+  if (!detach) ({ x: dx, y: dy } = snapMoveDelta(targets, state.registry, dx, dy));
   const key = `${dx},${dy},${detach ? 1 : 0}`;
   const cursor = { x, y };
   if (key === drag.key) {
-    return drag.plan ? { ...state, cursor } : { ...state, cursor, drag: { ...drag, plan } };
+    return drag.plan ? { ...state, cursor } : { ...state, cursor, drag: { ...drag, plan, snap: targets } };
   }
   const clearOurs = state.notice !== null && FOLLOW_FRAME_NOTICES.has(state.notice) ? null : state.notice;
   if (plan.locked && !detach && (dx !== 0 || dy !== 0)) {
@@ -677,7 +684,7 @@ function dragMove(state: EditorState, x: number, y: number, detach: boolean): Ed
       ...state,
       cursor,
       scene: { ...state.scene, objects: drag.base },
-      drag: { ...drag, plan, key, blocked: [] },
+      drag: { ...drag, plan, snap: targets, key, blocked: [] },
       notice: FOLLOW_LOCKED_NOTICE,
     };
   }
@@ -688,7 +695,7 @@ function dragMove(state: EditorState, x: number, y: number, detach: boolean): Ed
     ...state,
     cursor,
     scene: { ...state.scene, objects: frame.objects },
-    drag: { ...drag, plan, key, blocked: frame.blocked, valid: routed ? frame.objects : drag.valid },
+    drag: { ...drag, plan, snap: targets, key, blocked: frame.blocked, valid: routed ? frame.objects : drag.valid },
     notice: routed ? clearOurs : blockedNotice(frame.blocked),
   };
 }

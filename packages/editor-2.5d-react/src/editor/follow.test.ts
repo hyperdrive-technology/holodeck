@@ -348,3 +348,42 @@ describe('planFollow', () => {
     expect(fixed.heading).toBe('n');
   });
 });
+
+describe('mid-pipe tees pin the run (splitAtMidTees)', () => {
+  // `main` runs (0,0) -> (10,0) into b's west port; `branch` tees into its middle at (5,0) without a joint.
+  const teed = (extra: IsoPlacement[] = []) => createEditorState(sceneOf([
+    tank('b', 11, 0),
+    { ...pipe('main', 0, 0, 10, 0), band: '#00aa00', meta: { tag: 'M-1' } },
+    pipe('branch', 5, 0, 5, -4),
+    ...extra,
+  ]));
+
+  it('only the section between the moved port and the tee re-routes; the tee and the far side stay', () => {
+    const s = run(teed(), { type: 'drag-start', id: 'b', x: 11, y: 0 }, { type: 'drag-move', x: 11, y: 3 }, { type: 'drag-end' });
+    expect(byId(s, 'main')).toMatchObject({ x: 0, y: 0, toX: 5, toY: 0, band: '#00aa00', meta: { tag: 'M-1' } });
+    expect(byId(s, 'branch')).toMatchObject({ x: 5, y: 0, toX: 5, toY: -4 });
+    const fromTee = pipesOf(s).filter((p) => p.x === 5 && p.y === 0 && p.id !== 'branch');
+    expect(fromTee).toHaveLength(1);
+    expect(fromTee[0]!.band).toBe('#00aa00');
+    expect(fromTee[0]!.meta).toBeUndefined(); // identity bags stay on the original id
+    expect(pipesOf(s).some((p) => p.toX === 10 && p.toY === 3)).toBe(true);
+    expect(endsConnected(s.scene.objects)).toEqual(['main.from', 'branch.to']); // the two authored free ends, nothing new
+  });
+
+  it('riders keep the piece they sit on; undo restores the unsplit pipe', () => {
+    const s0 = teed([{ id: 'v1', object: 'valve', x: 2, y: 0, onPipe: 'main', at: 0.2 }, { id: 'v2', object: 'valve', x: 8, y: 0, onPipe: 'main', at: 0.8 }]);
+    const s = run(s0, { type: 'drag-start', id: 'b', x: 11, y: 0 }, { type: 'drag-move', x: 11, y: 3 }, { type: 'drag-end' });
+    expect(byId(s, 'v1')).toMatchObject({ x: 2, y: 0, onPipe: 'main' });
+    const v2 = byId(s, 'v2')!;
+    expect(v2.onPipe).not.toBe('main');
+    expect(positionOnPipe(segOf(byId(s, v2.onPipe!)!), v2.x, v2.y)).not.toBeNull();
+    expect(run(s, { type: 'undo' }).scene.objects).toEqual(s0.scene.objects);
+  });
+
+  it('an Alt-drag never splits anything', () => {
+    const s0 = teed();
+    const s = run(s0, { type: 'drag-start', id: 'b', x: 11, y: 0 }, { type: 'drag-move', x: 11, y: 3, detach: true }, { type: 'drag-end' });
+    expect(pipesOf(s)).toEqual(pipesOf(s0));
+  });
+});
+
