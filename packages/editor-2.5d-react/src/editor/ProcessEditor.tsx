@@ -455,6 +455,41 @@ export function ProcessEditor({
   const stateRef = useRef(state);
   stateRef.current = state;
 
+  // Move-drag frames re-route attached pipes (follow.ts), so they are
+  // coalesced to one dispatch per animation frame: only the latest pointer
+  // position is applied. The drop flushes a pending frame first so it lands
+  // exactly where the pointer was released. (`@tanstack/pacer` is not a
+  // dependency of this package; see the note in EditorLayer.tsx.)
+  const pendingMove = useRef<{ x: number; y: number; detach: boolean } | null>(null);
+  const moveFrame = useRef<number | null>(null);
+  const altHeld = useRef(false);
+  const flushDragMove = useCallback(() => {
+    if (moveFrame.current !== null) {
+      cancelAnimationFrame(moveFrame.current);
+      moveFrame.current = null;
+    }
+    const move = pendingMove.current;
+    pendingMove.current = null;
+    if (move) dispatch({ type: 'drag-move', ...move });
+  }, []);
+  const queueDragMove = useCallback((x: number, y: number, detach = false) => {
+    altHeld.current = detach;
+    pendingMove.current = { x, y, detach };
+    if (moveFrame.current === null) {
+      moveFrame.current = requestAnimationFrame(() => {
+        moveFrame.current = null;
+        flushDragMove();
+      });
+    }
+  }, [flushDragMove]);
+  const endDrag = useCallback(() => {
+    flushDragMove();
+    dispatch({ type: 'drag-end' });
+  }, [flushDragMove]);
+  useEffect(() => () => {
+    if (moveFrame.current !== null) cancelAnimationFrame(moveFrame.current);
+  }, []);
+
   useImperativeHandle(
     editorRef,
     () => ({
@@ -645,7 +680,20 @@ export function ProcessEditor({
 
   useEffect(() => {
     if (!keyboard) return;
+    // Pressing / releasing Alt mid-drag switches follow <-> detach without waiting for the pointer to move.
+    const toggleDetach = (detach: boolean) => {
+      const s = stateRef.current;
+      if (!s.drag || !s.cursor || altHeld.current === detach) return;
+      altHeld.current = detach;
+      pendingMove.current = null;
+      dispatch({ type: 'drag-move', x: s.cursor.x, y: s.cursor.y, detach });
+    };
     const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Alt') {
+        if (stateRef.current.drag) event.preventDefault(); // no menu-bar focus on Windows mid-drag
+        toggleDetach(true);
+        return;
+      }
       const inField = Boolean((event.target as HTMLElement | null)?.closest?.('input, textarea, select, [contenteditable="true"]'));
       if (event.code === 'Space') {
         if (inField) return;
@@ -689,6 +737,7 @@ export function ProcessEditor({
       if (runShortcut(shortcut.id) && !native) event.preventDefault();
     };
     const onUp = (event: KeyboardEvent) => {
+      if (event.key === 'Alt') toggleDetach(false);
       if (event.code === 'Space') {
         setSpacePan(false);
       }
@@ -967,8 +1016,8 @@ export function ProcessEditor({
                 onCursor={(x, y) => dispatch({ type: 'cursor', x, y })}
                 onFloorClick={(x, y) => dispatch({ type: 'floor-click', x, y })}
                 onDragStart={(id, x, y) => dispatch({ type: 'drag-start', id, x, y })}
-                onDragMove={(x, y) => dispatch({ type: 'drag-move', x, y })}
-                onDragEnd={() => dispatch({ type: 'drag-end' })}
+                onDragMove={queueDragMove}
+                onDragEnd={endDrag}
                 onResizeStart={(id, handle) => dispatch({ type: 'resize-start', id, handle })}
                 onResizeMove={(value) => dispatch({ type: 'resize-move', value })}
                 onResizeEnd={() => dispatch({ type: 'resize-end' })}
