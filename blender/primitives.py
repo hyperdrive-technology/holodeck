@@ -251,6 +251,22 @@ _AXES = {"+x": ((0, 0, math.pi / 2), (1, 0, 0)), "-x": ((0, 0, math.pi / 2), (-1
          "+y": ((0, 0, 0), (0, 1, 0)), "-y": ((0, 0, 0), (0, -1, 0))}
 
 
+def ring(name, radius, length, mat, position_t, rotation_t=(0, 0, 0), seg=12):
+    """Short closed cylinder band: a flange ring, lid rim or collar. Same
+    facet count as the drum/stub it sits on so the meridians line up; its
+    two 90 deg edges outline as the band's top and bottom lines."""
+    return hd.cylinder(name, radius, radius, length, seg, mat, position_t=position_t, rotation_t=rotation_t)
+
+
+def collar(name, drum_r, y_bottom, height, mat, scale=1.08, seg=12, yaw=0.0):
+    """Base collar around a vertical drum (e.g. a motor housing on a dome):
+    a band `scale` x wider than the drum from `y_bottom` up `height`. Sink
+    `y_bottom` a little below the surface it sits on so the band's lower
+    edge disappears into it and only the top edge outlines (the reference
+    mixer cap reads as drum + top rim + wider base band)."""
+    return ring(name, drum_r * scale, height, mat, (0, y_bottom + height / 2, 0), (0, yaw, 0), seg)
+
+
 def nozzle_with_flange(name, start_t, axis, length, mat, radius=0.05, flange_scale=1.32, flange_len=0.02, seg=12):
     """Slim pipe stub from `start_t` along `axis` ('+x', '-z', ...) with a flange
     RING at the free end, perpendicular to the stub, in the scene pipes'
@@ -261,8 +277,7 @@ def nozzle_with_flange(name, start_t, axis, length, mat, radius=0.05, flange_sca
     hd.cylinder(name, radius, radius, length, seg, mat, position_t=c, rotation_t=rot)
     end = tuple(s + di * length for s, di in zip(start_t, d))
     fc = tuple(e - di * flange_len / 2 for e, di in zip(end, d))
-    hd.cylinder(f"{name}.flange", radius * flange_scale, radius * flange_scale, flange_len, seg, mat,
-                position_t=fc, rotation_t=rot)
+    ring(f"{name}.flange", radius * flange_scale, flange_len, mat, fc, rot, seg)
     return end
 
 
