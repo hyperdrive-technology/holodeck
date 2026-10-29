@@ -22,7 +22,12 @@ export const AGITATOR_ANIM_NODE = 'anim.agitator';
 const HAT_EDGE_THRESHOLD = 20;
 
 /**
- * Agitator pieces shared by `Mixer` and the base `Tank` (`agitator` param):
+ * @deprecated since 2026-10-30: `Tank` draws agitated vessels as mixer.glb
+ * (`AgitatedVessel`), which has its own `anim.agitator`. Kept exported (with
+ * `AGITATOR_ANIM_NODE`, which core's brewery pack binds its spin to) for
+ * hosts that compose a procedural agitator themselves.
+ *
+ * Agitator pieces formerly shared by `Mixer` and the base `Tank` (`agitator` param):
  * a round drive hat (neck + drum + cover plate) on the top apex, a shaft from
  * the hat down into the liquid, and a hub with three pitched blades. The
  * shaft ends inside the hub (`mixerShaftLayout`), so the impeller can never
