@@ -94,3 +94,21 @@ Parameter history moved out of `.agents/TODO.md` (2026-10-13) so the backlog sta
 - rpm 432/314
 - rpm-val 536/338
 - liquid closed flask 2π + flat waterline
+
+## Batch 5 — Interior rings, mixer agitator, flange rotation (Des review 2026-10-29)
+
+- Reverses Batch 3's "no lines inside the window": inner back-wall rings (bottom rim, `TANK_INTERIOR_HOOPS` 2 hoops, top rim) on the back arc only (`interiorRingArc` = window arc + π, margin 0.08 rad); horizontal only, no meridians / wire cage
+- rings follow the liner facets (`facetedRadiusAt`) vs smooth circle at 0.995 r (hid behind each flat facet → dashed ring)
+- tank liquidOpacity 0.8 (depthWrite on) vs solid 1 (hid the rings below the waterline) / 0.88 depthWrite off (flask back faces printed through)
+- mixer liquidOpacity 0.72 vs 0.84 (shaft + impeller vanished below the waterline)
+- mixer hat: round 24-gon drum (aspect 0.72 × radius) + neck sunk 0.03 into the dome + cover plate 1.04 r vs squat 8-gon puck; aspect 0.9 sat tall
+- impeller: hub (2.2 × shaft r) + 3 pitched paddles (π/5, chord 3.5 × impellerRadius) vs round 4-gon bars ("stray orange sticks")
+- impeller height fixed: dome apex − shaftLength × H, clamped ≥ 0.16 H above the floor, shaft ends in the hub vs fill × 0.38 (floated off the shaft, rode the waterline)
+- MIXER_SHAFT_LENGTH 0.9 (apex → hub) vs 0.77 (lid → old blades); MIXER_IMPELLER_SPAN 0.7 vs 0.36 (tiny star as blades)
+- shaft #8c9196, blades #c9cdd1 + edges vs #666 (vanished in the liquid)
+- mash tun = mixer bottle body (MIXER_BODY_PRESET) R 1.0 × H 2.5 on 0.22 legs vs squat 1.7 dish-bottom can; Mixer part and mash tun share `Tank` + `TankAgitator` (Mixer no longer draws its own agitator)
+- legs yaw 0 (pairs either side of the camera axis) vs π/4 (one leg dead centre under the cutaway); legs on a heel stop at the heel surface at their inner edge (higher poked through into the window)
+- whirlpool nozzle: shared pipe geometry (`tankNozzleGeometry`, flange = routed-pipe flange) posed by `tankNozzlePose` quaternion vs group yaw + X-cylinder roll; runs −tangent from a foot 0.32 rad past the jamb, buried 1 r + 0.03 R inside the shell; nozzle r 0.08 R vs 0.06 R
+- nozzle rejected: +tangent at 0.38 (axis 23° off camera → round face on a long pipe read as a twisted flange), +tangent at 0.2 (still a bolt end-on), −tangent tangent-outside (capped stub floating at the jamb), foot 0.04 / 0.24 (foot showed through the window), chord depth 0.5 (near end poked out)
+- steam nut Euler [π/6, 0, −π/2] XYZ vs [π/6, π/12, −π/2] (π/12 yawed the nut 15° off its +X run)
+- fidelity (system Chrome 15x, same build reproduces the darwin record 0.16487 on main): 0.18745 vs 0.16487
