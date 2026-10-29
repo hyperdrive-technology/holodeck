@@ -1,4 +1,5 @@
-import { BufferGeometry, CylinderGeometry, LatheGeometry, Vector2 } from 'three';
+import { BufferGeometry, LatheGeometry, Vector2 } from 'three';
+import { flangeRingGeometry } from './flange';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   PIPE_FLANGE_LEN,
@@ -96,9 +97,7 @@ export function buildPipeGeometry({
   profile.push(new Vector2(radius, len / 2), new Vector2(style.to === 'cut' ? inner : 0, len / 2));
   const parts: BufferGeometry[] = [new LatheGeometry(profile, sides)];
   const ring = (y: number, scale: number, ringLen: number) => {
-    const g = new CylinderGeometry(radius * scale, radius * scale, ringLen, sides);
-    g.translate(0, y, 0);
-    parts.push(g);
+    parts.push(flangeRingGeometry({ radius, scale, length: ringLen, sides, y }));
   };
   if (style.from === 'flange') ring(-len / 2, flangeScale, flangeLen);
   if (style.to === 'flange') ring(len / 2, flangeScale, flangeLen);
@@ -139,18 +138,3 @@ export function buildPipeBoreGeometry({
   return merged;
 }
 
-/**
- * A vessel's side nozzle: a short pipe run along local +Y, plain at -Y (it
- * starts inside the shell) and flanged at +Y, with the routed pipes' flange
- * proportions scaled to the nozzle radius (PIPE_FLANGE_LEN is sized for
- * PIPE_RADIUS). Shared geometry means the nozzle flange is the same ring as
- * every pipe flange, perpendicular to the run by construction.
- */
-export function tankNozzleGeometry(length: number, radius: number): BufferGeometry {
-  return buildPipeGeometry({
-    length,
-    radius,
-    ends: { from: 'plain', to: 'flange' },
-    flangeLen: PIPE_FLANGE_LEN * (radius / PIPE_RADIUS) * 1.6,
-  });
-}

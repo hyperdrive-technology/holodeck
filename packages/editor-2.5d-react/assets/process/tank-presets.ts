@@ -6,7 +6,6 @@ import {
   MIXER_INNER_RATIO,
   MIXER_LINER_COLOR,
   MIXER_LINER_RATIO,
-  MIXER_LIQUID_OPACITY,
   MIXER_IMPELLER_RADIUS,
   MIXER_IMPELLER_SPAN,
   MIXER_OUTER_BOWL,
@@ -49,9 +48,6 @@ export interface TankPreset {
  */
 export const AGITATOR_PRESET: Partial<TankParams> = {
   agitator: true,
-  // Translucent so the shaft + impeller read through the liquid; the flask still writes depth,
-  // so only its front surface blends (nothing behind it prints through as mesh lines).
-  liquidOpacity: MIXER_LIQUID_OPACITY,
   capHeightRatio: MIXER_CAP_HEIGHT_RATIO,
   capRadiusRatio: MIXER_CAP_RADIUS_RATIO,
   capLidThickness: MIXER_CAP_LID_THICKNESS,

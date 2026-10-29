@@ -82,3 +82,31 @@ export function setEdgeLinesAppearance(
   if (color !== undefined) material.color.set(color);
   if (lineWidth !== undefined) material.linewidth = lineWidth;
 }
+
+/**
+ * Fat line segments from raw positions (x,y,z pairs), e.g. a vessel's
+ * meridians and rim rings computed in tank-params.ts. Same Line2 material
+ * as the edges, so cage lines and creases have one weight and colour.
+ */
+export function createLineSet(
+  positions: Float32Array | null,
+  { color, lineWidth, material }: Omit<EdgeLineOptions, 'threshold'> = {},
+): LineSegments2 {
+  const segments = new LineSegmentsGeometry();
+  segments.instanceCount = 0;
+  const line = new LineSegments2(segments, material ?? createEdgeMaterial({ color, lineWidth }));
+  line.raycast = () => {};
+  if (positions) setLineSetPositions(line, positions);
+  return line;
+}
+
+/** Replace a line set's segments (`positions` = x,y,z pairs; fewer than two points empties it). */
+export function setLineSetPositions(line: LineSegments2, positions: Float32Array): void {
+  const segments = line.geometry as LineSegmentsGeometry;
+  if (positions.length >= 6) {
+    segments.setPositions(positions);
+    line.computeLineDistances();
+  } else {
+    segments.instanceCount = 0;
+  }
+}

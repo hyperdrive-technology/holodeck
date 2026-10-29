@@ -205,13 +205,14 @@ export function annotationStyle(style: HolodeckStyle): AnnotationStyle {
 /**
  * Default liquid finish. Opacity history (Tank liquidOpacity before the
  * token): 0.69 with depthWrite on printed flask meridians; 1 (solid) hid the
- * interior rings; 0.84 hid the agitator. 0.62 with depthWrite off is the
- * reference's light see-through fill: back-wall lines and blades read
- * through, the colour still reads as liquid.
+ * interior rings; 0.84 hid the agitator. With depthWrite off: 0.62 read
+ * dull blue-grey over the shaded liner vs reference.jpg's bright cyan; 0.78
+ * keeps the colour while back-wall lines, bowl lines and blades still read
+ * through (and scores better on the Arcentry fidelity gate).
  */
 export const LIQUID_FINISH: LiquidFinish = {
   kind: 'liquid',
-  opacity: 0.62,
+  opacity: 0.78,
   renderOrder: 2,
   depthWrite: false,
   offset: false,

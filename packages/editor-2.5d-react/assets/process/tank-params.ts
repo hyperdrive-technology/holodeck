@@ -1,5 +1,5 @@
 import { Color, Quaternion, Vector3 } from 'three';
-import { HOLODECK_STYLE } from './style';
+import { HOLODECK_STYLE, LIQUID_FINISH } from './style';
 
 /** Legacy cap prop on `<Tank cap>`; maps onto `TankTop` ('flat' = flat lid with a hatch). */
 export type TankCap = 'dome' | 'flat';
@@ -19,7 +19,7 @@ export const TANK_SUPPORTS: readonly TankSupport[] = ['none', 'legs', 'skirt'];
 
 /** Holding / ingredient flask. 0.9 filled the silo like a pie vs r-holdbody's inset U.
  *  0.8 / 0.76 were still a tad wide in o-holdbody after the lathe flask. */
-export const TANK_INNER_RATIO = 0.74;
+export const TANK_INNER_RATIO = 0.9;
 
 /** Holding flask U sits on the floor. −0.2 put the hemisphere equator at the
  *  tank bottom so fill 0.21 read as a ball vs r-holdbody's bottle. */
@@ -36,12 +36,35 @@ export const TANK_BODY_RINGS = 0;
  * rim, seen through the cutaway (reference.jpg: the holding / ingredient
  * tanks show their inner rim and hoop lines through the window, above and
  * below the liquid). Des, 2026-10-29: reverses the earlier "no lines inside
- * the window" rule. 0 = rims only; 2 splits the wall in thirds.
+ * the window" rule. 0 = rims only. Round 2: 1 (mid hoop). reference.jpg
+ * shows rims + panel seams but no hoops; 2 hoops plus 4 seams read as a grid.
  */
-export const TANK_INTERIOR_HOOPS = 2;
+export const TANK_INTERIOR_HOOPS = 1;
 
 /** The interior rings sit just inside the liner so they never z-fight it. */
 export const INTERIOR_RING_INSET = 0.995;
+
+/**
+ * Vertical liner seams on the inner back wall: every Nth liner vertex on the
+ * back arc. reference.jpg's interiors show two or three seams; step 1 (every
+ * facet, ~6 with the margin) read as a bird cage in the demo scene. 0 = rings only.
+ */
+export const TANK_INTERIOR_MERIDIAN_STEP = 2;
+
+/**
+ * Width (CSS px) of the cage, rim, interior and liquid lines (Line2). The
+ * creases (Edges) use `edges.wireWidth` 1.5; these are the reference's
+ * thinner panel lines. 1-device-px lineBasic (before round 2) was ~0.5 CSS px
+ * at DPR 2 and read faint.
+ */
+export const TANK_LINE_WIDTH = 1;
+
+/**
+ * Liner (inner wall) iso shade, seen from inside with the inward normal:
+ * lighter than the outer wall (vessel 0.22..0.95) like reference.jpg's
+ * interiors -- near-white panels greying slightly toward the right.
+ */
+export const LINER_SHADE = { shadeMin: 0.75, shadeMax: 0.85, hubWhite: 1 } as const;
 
 /** Extra arc (radians) either side of the visible back arc so the hoops meet the jamb silhouettes without a gap. */
 export const INTERIOR_RING_MARGIN = 0.08;
@@ -65,14 +88,14 @@ export const MIXER_SHADE_MIN = HOLODECK_STYLE.finishes.flask.shadeMin;
  * so 0.72 shows the agitator and the back-wall hoops through the liquid
  * like reference.jpg's mixer without any mesh lines printing through.
  */
-export const MIXER_LIQUID_OPACITY = 0.72;
+export const MIXER_LIQUID_OPACITY = LIQUID_FINISH.opacity; // one liquid look since round 2: the `liquid` finish token
 
 /** Tanks inherited liquidOpacity 0.69 so meridians printed through the fill vs r-holdbody solid U. Mixer stays 0.84. */
 // History: 0.88 with depthWrite off printed the flask's own back faces and meridians through the cutout;
 // 1 (solid) hid the interior back-wall rings that Des asked for on 2026-10-29 (reference.jpg shows the
 // inner rim / hoop lines through the liquid). 0.8 with depthWrite ON: only the flask's front surface
 // blends, so the back-wall hoops read as darker liquid-tinted lines and nothing else prints through.
-export const TANK_LIQUID_OPACITY = 0.8;
+export const TANK_LIQUID_OPACITY = LIQUID_FINISH.opacity; // alias of the `liquid` finish token (style.ts), shared with GLB hd.liquid
 
 /** Aliases of `HOLODECK_STYLE.edges.thresholds.tankWall` / `.mixerWall`. */
 export const TANK_WALL_THRESHOLD = HOLODECK_STYLE.edges.thresholds.tankWall;
@@ -145,7 +168,10 @@ export type TankParams = {
   showWall: boolean;
   showLiner: boolean;
   showDome: boolean;
-  /** Flask (liquid) meridian lines, drawn all round. Off: they printed through the cutout as "mesh lines". */
+  /**
+   * Liquid bowl lines (meridians + latitude rings on the flask bowl), seen through the liquid like
+   * reference.jpg's liquid bottom. Off before round 2: with depthWrite on they printed through as "mesh lines".
+   */
   showBowl: boolean;
   /** Inner ullage cage (meridians at the inner radius above the liquid). Off for the same reason. */
   showInnerCage: boolean;
@@ -154,6 +180,8 @@ export type TankParams = {
   showInteriorRings: boolean;
   /** Body hoops between the bottom and top inner rims (`TANK_INTERIOR_HOOPS`). */
   interiorHoops: number;
+  /** Liner facet seams on the back wall: every Nth vertex, 0 = none (`TANK_INTERIOR_MERIDIAN_STEP`). */
+  interiorMeridianStep: number;
   shaftRadius: number;
   shaftLength: number;
   impellerSpan: number;
@@ -233,11 +261,12 @@ export const DEFAULT_TANK_PARAMS: TankParams = {
   showWall: true,
   showLiner: true,
   showDome: true,
-  showBowl: false,
+  showBowl: true,
   showInnerCage: false,
   showLiquid: true,
   showInteriorRings: true,
   interiorHoops: TANK_INTERIOR_HOOPS,
+  interiorMeridianStep: TANK_INTERIOR_MERIDIAN_STEP,
   shaftRadius: 0.04,
   shaftLength: 0.88,
   impellerSpan: 1.3,
@@ -647,6 +676,69 @@ export function interiorRingSegments(
   return new Float32Array(pts);
 }
 
+/**
+ * Vertical facet lines on the inner back wall (reference.jpg's interiors
+ * show the liner's panel seams through the window): one line per `step`-th
+ * liner vertex strictly inside `arc`, from `y0` to `y1`. Vertices sit on
+ * the facet corners, so the lines lie on the liner (radius = `radius`).
+ */
+export function interiorMeridianSegments(
+  radius: number,
+  y0: number,
+  y1: number,
+  arc: { start: number; len: number },
+  facetStart: number,
+  facetStep: number,
+  step = 1,
+): Float32Array {
+  if (!(facetStep > 1e-6) || !(y1 - y0 > 1e-6)) return new Float32Array(0);
+  const pts: number[] = [];
+  const first = Math.floor((arc.start - facetStart) / facetStep) + 1;
+  const every = Math.max(1, Math.round(step));
+  for (let k = first; ; k++) {
+    const th = facetStart + k * facetStep;
+    if (th >= arc.start + arc.len - 1e-9) break;
+    if ((k - first) % every !== 0) continue;
+    const x = radius * Math.sin(th);
+    const z = radius * Math.cos(th);
+    pts.push(x, y0, z, x, y1, z);
+  }
+  return new Float32Array(pts);
+}
+
+/**
+ * Latitude rings on the liquid flask's bowl: a full circle at each interior
+ * lathe-profile point below `yMax` (the bowl equator or the waterline,
+ * whichever is lower), every `step`-th point. With the flask meridians these
+ * are the radial + ring lines reference.jpg shows on the liquid bottom.
+ */
+export function bowlLatitudeRings(
+  profile: Array<[number, number]>,
+  yMax: number,
+  step = 1,
+  segments = 48,
+): Float32Array {
+  const parts: Float32Array[] = [];
+  const every = Math.max(1, Math.round(step));
+  // Skip the pole (radius 0) and the closing waterline point (also radius 0).
+  const inner = profile.filter(([r, y]) => r > 1e-4 && y < yMax - 1e-6);
+  inner.forEach(([r, y], i) => {
+    if (i % every === every - 1) parts.push(cylinderArcSegments(r, y, 0, Math.PI * 2, segments));
+  });
+  const out = new Float32Array(parts.reduce((n, a) => n + a.length, 0));
+  let o = 0;
+  for (const a of parts) {
+    out.set(a, o);
+    o += a.length;
+  }
+  return out;
+}
+
+/** The bowl part of a flask lathe profile (pole up to `yMax`), for the bowl meridians. */
+export function bowlProfile(profile: Array<[number, number]>, yMax: number): Array<[number, number]> {
+  return profile.filter(([r, y], i) => y <= yMax + 1e-6 && !(i > 0 && r < 1e-6));
+}
+
 /** Inner flask is a closed body of revolution (Arcentry bottle), not a
  * window pie. Window-sliced fill read as a cyan cutaway face. Waterline
  * is a flat disc — a bowl-height hemispherical cap (tick 96) ate holding
@@ -990,7 +1082,28 @@ export function innerCageSpan(
 }
 
 /** Mixer outer wall meridians. Step 2 on 24 segs read dense vs r-mixer. */
-export const MIXER_WALL_MERIDIAN_STEP = 3;
+// Round 2 (2026-10-29): 1. Step 3 left at most one meridian on each visible jamb strip, so the bottle read as
+// a smooth grey blob vs reference.jpg's faceted panels (4-5 seams per side).
+export const MIXER_WALL_MERIDIAN_STEP = 1;
+
+/**
+ * Tank outer-wall meridians (the cage on the kept arc): every facet, like
+ * reference.jpg's panelled walls. Was FLASK_MERIDIAN_STEP (3).
+ */
+export const TANK_WALL_MERIDIAN_STEP = 1;
+
+/**
+ * Dome meridians: every facet. Round 3 used every 2nd; reference.jpg's
+ * domes show a meridian per facet converging on the apex (holding / A / B).
+ */
+export const TANK_DOME_MERIDIAN_STEP = 1;
+
+/**
+ * Liquid bowl radial lines: every facet, like the reference's liquid bottom
+ * (a radial per facet + rings). Seen through the liquid, so they read
+ * tinted, not as a cage.
+ */
+export const TANK_BOWL_MERIDIAN_STEP = 1;
 
 /** Inner flask meridians. Step 2 (every second of 15) read dense vs r-holdbody. */
 export const FLASK_MERIDIAN_STEP = 3;
@@ -1328,48 +1441,36 @@ export function waterlineRing(radius: number, y: number, segments: number): Floa
 }
 
 /**
- * Where the tangential inlet's foot sits, in radians along the kept wall
- * from the window's camera-left jamb. The run then leaves along the wall
- * tangent away from the window, i.e. close to the world -X axis, so it runs
- * along the iso grid like a routed pipe and its flange reads as the same
- * ring. 0.32 keeps the foot (inside the shell, nozzle radius 0.08 R)
- * hidden behind the jamb: at 0.04 its capped end showed through the window.
- * History: 0.38 with the run pointing +tangent (toward the camera) put the
- * axis ~23° off the camera ray; the flange face showed nearly round while
- * the pipe looked long, so the flange read as twisted off the pipe (Des
- * 2026-10-29).
+ * Where the inlet nozzle leaves the shell, in radians along the kept wall
+ * from the window's camera-left jamb, and how far it leans from the wall
+ * normal toward the tangent (away from the window). Round 2 (Des
+ * 2026-10-29): "the diagonal stick reads worse than before" -- the long
+ * grid-aligned tangent chord (offset 0.32, lean pi/2, buried 1 r) grazed the
+ * wall as a thin sliver. A short stub, 0.6 rad onto the left wall (its
+ * normal ~80° off the camera ray, so the stub points screen-left and its
+ * flange ring is seen nearly edge-on) leaning 0.45 rad toward the tangent so
+ * it still reads as a tangential inlet.
+ * Earlier: 0.38 / +tangent / hex flange = round face on a long pipe that
+ * read as a twisted flange.
  */
-export const TANK_NOZZLE_JAMB_OFFSET = 0.32;
+export const TANK_NOZZLE_JAMB_OFFSET = 0.6;
+export const TANK_NOZZLE_LEAN = 0.45;
+/** Visible stub length / tank radius (round 1 stick was 0.4 R). */
+export const TANK_NOZZLE_LENGTH = 0.26;
+/** Stub radius / tank radius. */
+export const TANK_NOZZLE_RADIUS = 0.085;
 
 /**
- * How deep the nozzle axis runs inside the shell, in nozzle radii, on top of
- * the faceted wall's inset (`facetInset` in tankNozzlePose). Below 1 the
- * run's outer side is outside the shell at the foot and its capped near end
- * shows against the wall (0.5 did); 1 buries it. The long tapering
- * intersection where the run leaves the wall is what a tangential inlet
- * looks like (an elongated weld ellipse).
- */
-export const TANK_NOZZLE_CHORD_DEPTH = 1;
-
-/**
- * Pose of the tangential inlet nozzle in the tank's local frame. The nozzle
- * geometry is a pipe run built along local +Y (`buildPipeGeometry`: plain
- * `from` end at -Y inside the shell, flanged `to` end at +Y);
- * `quaternion` turns +Y onto `axis`, so every ring of that geometry (body
- * joints, end flange) is perpendicular to the nozzle axis by construction.
- * tank-geometry.test.ts pins this.
- *
- * Like a real tangential inlet, the run's axis is a chord one pipe radius
- * inside the shell: it starts at the chord's midpoint (the "foot", inside
- * the vessel at `theta`, where the wall near the jamb is hidden from the
- * camera) and runs along the wall tangent away from the window (-tangent),
- * leaving the shell after `sqrt(R^2 - (R - r)^2)` and showing
- * `visibleLength` outside it. A run tangent to the outside of the shell
- * never enters it, so its near end showed as a capped stub floating in
- * front of the jamb.
+ * Pose of the inlet nozzle stub in the tank's local frame. The stub
+ * geometry (`nozzleStubGeometry`, flange.ts) runs along local +Y from its
+ * origin (the shell end) to the flanged free end; `quaternion` turns +Y onto
+ * `axis`, so the flange ring is perpendicular to the stub by construction
+ * (flange-orientation.test.ts). `position` is the shell end, buried inside
+ * the faceted wall so no open end shows; `length` is the whole stub
+ * (buried part + `visibleLength`).
  *
  * Why a quaternion instead of the old Euler pair (group yaw theta + mesh
- * roll pi/2 on X-axis cylinders): one rotation, derived from the axis, with
+ * roll pi/2 on X-axis cylinders): one rotation derived from the axis, with
  * nothing to get out of order. `Quaternion.setFromUnitVectors` is three.js'
  * shortest-arc rotation between two directions.
  */
@@ -1379,31 +1480,33 @@ export function tankNozzlePose(
   y: number,
   visibleLength: number,
   nozzleR: number,
+  lean = TANK_NOZZLE_LEAN,
 ): {
   axis: [number, number, number];
-  /** Centre of the nozzle run (the pipe geometry's origin). */
+  /** Shell end of the stub (the geometry's origin). */
   position: [number, number, number];
   quaternion: [number, number, number, number];
-  /** Whole run length: the hidden chord inside the shell plus `visibleLength`. */
+  /** Whole stub length: the buried part plus `visibleLength`. */
   length: number;
 } {
   // Cylinder theta convention: point on the wall = (r sin θ, y, r cos θ); the outward normal is
-  // (sin θ, 0, cos θ) and d/dθ (cos θ, 0, -sin θ) the tangent. The run points along -tangent.
+  // (sin θ, 0, cos θ) and d/dθ (cos θ, 0, -sin θ) the tangent. Lean toward -tangent (away from the window).
   const normal = new Vector3(Math.sin(theta), 0, Math.cos(theta));
-  const axis = new Vector3(-Math.cos(theta), 0, Math.sin(theta));
-  // The shell is a polygon (radialSegments facets), whose flat faces sit up to R (1 - cos(pi / n))
-  // inside the circle; 0.03 R covers n >= 13.
-  const facetInset = radius * 0.03;
-  const d = Math.max(0, radius - facetInset - nozzleR * TANK_NOZZLE_CHORD_DEPTH);
-  const inside = Math.sqrt(Math.max(0, radius * radius - d * d));
-  const length = inside + Math.max(0, visibleLength);
-  const foot = normal.clone().multiplyScalar(d).setY(y);
-  const centre = foot.clone().addScaledVector(axis, length / 2);
+  const away = new Vector3(-Math.cos(theta), 0, Math.sin(theta));
+  const axis = normal.clone().multiplyScalar(Math.cos(lean)).addScaledVector(away, Math.sin(lean)).normalize();
+  // The shell is a polygon whose flat faces sit up to R (1 - cos(pi / n)) inside the circle (0.03 R covers
+  // n >= 13); the tilted end disc reaches r sin(lean) further out. Start inside both.
+  const startR = Math.max(0, radius * 0.97 - nozzleR * Math.sin(lean) - 0.01);
+  const start = normal.clone().multiplyScalar(startR).setY(y);
+  // Distance along the axis from the start to the circle of radius R (where the stub leaves the shell).
+  const b = start.x * axis.x + start.z * axis.z;
+  const c = start.x * start.x + start.z * start.z - radius * radius;
+  const inside = -b + Math.sqrt(Math.max(0, b * b - c));
   const q = new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), axis);
   return {
     axis: [axis.x, axis.y, axis.z],
-    position: [centre.x, centre.y, centre.z],
+    position: [start.x, start.y, start.z],
     quaternion: [q.x, q.y, q.z, q.w],
-    length,
+    length: inside + Math.max(0, visibleLength),
   };
 }

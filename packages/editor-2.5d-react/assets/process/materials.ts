@@ -48,14 +48,23 @@ export type IsoShadeParams = {
  * the shade numbers are uniforms, so `setIsoShade` can retune them live.
  */
 export function createIsoShadeMaterial(
-  params: IsoShadeParams & { offset: boolean },
+  params: IsoShadeParams & {
+    offset: boolean;
+    /**
+     * Shade the surface as seen from inside (a liner drawn BackSide): use
+     * the inward normal, so the inner back wall is light where it faces the
+     * camera-left light and greys toward the right, like reference.jpg's
+     * interiors. Baked at creation, like `offset`.
+     */
+    inside?: boolean;
+  },
 ): MeshBasicNodeMaterial {
   const uRadius = uniform(params.radius);
   const uWhiteHub = uniform(params.whiteHub ? 1 : 0);
   const uShadeMin = uniform(params.shadeMin);
   const uShadeMax = uniform(params.shadeMax);
   const uHubWhite = uniform(params.hubWhite);
-  const n = normalView;
+  const n = params.inside ? normalView.negate() : normalView;
   const t = clamp(n.x.mul(0.65).add(n.y.mul(0.35)), -1, 1).mul(0.5).add(0.5);
   const rim = mix(uShadeMin, uShadeMax, t);
   const localRadial = vec3(positionLocal.x, float(0), positionLocal.z);

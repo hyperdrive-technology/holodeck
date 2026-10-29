@@ -1,5 +1,5 @@
 import { useEffect, useMemo, type ReactNode } from 'react';
-import { type Side } from 'three';
+import { BackSide, type Side } from 'three';
 import type { MeshBasicNodeMaterial } from 'three/webgpu';
 import { Edges } from './Edges';
 import { createFinishMaterial, createIsoShadeMaterial, setIsoShade, type IsoShadeParams } from './materials';
@@ -18,9 +18,14 @@ export const FILL = HOLODECK_STYLE.colors.liquid;
 const SHADED = HOLODECK_STYLE.finishes.shaded;
 
 /** Iso material whose uniforms follow props every render; offset is baked (new material on change). */
-function useIsoShadeMaterial({ offset, ...shade }: IsoShadeParams & { offset: boolean }) {
-  // Shade numbers are uniforms (set below), so only `offset` rebuilds.
-  const material = useMemo(() => createIsoShadeMaterial({ ...shade, offset }), [offset]);
+function useIsoShadeMaterial({ offset, inside = false, ...shade }: IsoShadeParams & { offset: boolean; inside?: boolean }) {
+  // Shade numbers are uniforms (set below), so only `offset` / `inside` rebuild.
+  const material = useMemo(() => {
+    const m = createIsoShadeMaterial({ ...shade, offset, inside });
+    // A liner is seen from inside the vessel: draw its back faces.
+    if (inside) m.side = BackSide;
+    return m;
+  }, [offset, inside]);
   setIsoShade(material, shade);
   useEffect(() => () => material.dispose(), [material]);
   return material;
@@ -42,6 +47,7 @@ export function ShadedFill({
   // Tanks need this so Edges win; pipes must not — offset lets the
   // floor Grid steal the underside and reads as ground-only shade.
   offset = SHADED.offset,
+  inside = false,
 }: {
   radius: number;
   whiteHub?: boolean;
@@ -49,6 +55,8 @@ export function ShadedFill({
   shadeMax?: number;
   hubWhite?: number;
   offset?: boolean;
+  /** Liner: back faces, shaded with the inward normal (createIsoShadeMaterial `inside`). */
+  inside?: boolean;
 }) {
   const material = useIsoShadeMaterial({
     radius,
@@ -57,6 +65,7 @@ export function ShadedFill({
     shadeMax,
     hubWhite,
     offset,
+    inside,
   });
   return <primitive object={material} attach="material" />;
 }
@@ -70,6 +79,7 @@ export function ShadedMesh({
   shadeMax,
   hubWhite,
   offset,
+  inside,
   children,
 }: {
   radius: number;
@@ -80,6 +90,7 @@ export function ShadedMesh({
   shadeMax?: number;
   hubWhite?: number;
   offset?: boolean;
+  inside?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -92,6 +103,7 @@ export function ShadedMesh({
         shadeMax={shadeMax}
         hubWhite={hubWhite}
         offset={offset}
+        inside={inside}
       />
     </mesh>
   );
