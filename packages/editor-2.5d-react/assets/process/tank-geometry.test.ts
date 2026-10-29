@@ -9,7 +9,15 @@ import {
   frustumMeridianSegments,
   frustumProfile,
   legPositions,
+  heelSurfaceY,
+  facetedRadiusAt,
+  interiorRingArc,
+  interiorRingHeights,
+  interiorRingSegments,
   mergeTankParams,
+  TANK_INTERIOR_HOOPS,
+  MIXER_WINDOW_DEG,
+  MIXER_WINDOW_YAW,
   segmentsInsideWindow,
   sphereLatitudeArcs,
   sphereMeridiansFromCylinderThetas,
@@ -26,7 +34,7 @@ import { TANK_PRESETS } from './tank-presets';
 
 const win = tankWindow(TANK_WINDOW_DEG, TANK_WINDOW_YAW);
 
-describe('cutout: outline geometry never enters the window arc', () => {
+describe('cutout: outer outline geometry never enters the window arc', () => {
   it('wall meridians, top rim and dome lines are generated on the kept arc only', () => {
     const segs = DEFAULT_TANK_PARAMS.radialSegments;
     const wall = cylinderMeridianSegments(1, -1, 1, win.keepStart, win.keepLen, segs, false, FLASK_MERIDIAN_STEP);
@@ -58,7 +66,8 @@ describe('cutout: outline geometry never enters the window arc', () => {
   it('inner mesh lines are off by default (they printed through the cutout)', () => {
     expect(DEFAULT_TANK_PARAMS.showBowl).toBe(false);
     expect(DEFAULT_TANK_PARAMS.showInnerCage).toBe(false);
-    expect(DEFAULT_TANK_PARAMS.liquidOpacity).toBe(1);
+    // Translucent since 2026-10-29 so the interior rings read through it; depthWrite stays on (Tank.tsx LiquidFill).
+    expect(DEFAULT_TANK_PARAMS.liquidOpacity).toBeLessThan(1);
   });
 });
 
@@ -140,5 +149,93 @@ describe('presets', () => {
     expect(TANK_PRESETS.kettle.radius).toBeCloseTo(0.65, 1);
     expect(TANK_PRESETS.hlt.height).toBe(3);
     expect(TANK_PRESETS.whirlpool.radius * 2).toBeGreaterThan(TANK_PRESETS.whirlpool.height);
+  });
+});
+
+/**
+ * Des 2026-10-29: the interior back wall's horizontal lines (bottom inner rim,
+ * body hoops, top inner rim) must show through the cutaway, like reference.jpg.
+ * This reverses the earlier "no lines inside the window" rule for the INNER
+ * back wall only: the outer cage above still never enters the window arc.
+ */
+describe('interior back-wall rings (seen through the window)', () => {
+  const thetaOf = (x: number, z: number) => Math.atan2(x, z);
+  const segs = 15;
+  const facetStep = win.keepLen / segs;
+
+  it('ring heights are the bottom rim, the hoops and the top rim, bottom to top', () => {
+    const hs = interiorRingHeights(-1, 1, 2);
+    expect(hs).toHaveLength(4);
+    [-1, -1 / 3, 1 / 3, 1].forEach((h, i) => expect(hs[i]).toBeCloseTo(h));
+    expect(interiorRingHeights(-1, 1, 0)).toEqual([-1, 1]);
+    expect(interiorRingHeights(1, 1, 2)).toEqual([]);
+    expect(TANK_INTERIOR_HOOPS).toBeGreaterThan(0);
+    expect(DEFAULT_TANK_PARAMS.showInteriorRings).toBe(true);
+    expect(DEFAULT_TANK_PARAMS.interiorHoops).toBe(TANK_INTERIOR_HOOPS);
+  });
+
+  it.each([
+    ['tank', TANK_WINDOW_DEG, TANK_WINDOW_YAW],
+    ['mixer', MIXER_WINDOW_DEG, MIXER_WINDOW_YAW],
+  ])('%s: the ring arc is the back wall opposite the window', (_name, deg, yaw) => {
+    const w = tankWindow(deg, yaw);
+    const arc = interiorRingArc(deg, yaw);
+    const mid = arc.start + arc.len / 2;
+    // Centred half a turn from the window centre, at least as wide as the window.
+    expect(Math.cos(mid - (w.windowStart + w.windowRad / 2))).toBeCloseTo(-1);
+    expect(arc.len).toBeGreaterThanOrEqual(w.windowRad);
+    expect(arc.len).toBeLessThan(w.windowRad + 0.5);
+  });
+
+  it('every ring segment is horizontal, on the back arc, and on the faceted liner', () => {
+    const arc = interiorRingArc(TANK_WINDOW_DEG, TANK_WINDOW_YAW);
+    const heights = interiorRingHeights(-1.5, 1.5, 2);
+    const r = 0.99;
+    const pts = interiorRingSegments(r, heights, arc, win.keepStart, facetStep);
+    expect(pts.length % 6).toBe(0);
+    const ys = new Set<number>();
+    for (let i = 0; i < pts.length; i += 6) {
+      // Horizontal: both ends at the same height.
+      expect(pts[i + 1]).toBeCloseTo(pts[i + 4]);
+      ys.add(Number(pts[i + 1].toFixed(4)));
+      for (const o of [0, 3]) {
+        const x = pts[i + o];
+        const z = pts[i + o + 2];
+        // atan2 wraps to (-pi, pi]; unwrap onto the arc so the facet index matches the generator's.
+        let th = thetaOf(x, z);
+        while (th < arc.start - 1e-6) th += Math.PI * 2;
+        while (th > arc.start + Math.PI * 2) th -= Math.PI * 2;
+        expect(angleOnArc(th, arc.start - 1e-4, arc.len + 2e-4)).toBe(true);
+        // Never inside the window opening itself (that is the front, not the back wall).
+        expect(angleOnArc(th, win.windowStart + 1e-3, win.windowRad - 2e-3)).toBe(false);
+        // On the flat facet, not the circle: a circle bulges outside each facet and the
+        // ring hid behind the liner as a dashed line (first render, 2026-10-29).
+        expect(Math.hypot(x, z)).toBeCloseTo(facetedRadiusAt(r, th, win.keepStart, facetStep), 4);
+      }
+    }
+    expect([...ys].sort((a, b) => a - b)).toEqual(heights.map((h) => Number(h.toFixed(4))));
+  });
+
+  it('facetedRadiusAt is the radius at facet vertices and the apothem mid-facet', () => {
+    expect(facetedRadiusAt(1, 0, 0, 0.4)).toBeCloseTo(1);
+    expect(facetedRadiusAt(1, 0.4, 0, 0.4)).toBeCloseTo(1);
+    expect(facetedRadiusAt(1, 0.2, 0, 0.4)).toBeCloseTo(Math.cos(0.2));
+    expect(facetedRadiusAt(1, 0.2, 0, 0)).toBe(1);
+  });
+});
+
+describe('stand legs', () => {
+  it('no leg stands under the cutaway centre (the iso camera axis, theta 45°)', () => {
+    for (const [x, z] of legPositions(1, 4)) {
+      const th = Math.atan2(x, z);
+      expect(Math.abs(Math.cos(th - Math.PI / 4))).toBeLessThan(0.75);
+    }
+  });
+
+  it('heelSurfaceY is the floor at the axis and rises toward the rim', () => {
+    expect(heelSurfaceY(-1, 1, 0.3, 0)).toBeCloseTo(-1);
+    expect(heelSurfaceY(-1, 1, 0.3, 1)).toBeCloseTo(-0.7);
+    expect(heelSurfaceY(-1, 1, 0.3, 0.5)).toBeGreaterThan(-1);
+    expect(heelSurfaceY(-1, 1, 0, 0.5)).toBe(-1);
   });
 });

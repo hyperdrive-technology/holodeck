@@ -1,9 +1,16 @@
 /**
  * Renders vessels.html (the base-Tank preset family at brewhouse spacing)
  * in a real WebGPU canvas and saves artifacts/render/brewhouse-vessels.png
- * plus a close-up crop per vessel. Visual check: all vessels must read as
- * the same object (cutaway, solid liquid, no lines inside the window) with
- * different radius / height / closures.
+ * plus a close-up crop per vessel and zoomed close-ups
+ * (brewhouse-vessel-<id>-closeup.png). Visual check: all vessels must read
+ * as the same object with different radius / height / closures: cutaway
+ * window, translucent liquid, and the inner back wall's horizontal rings
+ * (bottom rim, hoops, top rim) visible through the window above and below
+ * the liquid, like reference.jpg. Des reversed the old "no lines inside the
+ * window" rule on 2026-10-29; only those horizontal rings are allowed in
+ * there (no meridians, no wire cage: tank-geometry.test.ts pins both).
+ * The mash tun close-up shows the agitator (drum hat, shaft into the hub,
+ * pitched blades); the whirlpool close-up its tangential nozzle flange.
  */
 import { statSync } from 'node:fs';
 import path from 'node:path';

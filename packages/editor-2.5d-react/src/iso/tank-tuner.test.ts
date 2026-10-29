@@ -3,7 +3,7 @@ import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
 import { launchRenderBrowser } from '../test-support/render-harness';
-import { DEFAULT_TANK_PARAMS, LIQUID_THETA_LENGTH, TANK_INNER_RATIO, TANK_BOWL_Y_OFFSET, MIXER_INNER_RATIO, MIXER_WINDOW_DEG, MIXER_SHOULDER_RATIO, MIXER_SHOULDER_TOP, MIXER_OUTER_BOWL, MIXER_HEEL_OVERLAP, MIXER_SHOULDER_OVERLAP, MIXER_DOME_OVERLAP, angleOnArc, bodyShoulder, bodyOuterBowl, flaskBowl, heelOverlap, shoulderOverlap, bowlThetaForLiquid, cylinderThetasEven, cylinderThetasKept, innerCageSpan, liquidCylinderHeight, liquidSurfaceRadius, mergeTankParams, mixerHatLayout, mixerShaftLayout, spherePhiFromCylinderTheta, tankWindow, tunedVesselHeight, windowFillSegments } from '../../assets/process/tank-params';
+import { DEFAULT_TANK_PARAMS, LIQUID_THETA_LENGTH, TANK_INNER_RATIO, TANK_BOWL_Y_OFFSET, MIXER_INNER_RATIO, MIXER_WINDOW_DEG, MIXER_SHOULDER_RATIO, MIXER_SHOULDER_TOP, MIXER_OUTER_BOWL, MIXER_HEEL_OVERLAP, MIXER_SHOULDER_OVERLAP, MIXER_DOME_OVERLAP, angleOnArc, bodyShoulder, bodyOuterBowl, flaskBowl, heelOverlap, shoulderOverlap, bowlThetaForLiquid, cylinderThetasEven, cylinderThetasKept, innerCageSpan, liquidCylinderHeight, liquidSurfaceRadius, mergeTankParams, mixerHatLayout, mixerShaftLayout, MIXER_IMPELLER_FLOOR_CLEARANCE, MIXER_HAT_ASPECT, spherePhiFromCylinderTheta, tankWindow, tunedVesselHeight, windowFillSegments } from '../../assets/process/tank-params';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
 
@@ -152,15 +152,42 @@ describe('tank tuner', () => {
     expect(tunedVesselHeight(2.7, { height: 6.1 })).toBeCloseTo(5.4);
   });
 
-  it('sizes the mixer shaft from shaftLength × tank height, not lid→liquid', () => {
-    const short = mixerShaftLayout(2.7, 0.4, mergeTankParams({ shaftLength: 0.5 }));
-    const long = mixerShaftLayout(2.7, 0.4, mergeTankParams({ shaftLength: 1.1 }));
+  it('drops the impeller shaftLength × tank height below the dome apex, clamped above the floor', () => {
+    const short = mixerShaftLayout(2.7, mergeTankParams({ shaftLength: 0.5 }));
+    const long = mixerShaftLayout(2.7, mergeTankParams({ shaftLength: 0.9 }));
     expect(long.shaftH).toBeGreaterThan(short.shaftH);
-    expect(long.shaftH).toBeCloseTo(2.7 * 1.1);
+    expect(long.domeApex - long.impellerY).toBeCloseTo(2.7 * 0.9);
+    // A slider past the floor clamps instead of running the blades through the heel.
+    const through = mixerShaftLayout(2.7, mergeTankParams({ shaftLength: 1.5 }));
+    expect(through.impellerY).toBeCloseTo(-1.35 + 2.7 * MIXER_IMPELLER_FLOOR_CLEARANCE);
+    // Shaft always ends at the hub: no floating impeller at any length.
+    for (const l of [0.1, 0.5, 0.9, 1.5]) {
+      const lay = mixerShaftLayout(2.7, mergeTankParams({ shaftLength: l }));
+      expect(lay.shaftBot).toBeCloseTo(lay.impellerY);
+      expect(lay.shaftTop).toBeGreaterThan(lay.shaftBot);
+    }
     expect(long.lidH).toBeCloseTo(DEFAULT_TANK_PARAMS.capLidThickness);
-    const thick = mixerShaftLayout(2.7, 0.4, mergeTankParams({ capLidThickness: 0.1 }));
+    const thick = mixerShaftLayout(2.7, mergeTankParams({ capLidThickness: 0.1 }));
     expect(thick.lidH).toBeCloseTo(0.1);
     expect(thick.lidTop).toBeGreaterThan(long.lidTop);
+  });
+
+  it('re-seats the hat and shaft on an explicit apex (flat / cone lids)', () => {
+    const p = mergeTankParams({});
+    const base = mixerShaftLayout(2.7, p);
+    const raised = mixerShaftLayout(2.7, p, base.domeApex + 0.5);
+    expect(raised.lidTop - base.lidTop).toBeCloseTo(0.5);
+    expect(raised.shaftTop - base.shaftTop).toBeCloseTo(0.5);
+    expect(raised.shaftBot).toBeCloseTo(raised.impellerY);
+  });
+
+  it('draws the hat as a drum, not a flat puck', () => {
+    const hat = mixerHatLayout(2.7, mergeTankParams({ capRadiusRatio: 0.4 }));
+    expect(hat.drumH / hat.capR).toBeCloseTo(MIXER_HAT_ASPECT);
+    expect(hat.drumH).toBeGreaterThan(hat.lidH * 4);
+    expect(hat.neckR).toBeLessThan(hat.capR);
+    // Neck sinks into the dome so the hat never floats over a faceted apex.
+    expect(hat.neckMidY - hat.neckH / 2).toBeLessThan(hat.domeApex);
   });
 
   it('keeps the mixer hat squat on the dome, not a chimney', () => {
