@@ -20,6 +20,7 @@ import fermenter from './fermenter.glb?url';
 import heatExchanger from './heat-exchanger.glb?url';
 import kettle from './kettle.glb?url';
 import mashTun from './mash-tun.glb?url';
+import mixer from './mixer.glb?url';
 import pump from './pump.glb?url';
 import valve from './valve.glb?url';
 
@@ -30,6 +31,7 @@ export const BUILTIN_MODEL_URLS: Readonly<Record<string, string>> = Object.freez
   'heat-exchanger': heatExchanger,
   kettle,
   'mash-tun': mashTun,
+  mixer,
   pump,
   valve,
 });

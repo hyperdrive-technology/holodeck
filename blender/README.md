@@ -50,6 +50,11 @@ material outside `hd.*`. Note that GLTFLoader removes `.` from node names
 (`port.in` arrives as `portin`). The original name is kept in `userData.name`;
 `findPorts` and `findAnimNodes` read it.
 
+Vessels ship with a full liquid (the runtime scales `anim.liquid`). To judge a
+part-filled look on the parts page, `parts/mixer.py` honours
+`HD_MIXER_PREVIEW_FILL=0.52 pnpm run parts:build mixer`; rebuild without it
+before committing (the GLB tests check the pivot is unscaled).
+
 ## Adding a part
 
 1. Create `parts/<part>.py`. Copy the header of `parts/valve.py`, which adds the
@@ -58,7 +63,10 @@ material outside `hd.*`. Note that GLTFLoader removes `.` from node names
 2. Build it with `hd.cylinder` / `hd.uv_sphere` / `hd.torus` / `hd.empty`. Every
    position and rotation is in **three.js space** (Y-up, R3F Euler `XYZ`), and the
    segment parametrisation matches three's geometries. You can port R3F code
-   one-to-one, and facets line up with hand-coded parts.
+   one-to-one, and facets line up with hand-coded parts. Vessel-level builders
+   (`lathe`, `sweep`, `cutaway_shell`, `interior_rings`, `nozzle_with_flange`,
+   `impeller`, `liquid_volume`) live in `primitives.py`; `brewery.py` adds the
+   brewery vessels' shared conventions (sight-window liquid, legs, pipe stubs).
 3. Run `pnpm run parts:build <part>`. Add `src/models/<part>-glb.test.ts`,
    modelled on `valve-glb.test.ts`.
 
@@ -68,8 +76,10 @@ material outside `hd.*`. Note that GLTFLoader removes `.` from node names
   The origin is the placement anchor (for an inline valve, the centre of the
   pipe axis through the body).
 - Materials are matched **by name only**: `hd.white`, `hd.shaded`, `hd.vessel`,
-  `hd.flask`, `hd.accent`. Only `hd.accent`'s base colour is read (it is the
-  default accent, e.g. handwheel `#c0392b`). `hd.material()` rejects any other name.
+  `hd.flask`, `hd.accent`, `hd.liquid`. Only `hd.accent`'s base colour is read (it is the
+  default accent, e.g. handwheel `#c0392b`). `hd.liquid` is the translucent liquid
+  finish (colour and opacity come from the style; `hd.material(..., alpha=)` only tints
+  the Workbench preview). `hd.material()` rejects any other name.
 - Optional node extras come from object custom properties, set with
   `hd.set_props(obj, ...)`: `hd_edge_threshold` (float, degrees) and
   `hd_edges` (`False` disables outlines).
