@@ -4,14 +4,8 @@ import { LineSet } from './LineSet';
 import { createFinishMaterial } from './materials';
 import { liquidFinish } from './style';
 import { useHolodeckStyle } from './style-context';
-import {
-  bowlLatitudeRings,
-  bowlProfile,
-  flaskLathePoints,
-  flaskMeridianSegments,
-  liquidShades,
-  waterlineRing,
-} from './tank-params';
+import { flaskLathePoints, liquidShades } from './tank-params';
+import { liquidLines } from './tank-lines';
 
 /**
  * The liquid in a vessel: one closed flask (bowl + wall lathe, flat
@@ -82,31 +76,24 @@ export function LiquidVolume({
     if (side.current) side.current.renderOrder = finish.renderOrder;
     if (surface.current) surface.current.renderOrder = finish.renderOrder;
   });
-  const waterline = useMemo(() => waterlineRing(inner, liquidTop, 48), [inner, liquidTop]);
-  const bowl = useMemo(() => {
-    if (!bowlLines || profile.length < 3) return null;
-    const yMax = Math.min(originY, liquidTop);
-    const meridians = flaskMeridianSegments(bowlProfile(profile, yMax), meridianThetas);
-    const rings = bowlLatitudeRings(profile, yMax, BOWL_RING_STEP);
-    const out = new Float32Array(meridians.length + rings.length);
-    out.set(meridians, 0);
-    out.set(rings, meridians.length);
-    return out;
-  }, [bowlLines, profile, originY, liquidTop, meridianThetas]);
+  const lines = useMemo(
+    () => liquidLines({ inner, bowlH, originY, liquidTop, stacks, thetas: meridianThetas, bowlLines }),
+    [inner, bowlH, originY, liquidTop, stacks, meridianThetas, bowlLines],
+  );
   if (lathe.length < 2) return null;
   return (
     <>
       <mesh ref={side} material={sideMat}>
         <latheGeometry args={[lathe, segments]} />
       </mesh>
+      {/* Disc at the waterline radius (inside the bowl it is narrower than the flask). */}
       <mesh ref={surface} material={surfaceMat} position={[0, liquidTop, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[inner, segments]} />
+        <circleGeometry args={[lines.surfaceR, segments]} />
       </mesh>
-      <LineSet color={edgeColor} width={lineWidth} positions={waterline} />
-      {bowl && bowl.length >= 6 ? <LineSet color={edgeColor} width={lineWidth} positions={bowl} /> : null}
+      {lines.waterline.length >= 6 ? <LineSet color={edgeColor} width={lineWidth} positions={lines.waterline} /> : null}
+      {lines.bowl.length >= 6 ? <LineSet color={edgeColor} width={lineWidth} positions={lines.bowl} /> : null}
     </>
   );
 }
 
-/** Every 2nd bowl stack gets a latitude ring (16 stacks: rings would be a hatch). */
-export const BOWL_RING_STEP = 2;
+export { BOWL_RING_STEP } from './tank-lines';

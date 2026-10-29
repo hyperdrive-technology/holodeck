@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { LineSet } from './LineSet';
-import { interiorMeridianSegments, interiorRingSegments } from './tank-params';
+import { interiorLineSegments } from './tank-params';
 
 /**
  * The inner back wall's lines seen through the cutaway (reference.jpg):
@@ -28,16 +28,9 @@ export function InteriorLines({
   color: string;
   width: number;
 }) {
-  const positions = useMemo(() => {
-    const rings = interiorRingSegments(radius, heights, arc, facetStart, facetStep);
-    const seams =
-      meridianStep > 0 && heights.length >= 2
-        ? interiorMeridianSegments(radius, heights[0], heights[heights.length - 1], arc, facetStart, facetStep, meridianStep)
-        : new Float32Array(0);
-    const out = new Float32Array(rings.length + seams.length);
-    out.set(rings, 0);
-    out.set(seams, rings.length);
-    return out;
-  }, [radius, heights, arc.start, arc.len, facetStart, facetStep, meridianStep]);
+  const positions = useMemo(
+    () => interiorLineSegments(radius, heights, arc, facetStart, facetStep, meridianStep),
+    [radius, heights, arc.start, arc.len, facetStart, facetStep, meridianStep],
+  );
   return positions.length >= 6 ? <LineSet color={color} width={width} positions={positions} /> : null;
 }

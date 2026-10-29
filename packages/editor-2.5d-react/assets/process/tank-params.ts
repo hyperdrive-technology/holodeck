@@ -707,6 +707,26 @@ export function interiorMeridianSegments(
   return new Float32Array(pts);
 }
 
+/** Interior rims / hoops plus the facet seams between the first and last height, as one line set. */
+export function interiorLineSegments(
+  radius: number,
+  heights: number[],
+  arc: { start: number; len: number },
+  facetStart: number,
+  facetStep: number,
+  meridianStep: number,
+): Float32Array {
+  const rings = interiorRingSegments(radius, heights, arc, facetStart, facetStep);
+  const seams =
+    meridianStep > 0 && heights.length >= 2
+      ? interiorMeridianSegments(radius, heights[0], heights[heights.length - 1], arc, facetStart, facetStep, meridianStep)
+      : new Float32Array(0);
+  const out = new Float32Array(rings.length + seams.length);
+  out.set(rings, 0);
+  out.set(seams, rings.length);
+  return out;
+}
+
 /**
  * Latitude rings on the liquid flask's bowl: a full circle at each interior
  * lathe-profile point below `yMax` (the bowl equator or the waterline,
@@ -1175,6 +1195,40 @@ export function cylinderThetasEven(
  * Jambs plus even meridians inset from the window. Even meridians within
  * half a step of a jamb still read as being in the cutout in iso.
  */
+/**
+ * Thetas of the kept-arc FACET corners: keepStart + k * keepLen / segs (the
+ * vertices of a `CylinderGeometry` / `LatheGeometry` cut on that arc), every
+ * `step`-th, always including both jambs. Lines on these sit on the mesh's
+ * facet edges and meet the kept-arc rims at their vertices.
+ * `cylinderThetasKept` uses the world 2 pi / segs grid instead, which is not
+ * the windowed mesh's grid: its meridians crossed facets mid-face and missed
+ * the rim vertices (line-termination.test.ts, 2026-10-30).
+ */
+export function facetThetasKept(segs: number, keepStart: number, keepLen: number, step = 1): number[] {
+  const n = Math.max(1, Math.round(segs));
+  const every = Math.max(1, Math.round(step));
+  const out: number[] = [];
+  for (let k = 0; k <= n; k++) {
+    if (k === 0 || k === n || k % every === 0) out.push(keepStart + (k * keepLen) / n);
+  }
+  return out;
+}
+
+/** Meridians along a full lathe profile (e.g. a dish rim -> pole), keeping the axis point (unlike flaskMeridianSegments). */
+export function profileMeridianSegments(profile: Array<[number, number]>, thetas: number[]): Float32Array {
+  const pts: number[] = [];
+  for (const th of thetas) {
+    const s = Math.sin(th);
+    const c = Math.cos(th);
+    for (let i = 0; i < profile.length - 1; i++) {
+      const [r0, y0] = profile[i];
+      const [r1, y1] = profile[i + 1];
+      pts.push(r0 * s, y0, r0 * c, r1 * s, y1, r1 * c);
+    }
+  }
+  return new Float32Array(pts);
+}
+
 export function cylinderThetasKept(
   segs: number,
   keepStart: number,
