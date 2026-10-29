@@ -68,7 +68,7 @@ describe('HOLODECK_STYLE tokens', () => {
       flask: { kind: 'iso', shadeMin: 0.4, shadeMax: 0.97, hubWhite: 0.88, whiteHub: false, offset: true },
       accent: { kind: 'unlit', color: '#c0392b', offset: false },
       // hd.liquid contract (2026-10-29): the Blender mixer lane exports a material named hd.liquid.
-      liquid: { kind: 'liquid', opacity: 0.62, renderOrder: 2, depthWrite: false, offset: false },
+      liquid: { kind: 'liquid', opacity: 0.78, renderOrder: 2, depthWrite: false, offset: false },
     });
     expect([...FINISH_NAMES].sort()).toEqual(Object.keys(HOLODECK_STYLE.finishes).sort());
   });

@@ -85,7 +85,7 @@ describe('tank tuner', () => {
     );
     const flaskThetas = cylinderThetasEven(DEFAULT_TANK_PARAMS.radialSegments, 0, LIQUID_THETA_LENGTH, true);
     expect(flaskThetas.some((th) => angleOnArc(th, windowStart, windowRad))).toBe(true);
-    expect(MIXER_INNER_RATIO).toBeLessThan(DEFAULT_TANK_PARAMS.innerRatio);
+    expect(MIXER_INNER_RATIO).toBeLessThanOrEqual(DEFAULT_TANK_PARAMS.innerRatio);
     expect(DEFAULT_TANK_PARAMS.innerRatio).toBeCloseTo(TANK_INNER_RATIO);
     expect(MIXER_WINDOW_DEG).toBeLessThan(DEFAULT_TANK_PARAMS.windowDeg);
     const silo = bodyShoulder(2.7, 1, DEFAULT_TANK_PARAMS);

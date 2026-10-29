@@ -17,8 +17,9 @@ export const TANK_TOPS: readonly TankTop[] = ['dome', 'flat', 'cone'];
 export const TANK_BOTTOMS: readonly TankBottom[] = ['flat', 'dish', 'cone'];
 export const TANK_SUPPORTS: readonly TankSupport[] = ['none', 'legs', 'skirt'];
 
-/** Holding / ingredient flask. 0.9 filled the silo like a pie vs r-holdbody's inset U.
- *  0.8 / 0.76 were still a tad wide in o-holdbody after the lathe flask. */
+/** Holding / ingredient flask radius / tank radius. 0.9 filled the silo like a pie vs r-holdbody's inset U
+ *  when the flask was a window-sliced pie; 0.8 / 0.76 / 0.74 followed. Round 2 (translucent closed flask with
+ *  bowl lines): 0.9 again -- reference.jpg's liquid spans the window, and fidelity 0.1960 -> 0.2022. */
 export const TANK_INNER_RATIO = 0.9;
 
 /** Holding flask U sits on the floor. −0.2 put the hemisphere equator at the
@@ -751,8 +752,12 @@ export function liquidCylinderHeight(liquidTop: number, bowlOriginY: number): nu
   return Math.max(0, liquidTop - bowlOriginY);
 }
 
-/** Mixer flask sits inset in the vessel; tanks use TANK_INNER_RATIO. */
-export const MIXER_INNER_RATIO = 0.72;
+/**
+ * Mixer flask radius / vessel radius. 0.72 left white margins either side
+ * of the liquid; reference.jpg's mixer liquid fills the window. 0.9 since
+ * round 2 (fidelity 0.2022 -> 0.2047). Tanks use TANK_INNER_RATIO.
+ */
+export const MIXER_INNER_RATIO = 0.9;
 
 /** Three pitched blades, like the reference propeller (two read as a plus, four as a star). */
 export const MIXER_IMPELLER_BLADES = 3;

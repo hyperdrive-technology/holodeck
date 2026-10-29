@@ -63,8 +63,8 @@ describe('cutout: outer outline geometry never enters the window arc', () => {
     expect(angleOnArc(TANK_WINDOW_YAW * (Math.PI / 180), win.windowStart, win.windowRad)).toBe(true);
   });
 
-  it('inner mesh lines are off by default (they printed through the cutout)', () => {
-    expect(DEFAULT_TANK_PARAMS.showBowl).toBe(false);
+  it('ullage cage stays off; the liquid bowl lines are on (seen through the translucent liquid since round 2)', () => {
+    expect(DEFAULT_TANK_PARAMS.showBowl).toBe(true);
     expect(DEFAULT_TANK_PARAMS.showInnerCage).toBe(false);
     // Translucent since 2026-10-29 so the interior rings read through it; depthWrite stays on (Tank.tsx LiquidFill).
     expect(DEFAULT_TANK_PARAMS.liquidOpacity).toBeLessThan(1);

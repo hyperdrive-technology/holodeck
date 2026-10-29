@@ -1,3 +1,4 @@
+import { HOLODECK_STYLE } from '../../assets/process/style';
 import { describe, expect, it } from 'vitest';
 import { OrthographicCamera } from 'three';
 import { LIBRARY_OBJECTS } from '../../assets/process';
@@ -69,7 +70,8 @@ describe('scene document', () => {
     expect(PROCESS_SNAPSHOT.mixerFill).toBeCloseTo(0.52);
     expect(PROCESS_SNAPSHOT.fillColor).toBe('#18BAE6');
     expect(LIQUID_THETA_LENGTH).toBeCloseTo(Math.PI * 2);
-    expect(MIXER_INNER_RATIO).toBeCloseTo(0.72);
+    // Round 2: the translucent liquid fills the window like reference.jpg (0.72 left white margins).
+    expect(MIXER_INNER_RATIO).toBeCloseTo(0.9);
     expect(MIXER_IMPELLER_BLADES).toBe(3);
     expect(MIXER_IMPELLER_YAW).toBeCloseTo(Math.PI / 6);
     expect(MIXER_IMPELLER_RADIUS).toBeCloseTo(0.03);
@@ -118,12 +120,13 @@ describe('scene document', () => {
     // #666 vanished under the liquid; the shaft and blades must stay lighter than the edge lines.
     expect(MIXER_AGITATOR_COLOR).not.toBe('#666666');
     expect(MIXER_IMPELLER_COLOR).toMatch(/^#[0-9a-f]{6}$/);
-    expect(TANK_INNER_RATIO).toBeCloseTo(0.74);
+    expect(TANK_INNER_RATIO).toBeCloseTo(0.9);
     expect(FLASK_MERIDIAN_STEP).toBe(3);
-    expect(MIXER_WALL_MERIDIAN_STEP).toBe(3);
+    // Round 2: every facet (step 3 left the bottle a smooth grey blob vs reference.jpg's panels).
+    expect(MIXER_WALL_MERIDIAN_STEP).toBe(1);
     expect(
-      cylinderThetasKept(24, 0, Math.PI * 1.6, MIXER_WALL_MERIDIAN_STEP).length,
-    ).toBeLessThan(cylinderThetasKept(24, 0, Math.PI * 1.6).length);
+      cylinderThetasKept(24, 0, Math.PI * 1.6, 3).length,
+    ).toBeLessThan(cylinderThetasKept(24, 0, Math.PI * 1.6, MIXER_WALL_MERIDIAN_STEP).length);
     expect(
       cylinderThetasEven(15, 0, LIQUID_THETA_LENGTH, true, FLASK_MERIDIAN_STEP).length,
     ).toBeLessThan(cylinderThetasEven(15, 0, LIQUID_THETA_LENGTH, true).length);
@@ -151,10 +154,11 @@ describe('scene document', () => {
     expect(MIXER_SHADE_MIN).toBeCloseTo(0.4);
     expect(MIXER_SHADE_MIN).toBeGreaterThan(TANK_SHADE_MIN);
     // 0.84 hid the shaft below the waterline; 0.69 (depthWrite off then) printed flask meridians through.
-    expect(MIXER_LIQUID_OPACITY).toBeCloseTo(0.72);
+    // One liquid look since round 2: both alias the `liquid` finish token (style.ts, GLB hd.liquid).
+    expect(MIXER_LIQUID_OPACITY).toBe(HOLODECK_STYLE.finishes.liquid!.opacity);
     expect(MIXER_LIQUID_OPACITY).toBeGreaterThan(0.69);
-    // Translucent (depthWrite on) so the interior back-wall rings show through the liquid (Des 2026-10-29).
-    expect(TANK_LIQUID_OPACITY).toBeCloseTo(0.8);
+    // Translucent so the interior back-wall rings show through the liquid (Des 2026-10-29).
+    expect(TANK_LIQUID_OPACITY).toBe(HOLODECK_STYLE.finishes.liquid!.opacity);
     expect(TANK_LIQUID_OPACITY).toBeLessThan(1);
     expect(TANK_LIQUID_OPACITY).toBeGreaterThan(0.69);
     expect(DEFAULT_TANK_PARAMS.liquidOpacity).toBe(TANK_LIQUID_OPACITY);
@@ -176,7 +180,7 @@ describe('scene document', () => {
     expect(DEFAULT_TANK_PARAMS.linerColor).toBe(TANK_LINER_COLOR);
     expect(DEFAULT_TANK_PARAMS.bowlYOffset).toBe(0);
     expect(DEFAULT_TANK_PARAMS.innerRatio).toBeCloseTo(TANK_INNER_RATIO);
-    expect(MIXER_INNER_RATIO).toBeLessThan(DEFAULT_TANK_PARAMS.innerRatio);
+    expect(MIXER_INNER_RATIO).toBeLessThanOrEqual(DEFAULT_TANK_PARAMS.innerRatio);
     expect(TANK_WINDOW_DEG).toBe(91);
     expect(TANK_WINDOW_YAW).toBe(45);
     expect(DEFAULT_TANK_PARAMS.windowDeg).toBe(TANK_WINDOW_DEG);

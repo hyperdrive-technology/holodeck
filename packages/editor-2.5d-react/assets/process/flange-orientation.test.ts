@@ -7,19 +7,22 @@
  * plane is perpendicular to the run.
  *
  * Regressions this pins: the whirlpool nozzle (was a group yaw + mesh roll
- * on X-axis cylinders, now `tankNozzlePose` + the shared pipe geometry) and
+ * on X-axis cylinders, now `tankNozzlePose` + flange.ts `nozzleStubGeometry`) and
  * the steam-out nut (its Euler had a pi/12 yaw that tilted the nut 15° off
  * the +X run).
  */
 import { describe, expect, it } from 'vitest';
 import { BufferGeometry, CylinderGeometry, Euler, Matrix4, Quaternion, Vector3 } from 'three';
-import { buildPipeGeometry, tankNozzleGeometry } from './pipe-geometry';
+import { buildPipeGeometry } from './pipe-geometry';
+import { NOZZLE_FLANGE_SCALE, flangeRingGeometry, nozzleStubGeometry } from './flange';
 import { pipePose } from './pipe-math';
 import { STEAM_NUT_LEN, STEAM_NUT_R, STEAM_NUT_ROT, STEAM_NUT_ROT_ORDER } from './EndCap';
 import { sharedValveBody } from './valve-geometry';
 import {
   DEFAULT_TANK_PARAMS,
   TANK_NOZZLE_JAMB_OFFSET,
+  TANK_NOZZLE_LEAN,
+  TANK_NOZZLE_RADIUS,
   mergeTankParams,
   tankLayout,
   tankNozzlePose,
@@ -64,10 +67,12 @@ describe('tank nozzle flange', () => {
   const p = mergeTankParams(WHIRLPOOL_PRESET.params);
   const { keepStart, keepLen } = tankWindow(p.windowDeg, p.windowYawDeg);
   const theta = keepStart + keepLen - TANK_NOZZLE_JAMB_OFFSET;
-  const nozzleR = tankR * 0.08;
+  const nozzleR = tankR * TANK_NOZZLE_RADIUS;
   const y0 = tankLayout(WHIRLPOOL_PRESET.height, tankR, p).y0;
-  const pose = tankNozzlePose(tankR, theta, y0 + 0.4, 0.44, nozzleR);
+  const pose = tankNozzlePose(tankR, theta, y0 + 0.4, 0.3, nozzleR);
   const axis = new Vector3(...pose.axis);
+  const start = new Vector3(...pose.position);
+  const end = start.clone().addScaledVector(axis, pose.length);
 
   it('the quaternion turns the geometry axis (+Y) onto the nozzle axis', () => {
     const y = new Vector3(0, 1, 0).applyQuaternion(new Quaternion(...pose.quaternion));
@@ -76,39 +81,65 @@ describe('tank nozzle flange', () => {
     expect(axis.length()).toBeCloseTo(1);
   });
 
-  it('runs along the wall tangent (a tangential inlet), away from the window', () => {
-    const tangent = new Vector3(Math.cos(theta), 0, -Math.sin(theta));
-    expect(Math.abs(axis.dot(tangent))).toBeCloseTo(1);
-    // Pointing toward decreasing theta: away from the window jamb at keepStart + keepLen.
-    expect(axis.dot(tangent)).toBeLessThan(0);
+  it('leaves the wall outward, leaning TANK_NOZZLE_LEAN toward the tangent (away from the window)', () => {
+    const normal = new Vector3(Math.sin(theta), 0, Math.cos(theta));
+    const away = new Vector3(-Math.cos(theta), 0, Math.sin(theta));
+    expect(axis.dot(normal)).toBeCloseTo(Math.cos(TANK_NOZZLE_LEAN));
+    expect(axis.dot(away)).toBeCloseTo(Math.sin(TANK_NOZZLE_LEAN));
+    expect(TANK_NOZZLE_LEAN).toBeGreaterThan(0);
+    expect(TANK_NOZZLE_LEAN).toBeLessThan(Math.PI / 4);
   });
 
-  it('every ring of the nozzle geometry (joints + end flange) is perpendicular to the axis', () => {
-    const geometry = tankNozzleGeometry(pose.length, nozzleR);
-    const m = new Matrix4().compose(new Vector3(...pose.position), new Quaternion(...pose.quaternion), new Vector3(1, 1, 1));
+  it('every ring of the stub (tube + end flange) is perpendicular to the axis', () => {
+    const geometry = nozzleStubGeometry({ length: pose.length, radius: nozzleR });
+    const m = new Matrix4().compose(start, new Quaternion(...pose.quaternion), new Vector3(1, 1, 1));
     expectRingsPerpendicular(geometry, m, new Vector3(0, 1, 0), axis);
     geometry.dispose();
   });
 
-  it('starts buried in the shell (no capped stub showing) and ends outside it', () => {
-    const c = new Vector3(...pose.position);
-    const start = c.clone().addScaledVector(axis, -pose.length / 2);
-    const end = c.clone().addScaledVector(axis, pose.length / 2);
-    // The whole near-end disc is inside the faceted wall (apothem of the default 15-gon).
+  it('starts buried in the faceted shell (no open end shows) and sticks out the visible length', () => {
     const apothem = tankR * Math.cos(Math.PI / DEFAULT_TANK_PARAMS.radialSegments);
-    expect(Math.hypot(start.x, start.z) + nozzleR).toBeLessThanOrEqual(apothem + 1e-9);
-    // Tangential, so the free end clears the wall by less than its length.
-    expect(Math.hypot(end.x, end.z)).toBeGreaterThan(tankR + 0.15);
+    // The tilted start disc reaches nozzleR * sin(lean) further out than its centre.
+    expect(Math.hypot(start.x, start.z) + nozzleR * Math.sin(TANK_NOZZLE_LEAN)).toBeLessThan(apothem);
     expect(start.y).toBeCloseTo(y0 + 0.4);
+    // `length` = buried part (to the circle of radius R) + the visible 0.3.
+    const exit = start.clone().addScaledVector(axis, pose.length - 0.3);
+    expect(Math.hypot(exit.x, exit.z)).toBeCloseTo(tankR, 6);
+    expect(Math.hypot(end.x, end.z)).toBeGreaterThan(tankR + 0.2);
   });
 
-  it('keeps the buried foot out of the window opening', () => {
+  it('sits on the kept wall, clear of the window opening', () => {
     const w = tankWindow(p.windowDeg, p.windowYawDeg);
-    const c = new Vector3(...pose.position);
-    const start = c.clone().addScaledVector(axis, -pose.length / 2);
     const th = Math.atan2(start.x, start.z);
-    const offWindow = Math.min(Math.abs(th - w.windowStart), Math.abs(th - (w.windowStart + w.windowRad)));
-    expect(offWindow).toBeGreaterThan(0.1);
+    const d = (a: number) => Math.abs(Math.atan2(Math.sin(a), Math.cos(a)));
+    expect(Math.min(d(th - w.windowStart), d(th - (w.windowStart + w.windowRad)))).toBeGreaterThan(0.3);
+  });
+});
+
+describe('flange.ts primitives', () => {
+  it('flangeRingGeometry is a ring of the given size centred at y on the +Y axis', () => {
+    const g = flangeRingGeometry({ radius: 0.2, scale: 1.5, length: 0.1, sides: 8, y: 2 });
+    g.computeBoundingBox();
+    const b = g.boundingBox!;
+    expect(b.min.y).toBeCloseTo(1.95);
+    expect(b.max.y).toBeCloseTo(2.05);
+    expect(Math.max(b.max.x, b.max.z)).toBeCloseTo(0.3);
+    g.dispose();
+  });
+
+  it('nozzleStubGeometry runs from y 0 to length with a flush flange at the free end', () => {
+    const g = nozzleStubGeometry({ length: 0.5, radius: 0.1 });
+    g.computeBoundingBox();
+    const b = g.boundingBox!;
+    expect(b.min.y).toBeCloseTo(0);
+    expect(b.max.y).toBeCloseTo(0.5);
+    expect(b.max.x).toBeCloseTo(0.1 * NOZZLE_FLANGE_SCALE, 2);
+    // The flange (widest vertices) only lives at the free end.
+    const pos = g.getAttribute('position');
+    for (let i = 0; i < pos.count; i++) {
+      if (Math.hypot(pos.getX(i), pos.getZ(i)) > 0.11) expect(pos.getY(i)).toBeGreaterThan(0.45);
+    }
+    g.dispose();
   });
 });
 
