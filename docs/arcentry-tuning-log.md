@@ -112,3 +112,20 @@ Parameter history moved out of `.agents/TODO.md` (2026-10-13) so the backlog sta
 - nozzle rejected: +tangent at 0.38 (axis 23° off camera → round face on a long pipe read as a twisted flange), +tangent at 0.2 (still a bolt end-on), −tangent tangent-outside (capped stub floating at the jamb), foot 0.04 / 0.24 (foot showed through the window), chord depth 0.5 (near end poked out)
 - steam nut Euler [π/6, 0, −π/2] XYZ vs [π/6, π/12, −π/2] (π/12 yawed the nut 15° off its +X run)
 - fidelity (system Chrome 15x, same build reproduces the darwin record 0.16487 on main): 0.18745 vs 0.16487
+
+## Batch 6 — Round 2: lines, shading, transparency, primitives, mixer.glb (Des 2026-10-29/30)
+
+- liquid = finish `liquid` (style.ts, GLB `hd.liquid`): opacity 0.78, depthWrite off, renderOrder 2 vs 0.62 (dull blue-grey over the shaded liner) / 1 solid / 0.84; Tank liquidOpacity + MIXER/TANK_LIQUID_OPACITY alias the token
+- style.colors.liquid #5cc8e6 vs #4aa3d9 (dull under a translucent fill); scene.json fills holding #6fd6ee vs #2f7eb8, ingredients #6c93f0 vs #2a6fa8 (solved from reference-canvas composites at opacity 0.78 over the liner)
+- TANK_INNER_RATIO 0.9 vs 0.74 (reference liquid spans the window; was "pie" when the flask was window-sliced), MIXER_INNER_RATIO 0.9 vs 0.72
+- liner iso shade (inward normal) 0.75..0.85 vs flat white / 0.8..1 / 0.9..1 (fidelity 0.167 white -> 0.187)
+- lines are Line2 at TANK_LINE_WIDTH 1 CSS px vs 1-device-px lineBasic (faint at DPR 2)
+- tank wall meridians every facet (TANK_WALL_MERIDIAN_STEP 1) vs step 3; dome every facet vs step 2; mixer wall step 1 vs 3
+- meridians on the kept-arc FACET grid (`facetThetasKept`) vs the world 2π/segs grid (crossed facets mid-face, missed rim vertices)
+- interior: TANK_INTERIOR_HOOPS 1 vs 2 (grid with seams), seams every 2nd liner vertex vs every facet (bird cage)
+- liquid bowl lines on (radial per facet + every 2nd stack ring) vs off; waterline at the surface radius; bowl equator ring when submerged
+- line-termination rule: every vertical ends on a ring -- dome liner hides far meridians, dish meridians reach the pole, flat-lid hatch base ring, dome equator ring
+- whirlpool inlet: short leaning stub (0.26 R, lean 0.45 rad, 0.6 rad onto the left wall, 16-gon, round 1.45x flange ring, iso shaded) vs round-1 grid-aligned chord stick (Des: "reads worse than before")
+- agitated vessels (Mixer part, mash tun) = mixer.glb (AgitatedVessel) scaled R / 0.45 x H / 1.45; MIXER_WINDOW 100° @ 45° (the GLB window) vs 70° @ 40°; mash tun support none
+- fidelity (system Chrome): 0.2054 vs batch-5 record 0.18745 (peak 0.212 before the dome liner + dense dome lines for the termination rule)
+- not fixed here (Blender lane): mixer.glb inner floor dish rim reads as a C (the window cuts through the dish in shell.band)
