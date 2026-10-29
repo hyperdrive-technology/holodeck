@@ -19,6 +19,10 @@ const pkgRoot = path.resolve(import.meta.dirname, '../..');
 const snapDir = artifactsDir('render');
 const snapPath = path.join(snapDir, 'brewhouse-vessels.png');
 const VIEW = { width: 1400, height: 520 };
+/** One vessel at 3x the row zoom: interior rings, agitator and nozzle flange at reviewable size. */
+const CLOSEUP_VIEW = { width: 520, height: 640 };
+const CLOSEUPS = ['mash-tun', 'whirlpool', 'hlt'] as const;
+const CLOSEUP_ZOOM = 160;
 
 
 let server: ViteDevServer;
@@ -71,8 +75,25 @@ describe.skipIf(!CHROMIUM)('vessel family workbench', () => {
           clip: { x: Math.round(i * stride), y: 0, width: Math.round(stride), height: VIEW.height },
         });
       }
+      // Close-ups: one vessel centred at CLOSEUP_ZOOM (vessels.html?only=<id>).
+      for (const name of CLOSEUPS) {
+        const close = await browser.newPage({ viewport: CLOSEUP_VIEW, deviceScaleFactor: 2 });
+        close.on('pageerror', (err) => logs.push(`pageerror: ${err.message}`));
+        await close.goto(
+          `http://127.0.0.1:${address.port}/vessels.html?level=0.5&agitate=1&only=${name}&zoom=${CLOSEUP_ZOOM}`,
+        );
+        const closeRoot = close.getByTestId('vessels-root');
+        await closeRoot.waitFor();
+        await waitForRendered(close);
+        expect(await closeRoot.getAttribute('data-vessels')).toBe(name);
+        const out = path.join(snapDir, `brewhouse-vessel-${name}-closeup.png`);
+        await close.screenshot({ path: out, type: 'png' });
+        if (statSync(out).size < 20_000) throw new Error(`blank close-up ${name}\n${logs.join('\n')}`);
+        await close.close();
+      }
+      expect(logs.filter((l) => l.startsWith('pageerror'))).toEqual([]);
     } finally {
       await browser.close();
     }
-  }, 60_000);
+  }, 90_000);
 });

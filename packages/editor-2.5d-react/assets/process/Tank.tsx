@@ -1,5 +1,6 @@
 import { Edges } from './Edges';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
+import { tankNozzleGeometry } from './pipe-geometry';
 import { BackSide, BufferAttribute, BufferGeometry, Vector2, type Vector3Tuple } from 'three';
 import { ShadedMesh, WhiteFill } from './Shell';
 import { useHolodeckStyle } from './style-context';
@@ -22,6 +23,10 @@ import {
   LIQUID_THETA_LENGTH,
   windowFillSegments,
   innerCageSpan,
+  interiorRingArc,
+  interiorRingHeights,
+  interiorRingSegments,
+  INTERIOR_RING_INSET,
   bodyShoulder,
   bodyOuterBowl,
   heelOverlap,
@@ -34,6 +39,10 @@ import {
   frustumProfile,
   dishProfile,
   legPositions,
+  heelSurfaceY,
+  tankNozzlePose,
+  TANK_NOZZLE_JAMB_OFFSET,
+  LEG_RADIUS_RATIO,
   type TankCap,
   type TankParams,
 } from './tank-params';
@@ -229,6 +238,18 @@ export function Tank({
           : [];
     return pts.map(([x, y]) => new Vector2(x, y));
   }, [p.bottom, tankR, y0, layout.bottomDepth, layout.bottomR, layout.bottomY]);
+  // Interior rim + hoop lines on the inner back wall (seen through the window). The straight wall runs
+  // y0..bodyTop on a plain tank; on a shouldered body (mixer) it runs from the heel join to the shoulder.
+  const interiorRings = useMemo(() => {
+    if (!p.showInteriorRings || !p.showLiner) return null;
+    const yBottom = useShoulder ? y0 + outer.bowlH : y0 + 0.004;
+    const yTop = useShoulder ? y0 + shoulder.cylH : bodyTop - 0.004;
+    const heights = interiorRingHeights(yBottom, yTop, p.interiorHoops);
+    if (heights.length === 0) return null;
+    const arc = interiorRingArc(p.windowDeg, p.windowYawDeg);
+    // The liner (cylinder or lathe) has `segs` facets over the kept arc starting at keepStart.
+    return interiorRingSegments(liner * INTERIOR_RING_INSET, heights, arc, keepStart, keepLen / segs);
+  }, [p.showInteriorRings, p.showLiner, p.interiorHoops, p.windowDeg, p.windowYawDeg, useShoulder, y0, outer.bowlH, shoulder.cylH, bodyTop, liner, keepStart, keepLen, segs]);
   const meshKey = `${segs}-${bodySegs}-${domeSegs}-${p.windowDeg}-${p.windowYawDeg}-${tankH}-${tankR}-${top}-${p.bottom}-${p.support}-${p.domeHeight}-${p.bowlHeight}-${level}-${p.shoulderRatio}-${p.shoulderTopRatio}-${p.outerBowlHeight}-${layout.bottomDepth}-${layout.topHeight}`;
   const bodyRingFs = Array.from({ length: Math.max(0, Math.round(p.bodyRings)) }, (_, i) => {
     const n = Math.max(1, Math.round(p.bodyRings));
@@ -237,20 +258,22 @@ export function Tank({
   const skirtR = tankR * 0.9;
   const skirtTop = p.bottom === 'flat' ? y0 : y0 - layout.bottomDepth * 0.5;
   const skirtH = Math.max(0.01, skirtTop - layout.floorY);
-  const legTop = p.bottom === 'flat' ? y0 : layout.bottomY + layout.bottomDepth * 0.6;
+  // A rounded heel (mixer bottle) curves up away from the floor point: run each leg up to the heel
+  // surface at the leg's INNER edge (the lowest point of the shell over the leg). Any higher and the leg
+  // top pokes through the shell into the cutaway (it showed through the liquid as a hex outline).
+  const legTop =
+    useShoulder && outer.bowlH > 1e-4
+      ? heelSurfaceY(y0, tankR, outer.bowlH, Math.max(0, tankR * LEG_RADIUS_RATIO - p.legRadius))
+      : p.bottom === 'flat'
+        ? y0
+        : layout.bottomY + layout.bottomDepth * 0.6;
   const legH = Math.max(0.01, legTop - layout.floorY);
   // Tangential inlet: on the kept arc just past the camera-left jamb (keepStart + keepLen is the
   // window's start, so subtracting walks onto the wall) so it reads against the shell.
-  const nozzleTheta = keepStart + keepLen - 0.38;
-  const nozzleLen = Math.max(0.3, tankR * 0.45);
-  const nozzleR = Math.max(0.04, tankR * 0.06);
-  const nozzleY = y0 + bodyH * 0.3;
-  const nozzleTangent = [Math.cos(nozzleTheta), 0, -Math.sin(nozzleTheta)] as const;
-  const nozzleCenter: Vector3Tuple = [
-    tankR * Math.sin(nozzleTheta) + nozzleTangent[0] * (nozzleLen / 2 - nozzleR),
-    nozzleY,
-    tankR * Math.cos(nozzleTheta) + nozzleTangent[2] * (nozzleLen / 2 - nozzleR),
-  ];
+  const nozzleLen = Math.max(0.3, tankR * 0.4);
+  // 0.06 R read as a wire next to the routed pipes (PIPE_RADIUS 0.2); 0.08 R keeps the flange ring legible.
+  const nozzleR = Math.max(0.05, tankR * 0.08);
+  const nozzle = tankNozzlePose(tankR, keepStart + keepLen - TANK_NOZZLE_JAMB_OFFSET, y0 + bodyH * 0.3, nozzleLen, nozzleR);
   return (
     <group position={position}>
       <group key={meshKey}>
@@ -475,18 +498,14 @@ export function Tank({
           </>
         ) : null}
         {p.nozzle === 'tangential' ? (
-          <group position={nozzleCenter} rotation={[0, nozzleTheta, 0]}>
-            <mesh rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[nozzleR, nozzleR, nozzleLen, 8]} />
-              <WhiteFill />
-              <Edges threshold={style.edges.thresholds.pipe} color={p.edgeColor} lineWidth={p.capLineWidth} />
-            </mesh>
-            <mesh rotation={[0, 0, Math.PI / 2]} position={[nozzleLen / 2 - nozzleR * 0.6, 0, 0]}>
-              <cylinderGeometry args={[nozzleR * 1.35, nozzleR * 1.35, nozzleR * 1.2, 8]} />
-              <WhiteFill />
-              <Edges threshold={style.edges.thresholds.pipe} color={p.edgeColor} lineWidth={p.capLineWidth} />
-            </mesh>
-          </group>
+          <TankNozzle
+            position={nozzle.position}
+            quaternion={nozzle.quaternion}
+            length={nozzle.length}
+            radius={nozzleR}
+            edgeColor={p.edgeColor}
+            lineWidth={p.capLineWidth}
+          />
         ) : null}
         {/* One lathe — bowl+cylinder rims were an equator ring vs r-holdbody. */}
         {p.showLiquid && lathePts.length > 2 ? (
@@ -505,6 +524,7 @@ export function Tank({
             <LineBag color={p.edgeColor} positions={waterline} />
           </>
         ) : null}
+        {interiorRings ? <LineBag color={p.edgeColor} positions={interiorRings} /> : null}
         {p.showBowl && flaskMeridians ? <LineBag color={p.edgeColor} positions={flaskMeridians} /> : null}
         {p.showCage && p.showInnerCage && ullageCage ? (
           <LineBag
@@ -516,9 +536,40 @@ export function Tank({
       </group>
       {/* Outside the keyed group so the `anim.agitator` node survives level / size changes (findAnimNodes memoises on the root). */}
       {p.agitator ? (
-        <TankAgitator tankH={tankH} fill={level} params={{ ...p, radius: tankR }} apexY={layout.apexY} />
+        <TankAgitator tankH={tankH} params={{ ...p, radius: tankR }} apexY={layout.apexY} />
       ) : null}
     </group>
+  );
+}
+
+/**
+ * The tangential inlet: a pipe run (the same geometry as routed pipes, so its
+ * end flange is the same ring) grown out of the shell along `quaternion`'s
+ * +Y. The shell end is plain (it is inside the wall); the free end flanged.
+ */
+function TankNozzle({
+  position,
+  quaternion,
+  length,
+  radius,
+  edgeColor,
+  lineWidth,
+}: {
+  position: Vector3Tuple;
+  quaternion: [number, number, number, number];
+  length: number;
+  radius: number;
+  edgeColor: string;
+  lineWidth: number;
+}) {
+  const style = useHolodeckStyle();
+  const geometry = useMemo(() => tankNozzleGeometry(length, radius), [length, radius]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  return (
+    <mesh position={position} quaternion={quaternion} geometry={geometry}>
+      <WhiteFill />
+      <Edges threshold={style.edges.thresholds.pipe} color={edgeColor} lineWidth={lineWidth} />
+    </mesh>
   );
 }
 

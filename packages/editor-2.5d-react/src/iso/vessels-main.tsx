@@ -5,7 +5,10 @@
  * copper liquid, so the family reads as one object with different params.
  * vessels-render.test.ts snapshots it to artifacts/render/brewhouse-vessels.png.
  *
- * URL params: level=<0..1> (default 0.5), agitate=1 (spin the agitators).
+ * URL params: level=<0..1> (default 0.5), agitate=1 (spin the agitators),
+ * only=<preset id> (one vessel, centred: the close-up review shots),
+ * zoom=<n> (orthographic zoom, default 62), target=<x,y,z> (look-at point,
+ * default the middle of the row at y 1.3).
  */
 import { createRoot } from 'react-dom/client';
 import { useRef } from 'react';
@@ -22,6 +25,9 @@ const COPPER = '#c8792a';
 const query = new URLSearchParams(location.search);
 const level = Number(query.get('level') ?? 0.5);
 const agitate = query.get('agitate') === '1';
+const only = query.get('only');
+const zoom = Number(query.get('zoom') ?? 62);
+const targetParam = query.get('target')?.split(',').map(Number);
 
 const ORDER: TankPresetId[] = ['hlt', 'mash-tun', 'kettle', 'whirlpool', 'fermenter', 'brite-tank'];
 const SPACING = 3.4;
@@ -53,12 +59,19 @@ function Vessel({ id, index }: { id: TankPresetId; index: number }) {
 }
 
 function Workbench() {
-  const [mx, mz] = along((ORDER.length - 1) / 2);
+  const shown = only && (ORDER as string[]).includes(only) ? [only as TankPresetId] : ORDER;
+  const [mx, mz] = along((shown.length - 1) / 2);
   return (
-    <main data-testid="vessels-root" data-vessels={ORDER.join(',')} style={{ width: '100%', height: '100%' }}>
+    <main data-testid="vessels-root" data-vessels={shown.join(',')} style={{ width: '100%', height: '100%' }}>
       <IsoRegistryProvider registry={getDefaultIsoRegistry()}>
-        <IsoCanvas zoom={62} target={[mx, 1.3, mz]} showControls={false} showGrid>
-          {ORDER.map((id, i) => (
+        <IsoCanvas
+          zoom={zoom}
+          target={
+            targetParam?.length === 3 && targetParam.every(Number.isFinite)
+              ? (targetParam as [number, number, number])
+              : [mx, 1.3, mz]
+          } showControls={false} showGrid>
+          {shown.map((id, i) => (
             <Vessel key={id} id={id} index={i} />
           ))}
         </IsoCanvas>

@@ -13,29 +13,8 @@ import { formatLabelText } from './label-text';
 import { mergeFittingParams } from '../../assets/process/fitting-params';
 import { pipeWorldY } from '../../assets/process/pipe-math';
 import { pipeRunSpec } from '../iso/pipe-runs';
-import {
-  tunedVesselHeight,
-  MIXER_INNER_RATIO,
-  MIXER_WINDOW_DEG,
-  MIXER_WINDOW_YAW,
-  MIXER_SHOULDER_RATIO,
-  MIXER_SHOULDER_TOP,
-  MIXER_OUTER_BOWL,
-  MIXER_IMPELLER_RADIUS,
-  MIXER_IMPELLER_SPAN,
-  MIXER_SHAFT_RADIUS,
-  MIXER_SHAFT_LENGTH,
-  MIXER_CAP_HEIGHT_RATIO,
-  MIXER_CAP_LID_THICKNESS,
-  MIXER_BODY_RINGS,
-  MIXER_CAP_RADIUS_RATIO,
-  MIXER_RADIAL_SEGMENTS,
-  MIXER_LIQUID_OPACITY,
-  MIXER_LINER_RATIO,
-  MIXER_LINER_COLOR,
-  MIXER_WALL_THRESHOLD,
-  type TankParams,
-} from '../../assets/process/tank-params';
+import { tunedVesselHeight, MIXER_WINDOW_DEG, MIXER_WINDOW_YAW, type TankParams } from '../../assets/process/tank-params';
+import { AGITATOR_PRESET, MIXER_BODY_PRESET } from '../../assets/process/tank-presets';
 import { ELBOW_BEND_MODES, ELBOW_BEND_PARAM } from '../routing/elbows';
 import { DEFAULT_TANK_CUTOUT } from '../routing/vessel-ports';
 import { INLINE_PART_LENGTH } from '../routing/inline';
@@ -52,28 +31,12 @@ export const BUILTIN_ISO_EXTENSION_ID = 'holodeck.iso.builtin';
 function mixerDefaults(style: HolodeckStyle): Partial<TankParams> {
   const flask = style.finishes.flask;
   return {
-    capHeightRatio: MIXER_CAP_HEIGHT_RATIO,
-    capRadiusRatio: MIXER_CAP_RADIUS_RATIO,
-    capLidThickness: MIXER_CAP_LID_THICKNESS,
-    shaftLength: MIXER_SHAFT_LENGTH,
-    shaftRadius: MIXER_SHAFT_RADIUS,
-    impellerSpan: MIXER_IMPELLER_SPAN,
-    impellerRadius: MIXER_IMPELLER_RADIUS,
-    radialSegments: MIXER_RADIAL_SEGMENTS,
-    bodyRings: MIXER_BODY_RINGS,
-    innerRatio: MIXER_INNER_RATIO,
-    windowDeg: MIXER_WINDOW_DEG,
-    windowYawDeg: MIXER_WINDOW_YAW,
-    shoulderRatio: MIXER_SHOULDER_RATIO,
-    shoulderTopRatio: MIXER_SHOULDER_TOP,
-    outerBowlHeight: MIXER_OUTER_BOWL,
+    // Same bottle body and agitator as the mash tun preset (one code path; tank-presets.ts).
+    ...MIXER_BODY_PRESET,
+    ...AGITATOR_PRESET,
     shadeMin: flask.shadeMin,
-    liquidOpacity: MIXER_LIQUID_OPACITY,
     hubWhite: flask.hubWhite,
     shadeMax: flask.shadeMax,
-    linerRatio: MIXER_LINER_RATIO,
-    linerColor: MIXER_LINER_COLOR,
-    wallThreshold: MIXER_WALL_THRESHOLD,
   };
 }
 

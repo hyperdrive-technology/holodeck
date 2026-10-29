@@ -1,15 +1,16 @@
 import type { Vector3Tuple } from 'three';
-import { useHolodeckStyle } from './style-context';
 import { Tank } from './Tank';
-import { TankAgitator } from './TankAgitator';
-import { mergeTankParams, type TankParams } from './tank-params';
+import type { TankParams } from './tank-params';
 
 /**
- * Same cutaway cylinder + dome as Tank, plus mixer bottle shoulders
- * (cosine lathe into the dome), a rounded outer heel, a squat agitator hat
- * on the dome apex, and a shaft + 3-blade impeller in the window.
- * The hat / shaft / impeller are `TankAgitator`, shared with the base
- * Tank's `agitator` param so both vessels draw the same agitator.
+ * The agitated vessel: the base `Tank` with a dome and `agitator: true`, so
+ * the Mixer palette part and agitated presets (mash tun) share one code path
+ * (hat / shaft / impeller are `TankAgitator`, drawn by Tank). The bottle body
+ * (shoulder, heel, window) comes from `params`; the registry passes
+ * `MIXER_BODY_PRESET` + `AGITATOR_PRESET` (src/registry/builtin.tsx).
+ *
+ * Before 2026-10-29 the Mixer drew its own `TankAgitator` next to the Tank;
+ * now an `agitator: false` in `params` is honoured instead of doubled.
  */
 export function Mixer({
   position,
@@ -26,21 +27,15 @@ export function Mixer({
   alarm?: boolean;
   params?: Partial<TankParams>;
 }) {
-  const style = useHolodeckStyle();
-  const p = mergeTankParams({ edgeColor: style.colors.edge, ...params });
-  const tankH = height ?? p.height;
   return (
-    <group position={position}>
-      <Tank
-        position={[0, 0, 0]}
-        fill={fill}
-        fillColor={fillColor}
-        height={tankH}
-        alarm={alarm}
-        cap="dome"
-        params={params}
-      />
-      <TankAgitator tankH={tankH} fill={fill} params={p} />
-    </group>
+    <Tank
+      position={position}
+      fill={fill}
+      fillColor={fillColor}
+      height={height}
+      alarm={alarm}
+      cap="dome"
+      params={{ agitator: true, ...params }}
+    />
   );
 }

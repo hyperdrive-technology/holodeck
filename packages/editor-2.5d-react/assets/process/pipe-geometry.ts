@@ -138,3 +138,19 @@ export function buildPipeBoreGeometry({
   parts.forEach((g) => g.dispose());
   return merged;
 }
+
+/**
+ * A vessel's side nozzle: a short pipe run along local +Y, plain at -Y (it
+ * starts inside the shell) and flanged at +Y, with the routed pipes' flange
+ * proportions scaled to the nozzle radius (PIPE_FLANGE_LEN is sized for
+ * PIPE_RADIUS). Shared geometry means the nozzle flange is the same ring as
+ * every pipe flange, perpendicular to the run by construction.
+ */
+export function tankNozzleGeometry(length: number, radius: number): BufferGeometry {
+  return buildPipeGeometry({
+    length,
+    radius,
+    ends: { from: 'plain', to: 'flange' },
+    flangeLen: PIPE_FLANGE_LEN * (radius / PIPE_RADIUS) * 1.6,
+  });
+}

@@ -38,8 +38,15 @@ export const STEAM_NUT_EDGE_THRESHOLD = HOLODECK_STYLE.edges.thresholds.steamNut
  * Z = −π/2 (vertex-up in iso). World X = π/6 after that yaw is one hex
  * step so a face sits iso-up like r-steam’s flat-top. Do not put π/6 on
  * Y (that was the pancake) or on ZYX roll (that was the cube).
+ *
+ * 2026-10-29 (Des: "every flange ring must be perpendicular to its pipe
+ * axis"): the Y = π/12 yaw tilted the nut's axis 15° off the +X pipe, so the
+ * coupling sat skewed on the steam-out run in editor.png. Y is 0 now:
+ * XYZ builds Rx(π/6)·Ry(0)·Rz(−π/2), i.e. lay the prism on +X, then roll it
+ * π/6 about its own (+X) axis for the flat-top face. The roll cannot move
+ * the axis, so the nut is coaxial with the pipe; pipe-flanges.test.ts pins it.
  */
-export const STEAM_NUT_ROT: Vector3Tuple = [Math.PI / 6, Math.PI / 12, -Math.PI / 2];
+export const STEAM_NUT_ROT: Vector3Tuple = [Math.PI / 6, 0, -Math.PI / 2];
 export const STEAM_NUT_ROT_ORDER = 'XYZ' as const;
 
 /**
