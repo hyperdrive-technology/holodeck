@@ -50,6 +50,11 @@ material outside `hd.*`. Note that GLTFLoader removes `.` from node names
 (`port.in` arrives as `portin`). The original name is kept in `userData.name`;
 `findPorts` and `findAnimNodes` read it.
 
+Vessels ship with a full liquid (the runtime scales `anim.liquid`). To judge a
+part-filled look on the parts page, `parts/mixer.py` honours
+`HD_MIXER_PREVIEW_FILL=0.52 pnpm run parts:build mixer`; rebuild without it
+before committing (the GLB tests check the pivot is unscaled).
+
 ## Adding a part
 
 1. Create `parts/<part>.py`. Copy the header of `parts/valve.py`, which adds the

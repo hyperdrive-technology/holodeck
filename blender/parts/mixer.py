@@ -81,6 +81,14 @@ KEEP_ARC = (math.pi / 2, math.tau)  # the 270 deg of wall that stays
 KEEP_STEPS = 12  # 22.5 deg per step so the cut lands on the 16-gon facets
 RING_YS = (0.35, 0.55, 0.75, 0.95, 1.15, 1.35)  # inner back-wall ring lines
 RING_DEPTH, RING_HALF_H = 0.006, 0.03  # ridge apex crease = 2*atan(0.2) ~ 22.6 deg
+# Visibility note (found by rendering, not obvious from the geometry): from the
+# 35 deg iso camera the opaque liquid's top surface covers the back wall up to
+# about 0.08 above the liquid level, and the front shoulder rim hides it above
+# y ~0.86 at the back (less at the sides). So the ring lines read at low fills
+# (<= ~40%) and near the cut faces; at the reference's 52% only the top ring
+# shows. They are not drawn through the liquid as in Arcentry because
+# hd.accent has no translucency. Verified with omission probes (no liquid /
+# no band): the band's inner wall and its ridges render correctly.
 # --- liquid ---------------------------------------------------------------------
 Y_LIQ0 = T  # inner floor
 LIQ_H = Y_WALL1 - T  # 1.39, full = up to the shoulder
@@ -147,6 +155,12 @@ def sweep(name, loop, seg, mat, arc=None, arc_steps=None, parent=None):
     bm = bmesh.new()
     bm.from_mesh(obj.data)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    # Self-check: a closed solid oriented outward has positive signed volume.
+    # Materials are single-sided, so an inside-out shell would silently render
+    # as its own interior (culled walls, no outlines on the ridges).
+    vol = bm.calc_volume(signed=True)
+    if vol <= 0 or any(not e.is_manifold for e in bm.edges):
+        raise RuntimeError(f"{name}: sweep is not a closed outward solid (signed volume {vol:.5f})")
     bm.to_mesh(obj.data)
     bm.free()
     obj.data.update()
