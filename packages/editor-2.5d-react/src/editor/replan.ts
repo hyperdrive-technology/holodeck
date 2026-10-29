@@ -74,7 +74,7 @@ export interface ReplanOptions {
 
 export type ReplanResult =
   | { ok: true; objects: IsoPlacement[]; firstId: string | null }
-  | { ok: false; reason: 'locked' | 'no-route' | 'inline' | 'retained'; notice: string };
+  | { ok: false; reason: 'locked' | 'no-route' | 'inline' | 'retained' | 'identity'; notice: string };
 
 const fail = (reason: Exclude<ReplanResult, { ok: true }>['reason'], notice: string): ReplanResult => ({ ok: false, reason, notice });
 
@@ -223,6 +223,21 @@ export function replanRun(
   let carriedOut = carried;
   if (opts.keepIds) {
     const adopted = adoptRunIds(replacements, originals, chain);
+    // PR #212 review (P1): a route with fewer segments than the run drops the
+    // surplus ids. Reroute merges every old segment's data onto the first new
+    // one; follow keeps ids instead, so a surplus segment that carries its own
+    // data (bindings, meta, extensions, animation) or that another placement
+    // points at would silently lose it. Refuse that route rather than delete.
+    const kept = new Set(adopted.rename.values());
+    const carriedIds = new Set(carried.map((p) => p.id));
+    for (const old of originals) {
+      if (kept.has(old.id)) continue;
+      const hasData = ROUTE_IDENTITY_FIELDS.some((f) => old[f] !== undefined);
+      const referenced = rest.some((o) => !carriedIds.has(o.id) && referencesId(o, old.id));
+      if (hasData || referenced) {
+        return fail('identity', `${old.object === 'elbow' ? 'Elbow' : 'Pipe'} ${old.id} ${hasData ? 'carries tags / metadata' : 'is referenced by another part'} and this route would remove it — move elsewhere, or Alt-drag to move the part alone`);
+      }
+    }
     replacements = adopted.placements;
     carriedOut = carried.map((p) => (p.onPipe && adopted.rename.has(p.onPipe) ? { ...p, onPipe: adopted.rename.get(p.onPipe)! } : p));
   }
@@ -306,6 +321,12 @@ function attachTerminals(placements: IsoPlacement[], start: IsoPipeAttach | unde
     if (p.id === last.id) next = withPipeAttach(next, 'to', end ? attachRecord(end) : null);
     return next;
   });
+}
+
+/** Does placement `o` point at placement id `id` (connector anchor, pipe attach record, onPipe)? */
+function referencesId(o: IsoPlacement, id: string): boolean {
+  const end = (e: unknown) => typeof e === 'object' && e !== null && 'object' in e && (e as { object: unknown }).object === id;
+  return o.onPipe === id || end(o.link?.from) || end(o.link?.to) || end(o.attach?.from) || end(o.attach?.to);
 }
 
 /** The explicit record on whichever run pipe end lies at `point`. */

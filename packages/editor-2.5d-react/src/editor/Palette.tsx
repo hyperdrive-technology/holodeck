@@ -33,10 +33,11 @@ export const PALETTE_DRAG_THRESHOLD = 4;
  * stops sending pointer moves to the canvas, so the editor's own ghost (grid
  * snap, port snap) could not follow the pointer. Past the threshold the part
  * is armed (`onDragStart`, the same as a click); on release `onDrop` gets
- * whether the pointer is over the canvas. A press that never moves stays a
+ * the element under the pointer (null when cancelled): the editor decides
+ * whether that is ITS canvas (another canvas on the page is not, #221). A press that never moves stays a
  * click (arm the tool for click-to-place).
  */
-function usePaletteDrag(onDragStart?: (partId: string) => void, onDrop?: (partId: string, overCanvas: boolean) => void) {
+function usePaletteDrag(onDragStart?: (partId: string) => void, onDrop?: (partId: string, target: Element | null) => void) {
   const cleanup = useRef<(() => void) | null>(null);
   useEffect(() => () => cleanup.current?.(), []);
   return (event: ReactPointerEvent<HTMLElement>, partId: string) => {
@@ -55,12 +56,11 @@ function usePaletteDrag(onDragStart?: (partId: string) => void, onDrop?: (partId
     const up = (e: PointerEvent) => {
       cleanup.current?.();
       if (!active) return;
-      const target = document.elementFromPoint(e.clientX, e.clientY);
-      onDrop(partId, target instanceof HTMLCanvasElement);
+      onDrop(partId, document.elementFromPoint(e.clientX, e.clientY));
     };
     const cancel = () => {
       cleanup.current?.();
-      if (active) onDrop(partId, false);
+      if (active) onDrop(partId, null);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -88,7 +88,7 @@ export function Palette({
   onPick: (partId: string) => void;
   /** Drag-and-drop from the palette (see `usePaletteDrag`); omit both to keep click-to-place only. */
   onDragStart?: (partId: string) => void;
-  onDrop?: (partId: string, overCanvas: boolean) => void;
+  onDrop?: (partId: string, target: Element | null) => void;
 }) {
   const [query, setQuery] = useState('');
   const startDrag = usePaletteDrag(onDragStart, onDrop);

@@ -495,12 +495,15 @@ export function ProcessEditor({
   // the ghost and returns to the select tool with it selected. Released
   // anywhere else, the drag is cancelled. Run parts (pipe) only arm their
   // tool: a pipe is drawn click-click.
-  const dropFromPalette = useCallback((partId: string, overCanvas: boolean) => {
+  const dropFromPalette = useCallback((partId: string, target: Element | null) => {
     const s = stateRef.current;
     if (s.mode === 'draw-pipe') return;
     if (s.mode !== 'place' || s.placing !== partId) return;
-    if (overCanvas && s.cursor) dispatch({ type: 'floor-click', x: s.cursor.x, y: s.cursor.y });
-    dispatch({ type: 'select-mode' });
+    // Only this editor's own canvas takes the drop (#221), not any <canvas> on the page.
+    const overCanvas = target instanceof HTMLCanvasElement && (viewRef.current?.contains(target) ?? false);
+    // One action (place + select + `placed`), so the host's onPlaced fires (PR #212 review).
+    if (overCanvas && s.cursor) dispatch({ type: 'palette-drop', object: partId, x: s.cursor.x, y: s.cursor.y });
+    else dispatch({ type: 'select-mode' });
   }, []);
 
   useImperativeHandle(

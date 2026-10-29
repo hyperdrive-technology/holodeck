@@ -45,7 +45,15 @@ export const FOLLOW_PARTS_NOTICE = 'Valves / pumps on an attached pipe do not fi
 
 /** The notice for a frame with blocked runs. */
 export function blockedNotice(blocked: readonly BlockedRun[]): string {
+  const identity = blocked.find((b) => b.reason === 'identity');
+  if (identity?.notice) return identity.notice;
   return blocked.every((b) => b.reason === 'inline') ? FOLLOW_PARTS_NOTICE : FOLLOW_BLOCKED_NOTICE;
+}
+
+/** Notices a drag frame sets (cleared again when a frame routes, on drop or Esc). */
+export function isFollowFrameNotice(notice: string | null): boolean {
+  return notice === FOLLOW_BLOCKED_NOTICE || notice === FOLLOW_PARTS_NOTICE || notice === FOLLOW_LOCKED_NOTICE
+    || (notice !== null && notice.includes('this route would remove it'));
 }
 /** Drop at an unroutable spot: the move lands on the last position every pipe could follow. */
 export const FOLLOW_SNAPPED_NOTICE = 'Pipes could not follow to that spot — dropped at the last position they could reach';
@@ -101,7 +109,9 @@ export interface BlockedRun {
   ids: string[];
   points: GridPoint[];
   /** `inline`: a route exists but the valves / pumps riding on the run do not fit it. */
-  reason: 'no-route' | 'inline' | 'locked' | 'retained';
+  reason: 'no-route' | 'inline' | 'locked' | 'retained' | 'identity';
+  /** Reason text from the planner (e.g. which pipe would lose its data). */
+  notice?: string;
 }
 
 const sameRunEnd = (a: GridPoint, b: GridPoint) => a.x === b.x && a.y === b.y;
@@ -134,11 +144,20 @@ export function planFollow(
   // far side, with its branch, stays exactly where it is.
   const objects = splitAtMidTees(original, registry, originalAttached, moving);
   const split = objects !== original;
+  // PR #212 review (P2): splitting rewrites the split pipes and the riders
+  // re-attached to a new piece, including riders on the far, stationary side
+  // that the run's own lock check never sees. Every placement the split
+  // changes must be editable, or the move refuses like any locked run.
+  let splitLocked = false;
+  if (split) {
+    const after = new Map(objects.map((o) => [o.id, o]));
+    splitLocked = original.some((o) => after.get(o.id) !== o && !editable(o));
+  }
   const attached = split ? endsAttachedTo(objects, registry, moving) : originalAttached;
   const byId = new Map(objects.map((o) => [o.id, o]));
   const seen = new Set<string>();
   const runs: FollowRun[] = [];
-  let locked = false;
+  let locked = splitLocked;
   for (const { pipe } of attached) {
     if (seen.has(pipe.id)) continue;
     const run = findRun(objects, pipe.id, registry);
@@ -345,7 +364,7 @@ export function applyFollow(
       } else {
         const { pipes, elbow } = manhattanRoute(start.point, end.point);
         const points = pipes.length === 0 ? [] : elbow ? [start.point, elbow, end.point] : [start.point, end.point];
-        blocked.push({ ids: r.run.ids, points, reason: result.reason });
+        blocked.push({ ids: r.run.ids, points, reason: result.reason, notice: result.notice });
       }
     }
   }

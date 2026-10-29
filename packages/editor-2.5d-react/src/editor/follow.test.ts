@@ -387,3 +387,96 @@ describe('mid-pipe tees pin the run (splitAtMidTees)', () => {
   });
 });
 
+
+describe('PR #212 review fixes', () => {
+  it('[P1] a follow that would drop a surplus segment carrying bindings / meta is refused, never silently deleted', () => {
+    // a -> b through three collinear segments; p2 carries a live binding and metadata.
+    const s0 = createEditorState(sceneOf([
+      tank('a', 0, 0), tank('b', 10, 0),
+      pipe('p1', 1, 0, 4, 0),
+      { ...pipe('p2', 4, 0, 6, 0), meta: { tag: 'FT-2' }, bindings: { flow: { connection: 'plc', source: 'FT2' } } },
+      pipe('p3', 6, 0, 9, 0),
+    ]));
+    const s1 = run(s0, { type: 'drag-start', id: 'b', x: 10, y: 0 }, { type: 'drag-move', x: 11, y: 0 });
+    // Straightening into one pipe would remove p2: the frame is blocked, nothing is deleted.
+    expect(s1.drag?.blocked).toHaveLength(1);
+    expect(s1.drag?.blocked[0]!.reason).toBe('identity');
+    expect(s1.notice).toMatch(/p2/);
+    expect(byId(s1, 'p2')).toMatchObject({ meta: { tag: 'FT-2' }, bindings: { flow: { connection: 'plc', source: 'FT2' } } });
+    const s2 = run(s1, { type: 'drag-end' });
+    expect(s2.scene.objects).toEqual(s0.scene.objects);
+    expect(s2.past).toHaveLength(0);
+  });
+
+  it('[P1] surplus segments without data still collapse (no needless refusal)', () => {
+    const s0 = createEditorState(sceneOf([tank('a', 0, 0), tank('b', 10, 0), pipe('p1', 1, 0, 4, 0), pipe('p2', 4, 0, 6, 0), pipe('p3', 6, 0, 9, 0)]));
+    const s = run(s0, { type: 'drag-start', id: 'b', x: 10, y: 0 }, { type: 'drag-move', x: 11, y: 0 }, { type: 'drag-end' });
+    expect(pipesOf(s)).toEqual([expect.objectContaining({ id: 'p1', x: 1, y: 0, toX: 10, toY: 0 })]);
+  });
+
+  it('[P1] a surplus segment referenced by another placement (connector anchor) is refused', () => {
+    const s0 = createEditorState(sceneOf([
+      tank('a', 0, 0), tank('b', 10, 0), pipe('p1', 1, 0, 4, 0), pipe('p2', 4, 0, 6, 0), pipe('p3', 6, 0, 9, 0),
+      { id: 'c', object: 'connector', x: 5, y: 3, link: { from: { object: 'p2' }, to: { x: 5, y: 6 } } },
+    ]));
+    const s = run(s0, { type: 'drag-start', id: 'b', x: 10, y: 0 }, { type: 'drag-move', x: 11, y: 0 });
+    expect(s.drag?.blocked[0]?.reason).toBe('identity');
+  });
+
+  it('#217 releasing Alt then dropping on a blocked spot never lands on the detached frame', () => {
+    const s0 = createEditorState(sceneOf([tank('a', 0, 0), tank('b', 10, 0), pipe('p', 1, 0, 9, 0), tank('w', 7, 4)]));
+    const s = run(s0,
+      { type: 'drag-start', id: 'b', x: 10, y: 0 },
+      { type: 'drag-move', x: 10, y: 2, detach: true },
+      { type: 'drag-move', x: 10, y: 4 },
+      { type: 'drag-end' });
+    // No follow frame ever routed: the move is cancelled, truthfully.
+    expect(s.scene.objects).toEqual(s0.scene.objects);
+    expect(s.notice).toBe(FOLLOW_CANCELLED_NOTICE);
+  });
+
+  it('#217 a routable follow frame before the Alt frames is still the fallback', () => {
+    const s0 = createEditorState(sceneOf([tank('a', 0, 0), tank('b', 10, 0), pipe('p', 1, 0, 9, 0), tank('w', 7, 4)]));
+    const s = run(s0,
+      { type: 'drag-start', id: 'b', x: 10, y: 0 },
+      { type: 'drag-move', x: 10, y: 2 },
+      { type: 'drag-move', x: 10, y: 3, detach: true },
+      { type: 'drag-move', x: 10, y: 4 },
+      { type: 'drag-end' });
+    expect(byId(s, 'b')).toMatchObject({ x: 10, y: 2 });
+    expect(pipesOf(s).some((p) => p.toX === 9 && p.toY === 2)).toBe(true);
+    expect(s.notice).toBe(FOLLOW_SNAPPED_NOTICE);
+  });
+
+  it('#221 Esc clears the follow notice', () => {
+    const s0 = createEditorState(sceneOf([tank('a', 0, 0), tank('b', 10, 0), pipe('p', 1, 0, 9, 0), tank('w', 7, 4)]));
+    const s = run(s0, { type: 'drag-start', id: 'b', x: 10, y: 0 }, { type: 'drag-move', x: 10, y: 4 });
+    expect(s.notice).toBe(FOLLOW_BLOCKED_NOTICE);
+    expect(run(s, { type: 'cancel' }).notice).toBeNull();
+  });
+
+  it('[P2] splitting at a mid-pipe tee refuses when a rider it would rewrite is on a locked layer', () => {
+    const s0 = createEditorState(sceneOf([
+      // b's east port (0, 0) feeds `main`; the locked valve sits on the far (stationary) side of the tee,
+      // so the split would rewrite its onPipe to the new piece without it being part of the moving run.
+      tank('b', -1, 0),
+      pipe('main', 0, 0, 10, 0),
+      pipe('branch', 5, 0, 5, -4),
+      { id: 'v', object: 'valve', x: 8, y: 0, onPipe: 'main', at: 0.8, layer: 'locked' },
+    ], { layers: [{ id: 'locked', name: 'Locked', locked: true }] }));
+    const s = run(s0, { type: 'drag-start', id: 'b', x: -1, y: 0 }, { type: 'drag-move', x: -1, y: 3 });
+    expect(s.notice).toBe(FOLLOW_LOCKED_NOTICE);
+    expect(s.scene.objects).toBe(s0.scene.objects);
+  });
+
+  it('[P2] a palette drop is one action: places, selects, returns to select and reports `placed`', () => {
+    const s0 = createEditorState(sceneOf([]));
+    const s = run(s0, { type: 'palette-drop', object: 'tank', x: 2, y: 3 });
+    expect(byId(s, 'tank-1')).toMatchObject({ x: 2, y: 3 });
+    expect(s.placed).toBe('tank-1');
+    expect(s.mode).toBe('select');
+    expect(s.placing).toBeNull();
+    expect(s.selectedIds).toEqual(['tank-1']);
+    expect(s.past).toHaveLength(1);
+  });
+});

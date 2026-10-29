@@ -214,6 +214,8 @@ describe.skipIf(!CHROMIUM)('pipes follow a dragged vessel (browser)', () => {
       const after = await page.evaluate(() => (window as unknown as Win).__editor.getState());
       expect(after.mode).toBe('select');
       expect(after.selectedIds).toEqual(['tank-1']);
+      // The host hears about the drop exactly once (PR #212 review: place + select-mode lost `placed`).
+      expect(await page.evaluate(() => (window as unknown as { __placed: string[] }).__placed)).toEqual(['tank-1']);
 
       // The stub is attached now: dragging the new tank re-routes it from tank-a.
       await dragFrom(page, toScreen, [7, 0], [6, 3]);

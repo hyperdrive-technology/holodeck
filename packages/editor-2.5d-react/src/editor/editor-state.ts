@@ -7,7 +7,7 @@ import { resolveRouteEnd, type ResolvedRouteEnd } from '../routing/ports';
 import { withPipeAttach } from '../routing/attach';
 import { isPipePlacement, withAttachment } from '../routing/inline';
 import { findRun, isInlinePart } from '../routing/run';
-import { applyFollow, blockedNotice, FOLLOW_BLOCKED_NOTICE, FOLLOW_PARTS_NOTICE, FOLLOW_CANCELLED_NOTICE, FOLLOW_LOCKED_NOTICE, FOLLOW_SNAPPED_NOTICE, followsAnything, planFollow, sameObjects, type BlockedRun, type FollowPlan } from './follow';
+import { applyFollow, blockedNotice, isFollowFrameNotice, FOLLOW_CANCELLED_NOTICE, FOLLOW_LOCKED_NOTICE, FOLLOW_SNAPPED_NOTICE, followsAnything, planFollow, sameObjects, type BlockedRun, type FollowPlan } from './follow';
 import { moveSnapTargets, snapMoveDelta, snapNewPlacement, type MoveSnapTargets } from './port-snap';
 import { replanRun } from './replan';
 import { routeToPlacements, type GridPoint } from './routing';
@@ -126,6 +126,12 @@ export interface EditorState {
 export type EditorAction =
   | { type: 'select-mode' }
   | { type: 'place-mode'; object: string }
+  /**
+   * Palette drag released over the canvas: stamp one `object` at (x, y) and
+   * return to the select tool with it selected. One action, so `placed` (and
+   * the host's `onPlaced`) survives (PR #212 review).
+   */
+  | { type: 'palette-drop'; object: string; x: number; y: number }
   | { type: 'pipe-mode' }
   | { type: 'cursor'; x: number; y: number }
   | { type: 'floor-click'; x: number; y: number }
@@ -648,8 +654,6 @@ function numberParam(obj: IsoPlacement, param: string, fallback: unknown): numbe
 /** Arrow-key nudge refused: an attached pipe has no clear route at the new position. */
 export const NUDGE_BLOCKED_NOTICE = 'No clear route for an attached pipe there — nudge cancelled';
 
-const FOLLOW_FRAME_NOTICES: ReadonlySet<string> = new Set([FOLLOW_BLOCKED_NOTICE, FOLLOW_PARTS_NOTICE, FOLLOW_LOCKED_NOTICE]);
-
 /**
  * One move-drag frame (pure). Starts from `drag.base` every time: the moved
  * parts by the pointer delta, plus pipes following them (follow.ts). When
@@ -676,7 +680,7 @@ function dragMove(state: EditorState, x: number, y: number, detach: boolean): Ed
   if (key === drag.key) {
     return drag.plan ? { ...state, cursor } : { ...state, cursor, drag: { ...drag, plan, snap: targets } };
   }
-  const clearOurs = state.notice !== null && FOLLOW_FRAME_NOTICES.has(state.notice) ? null : state.notice;
+  const clearOurs = isFollowFrameNotice(state.notice) ? null : state.notice;
   if (plan.locked && !detach && (dx !== 0 || dy !== 0)) {
     // holodeck#122: never re-route a locked / hidden pipe. Hold everything at
     // the start (Alt still moves the part alone) and say why.
@@ -695,7 +699,9 @@ function dragMove(state: EditorState, x: number, y: number, detach: boolean): Ed
     ...state,
     cursor,
     scene: { ...state.scene, objects: frame.objects },
-    drag: { ...drag, plan, snap: targets, key, blocked: frame.blocked, valid: routed ? frame.objects : drag.valid },
+    // Only a frame where the pipes really followed may be the drop fallback:
+    // an Alt (detach) frame left them behind (#217).
+    drag: { ...drag, plan, snap: targets, key, blocked: frame.blocked, valid: routed && !detach ? frame.objects : drag.valid },
     notice: routed ? clearOurs : blockedNotice(frame.blocked),
   };
 }
@@ -713,7 +719,7 @@ function dragEnd(state: EditorState): EditorState {
     return state;
   }
   let objects = state.scene.objects;
-  let notice = state.notice !== null && (state.notice === FOLLOW_BLOCKED_NOTICE || state.notice === FOLLOW_PARTS_NOTICE) ? null : state.notice;
+  let notice = state.notice !== FOLLOW_LOCKED_NOTICE && isFollowFrameNotice(state.notice) ? null : state.notice;
   if (drag.blocked.length > 0) {
     objects = drag.valid ?? drag.base;
     notice = drag.valid && !sameObjects(drag.valid, drag.base) ? FOLLOW_SNAPPED_NOTICE : FOLLOW_CANCELLED_NOTICE;
@@ -844,6 +850,11 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
         return { ...state, mode: 'draw-pipe', placing: null, pipeStart: null, pipeStartHeading: null, linkStart: null, ...selection([]), drag: null };
       }
       return { ...state, mode: 'place', placing: action.object, pipeStart: null, linkStart: null, ...selection([]), drag: null };
+    case 'palette-drop': {
+      if (!Number.isFinite(action.x) || !Number.isFinite(action.y) || isRunPart(state, action.object)) return state;
+      const placed = placeAt({ ...state, mode: 'place', placing: action.object }, action.x, action.y);
+      return { ...placed, mode: 'select', placing: null, pipeStart: null, linkStart: null, cursor: { x: action.x, y: action.y } };
+    }
     case 'pipe-mode':
       return { ...state, mode: 'draw-pipe', placing: null, pipeStart: null, pipeStartHeading: null, linkStart: null, ...selection([]), drag: null };
     case 'connector-mode':
@@ -1149,8 +1160,10 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
     case 'cancel':
       return {
         ...state,
-        // Esc mid-drag puts every moved part and following pipe back (nothing was committed).
+        // Esc mid-drag puts every moved part and following pipe back (nothing was committed)
+        // and drops the drag's own notice (#221).
         ...(state.drag ? { scene: { ...state.scene, objects: state.drag.base } } : {}),
+        ...(isFollowFrameNotice(state.notice) ? { notice: null } : {}),
         mode: 'select',
         placing: null,
         pipeStart: null,
