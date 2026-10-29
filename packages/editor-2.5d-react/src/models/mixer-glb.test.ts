@@ -92,8 +92,9 @@ describe('assets/models/mixer.glb', () => {
   it('cuts the window through the wall band and shoulder, leaving the head cap and heel whole', () => {
     const band = nodeBounds(gltf, nodeByName(gltf, 'shell.band')!.index);
     // 270 deg keep-arc (95..355 deg): reaches -R on -X and -Z, the cut planes near +X / +Z.
-    expect(band.min.x).toBeCloseTo(-0.45, 3);
-    expect(band.min.z).toBeCloseTo(-0.45, 3);
+    // Facets sit at -5 + 20k deg, so no column lies exactly on an axis: extents are R*sin(85 deg).
+    expect(band.min.x).toBeCloseTo(-0.45, 2);
+    expect(band.min.z).toBeCloseTo(-0.45, 2);
     expect(band.max.x).toBeCloseTo(0.45, 2);
     expect(band.max.z).toBeCloseTo(0.45, 2);
     expect(band.min.y).toBeCloseTo(0.08, 3); // sill, into the heel

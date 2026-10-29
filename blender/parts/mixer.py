@@ -125,7 +125,8 @@ def build() -> None:
     hd.cylinder("shaft", SHAFT_R, SHAFT_R, shaft_top - shaft_bot, 8, white,
                 position_t=(0, (shaft_top + shaft_bot) / 2 - Y_APEX, 0), parent=ag)
     b.box("paddle", PADDLE_SIZE, white, position_t=(0, Y_PADDLE - Y_APEX, 0), parent=ag)
-    pr.impeller("impeller", ag, Y_IMP - Y_APEX, white, blade_len=0.18, blade_h=0.08)  # tip-to-tip 0.44
+    # Blades are pitched 30 deg, so chord height (not length) is what shows through the liquid.
+    pr.impeller("impeller", ag, Y_IMP - Y_APEX, white, blade_len=0.18, blade_h=0.10, blade_t=0.015)  # tip-to-tip 0.44
 
     if SUPPORT == "pads":
         # Screen-left / screen-right of the base in iso (theta 315 / 135 deg).
