@@ -480,3 +480,86 @@ describe('PR #212 review fixes', () => {
     expect(s.past).toHaveLength(1);
   });
 });
+
+describe('PR #212 second review fixes', () => {
+  const threeSegments = (middle: Partial<IsoPlacement>, extra: IsoPlacement[] = []) => createEditorState(sceneOf([
+    tank('a', 0, 0), tank('b', 10, 0),
+    { ...pipe('p1', 1, 0, 4, 0), band: '#e74c3c' },
+    { ...pipe('p2', 4, 0, 6, 0), band: '#e74c3c', ...middle },
+    { ...pipe('p3', 6, 0, 9, 0), band: '#e74c3c' },
+    ...extra,
+  ]));
+  const straighten = (s0: EditorState) => run(s0, { type: 'drag-start', id: 'b', x: 10, y: 0 }, { type: 'drag-move', x: 11, y: 0 });
+
+  it.each([
+    ['band', { band: '#00ff00' }],
+    ['params', { params: { insulated: true } }],
+    ['group', { group: 'group-7' }],
+    ['opacity', { opacity: 0.5 }],
+    ['an unknown future field', { futureField: 'x' } as Partial<IsoPlacement>],
+  ])('[P1] a surplus segment with a distinct %s is refused, not dropped', (_label, middle) => {
+    const s0 = threeSegments(middle);
+    const s1 = straighten(s0);
+    expect(s1.drag?.blocked[0]?.reason).toBe('identity');
+    expect(s1.notice).toMatch(/p2/);
+    const s2 = run(s1, { type: 'drag-end' });
+    expect(s2.scene.objects).toEqual(s0.scene.objects);
+    expect(s2.past).toHaveLength(0);
+  });
+
+  it('[P1] a surplus segment whose user fields all equal the survivor collapses', () => {
+    const same = createEditorState(sceneOf([
+      tank('a', 0, 0), tank('b', 10, 0),
+      { ...pipe('p1', 1, 0, 4, 0), band: '#e74c3c', group: 'g' },
+      { ...pipe('p2', 4, 0, 6, 0), band: '#e74c3c', group: 'g' },
+      { ...pipe('p3', 6, 0, 9, 0), band: '#e74c3c', group: 'g' },
+    ]));
+    const collapsed = run(straighten(same), { type: 'drag-end' });
+    expect(pipesOf(collapsed)).toEqual([expect.objectContaining({ id: 'p1', toX: 10, band: '#e74c3c', group: 'g' })]);
+    expect(collapsed.past).toHaveLength(1);
+  });
+
+  it('[P1] auto elbows removed by straightening do not block it', () => {
+    const s0 = createEditorState(sceneOf([
+      tank('a', 0, 0), tank('b', 10, 3),
+      pipe('p1', 1, 0, 5, 0), { id: 'e1', object: 'elbow', x: 5, y: 0, params: { bend: 'auto' } },
+      pipe('p2', 5, 0, 5, 3), { id: 'e2', object: 'elbow', x: 5, y: 3, params: { bend: 'auto' } },
+      pipe('p3', 5, 3, 9, 3),
+    ]));
+    const s = run(s0, { type: 'drag-start', id: 'b', x: 10, y: 3 }, { type: 'drag-move', x: 10, y: 0 }, { type: 'drag-end' });
+    expect(pipesOf(s)).toEqual([expect.objectContaining({ id: 'p1', x: 1, y: 0, toX: 9, toY: 0 })]);
+  });
+
+  it('[P2 regression] an out-and-back drag next to a free pipe end does not snap: no move, no history', () => {
+    const s0 = createEditorState(sceneOf([tank('t', 0, 0), pipe('free', 2, 0, 8, 0)]));
+    const s = run(s0, { type: 'drag-start', id: 't', x: 0, y: 0 }, { type: 'drag-move', x: 3, y: 3 }, { type: 'drag-move', x: 0, y: 0 }, { type: 'drag-end' });
+    expect(byId(s, 't')).toMatchObject({ x: 0, y: 0 });
+    expect(s.past).toHaveLength(0);
+    expect(s.scene.objects).toBe(s0.scene.objects);
+  });
+
+  // b's west port takes the far end of `main`, which a branch tees into: the split
+  // allocates a new piece for b's side, but the attach.to record lives on `main`.
+  const teedAttached = () => createEditorState(sceneOf([
+    tank('b', 11, 0),
+    { ...pipe('main', 0, 0, 10, 0), attach: { to: { object: 'b', port: 'west' } } },
+    pipe('branch', 5, 0, 5, -4),
+  ]));
+
+  it('[follow-up] Alt-drag frees the record on the real (unsplit) pipe', () => {
+    const s = run(teedAttached(), { type: 'drag-start', id: 'b', x: 11, y: 0 }, { type: 'drag-move', x: 11, y: 3, detach: true }, { type: 'drag-end' });
+    expect(byId(s, 'main')).toMatchObject({ x: 0, y: 0, toX: 10, toY: 0 });
+    expect(byId(s, 'main')!.attach).toBeUndefined();
+    expect(pipesOf(s)).toHaveLength(2);
+  });
+
+  it('[follow-up] toggling Alt on mid-drag also frees it', () => {
+    const s = run(teedAttached(),
+      { type: 'drag-start', id: 'b', x: 11, y: 0 },
+      { type: 'drag-move', x: 11, y: 3 },
+      { type: 'drag-move', x: 11, y: 3, detach: true },
+      { type: 'drag-end' });
+    expect(byId(s, 'main')!.attach).toBeUndefined();
+    expect(byId(s, 'b')).toMatchObject({ x: 11, y: 3 });
+  });
+});

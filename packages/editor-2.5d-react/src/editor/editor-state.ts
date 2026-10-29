@@ -674,7 +674,9 @@ function dragMove(state: EditorState, x: number, y: number, detach: boolean): Ed
   let dx = whole ? Math.round(x - drag.grab.x) : x - drag.grab.x;
   let dy = whole ? Math.round(y - drag.grab.y) : y - drag.grab.y;
   // A port within a cell of a free pipe end snaps onto it (Alt: no snapping, like most editors).
-  if (!detach) ({ x: dx, y: dy } = snapMoveDelta(targets, state.registry, dx, dy));
+  // Back at the start is back at the start: never snap a zero delta (PR #212
+  // review: a tank next to a free end jumped onto it after an out-and-back drag).
+  if (!detach && (dx !== 0 || dy !== 0)) ({ x: dx, y: dy } = snapMoveDelta(targets, state.registry, dx, dy));
   const key = `${dx},${dy},${detach ? 1 : 0}`;
   const cursor = { x, y };
   if (key === drag.key) {

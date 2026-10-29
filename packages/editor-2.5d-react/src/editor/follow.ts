@@ -93,7 +93,11 @@ export interface FollowRun {
 export interface FollowPlan {
   moving: ReadonlySet<string>;
   runs: FollowRun[];
-  /** Pipe ends attached to a moving part (Alt-drag drops their records). */
+  /**
+   * Pipe ends attached to a moving part, in the REAL base scene (before any
+   * tee split): Alt-drag frames start from that base, so this is the list
+   * whose records they drop.
+   */
   attached: AttachedEnd[];
   /** Some affected run is on a locked / hidden layer: the move must refuse. */
   locked: boolean;
@@ -197,7 +201,7 @@ export function planFollow(
     if ([...run.ids, ...carry].some((id) => !editable(byId.get(id)!))) locked = true;
     runs.push({ run, mode, start, end, hosted: carry });
   }
-  return { moving, runs, attached, locked, ...(split ? { base: objects } : {}) };
+  return { moving, runs, attached: originalAttached, locked, ...(split ? { base: objects } : {}) };
 }
 
 /**

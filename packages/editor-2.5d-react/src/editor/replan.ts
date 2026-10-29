@@ -223,19 +223,24 @@ export function replanRun(
   let carriedOut = carried;
   if (opts.keepIds) {
     const adopted = adoptRunIds(replacements, originals, chain);
-    // PR #212 review (P1): a route with fewer segments than the run drops the
+    // PR #212 reviews (P1): a route with fewer segments than the run drops the
     // surplus ids. Reroute merges every old segment's data onto the first new
-    // one; follow keeps ids instead, so a surplus segment that carries its own
-    // data (bindings, meta, extensions, animation) or that another placement
-    // points at would silently lose it. Refuse that route rather than delete.
+    // one; follow keeps ids instead. A surplus segment may only disappear when
+    // nothing the user authored on it is lost: every field outside the
+    // replan-owned allowlist must equal the surviving segment's (so a field
+    // added to IsoPlacement later is protected by default), and no other
+    // placement may point at it. Otherwise refuse the route rather than delete.
     const kept = new Set(adopted.rename.values());
     const carriedIds = new Set(carried.map((p) => p.id));
+    const keptOld = originals.filter((o) => kept.has(o.id));
     for (const old of originals) {
       if (kept.has(old.id)) continue;
-      const hasData = ROUTE_IDENTITY_FIELDS.some((f) => old[f] !== undefined);
+      const survivor = keptOld.find((o) => o.object === old.object) ?? keptOld.find((o) => o.object === 'pipe');
+      const lost = survivor ? lostUserFields(old, survivor) : userFieldNames(old);
       const referenced = rest.some((o) => !carriedIds.has(o.id) && referencesId(o, old.id));
-      if (hasData || referenced) {
-        return fail('identity', `${old.object === 'elbow' ? 'Elbow' : 'Pipe'} ${old.id} ${hasData ? 'carries tags / metadata' : 'is referenced by another part'} and this route would remove it — move elsewhere, or Alt-drag to move the part alone`);
+      if (lost.length > 0 || referenced) {
+        const why = referenced ? 'is referenced by another part' : `has its own ${lost.join(', ')}`;
+        return fail('identity', `${old.object === 'elbow' ? 'Elbow' : 'Pipe'} ${old.id} ${why} and this route would remove it — move elsewhere, or Alt-drag to move the part alone`);
       }
     }
     replacements = adopted.placements;
@@ -321,6 +326,44 @@ function attachTerminals(placements: IsoPlacement[], start: IsoPipeAttach | unde
     if (p.id === last.id) next = withPipeAttach(next, 'to', end ? attachRecord(end) : null);
     return next;
   });
+}
+
+/**
+ * Fields a re-route owns and recomputes (geometry, attachments). Everything
+ * else on a placement is the user's. An allowlist on purpose: unknown and
+ * future fields count as user data, so removing a segment can never drop them
+ * silently.
+ */
+const REPLAN_OWNED_FIELDS: ReadonlySet<string> = new Set(['id', 'object', 'x', 'y', 'toX', 'toY', 'rotation', 'onPipe', 'at', 'attach']);
+
+/** The user-authored field names of a placement. An elbow's `params.bend` (auto / manual) is a fitting setting, not user data. */
+function userFields(o: IsoPlacement): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(o)) {
+    if (REPLAN_OWNED_FIELDS.has(k) || v === undefined) continue;
+    if (k === 'params' && o.object === 'elbow' && typeof v === 'object' && v !== null) {
+      const { bend: _bend, ...restParams } = v as Record<string, unknown>;
+      if (Object.keys(restParams).length === 0) continue;
+      out[k] = restParams;
+      continue;
+    }
+    out[k] = v;
+  }
+  return out;
+}
+
+function userFieldNames(o: IsoPlacement): string[] {
+  return Object.keys(userFields(o));
+}
+
+/**
+ * User fields of `removed` the `survivor` does not carry with the same value.
+ * An elbow folded into a pipe only has to match the fields it actually has.
+ */
+function lostUserFields(removed: IsoPlacement, survivor: IsoPlacement): string[] {
+  const mine = userFields(removed);
+  const theirs = userFields(survivor);
+  return Object.keys(mine).filter((k) => JSON.stringify(mine[k]) !== JSON.stringify(theirs[k]));
 }
 
 /** Does placement `o` point at placement id `id` (connector anchor, pipe attach record, onPipe)? */
