@@ -107,7 +107,26 @@ describe('assets/models/mixer.glb', () => {
     expect(lower.min.y).toBeCloseTo(0, 4);
     expect(lower.max.y).toBeCloseTo(0.08, 3);
     // The shell is the mixer iso shade, not plain white; agitator and nozzles are white.
-    for (const name of ['shell.upper', 'shell.band', 'shell.lower', 'housing', 'housing.lid']) expect(materialOf(name), name).toBe('hd.flask');
+    for (const name of ['shell.upper', 'shell.band', 'shell.lower', 'housing', 'housing.lid', 'housing.collar']) {
+      expect(materialOf(name), name).toBe('hd.flask');
+    }
     for (const name of ['shaft', 'paddle', 'impeller.hub', 'inlet', 'outlet']) expect(materialOf(name), name).toBe('hd.white');
+  });
+
+  it('motor housing has a lid rim on top and a wider collar band at its base on the head', () => {
+    const drum = nodeBounds(gltf, nodeByName(gltf, 'housing')!.index);
+    const lid = nodeBounds(gltf, nodeByName(gltf, 'housing.lid')!.index);
+    const collar = nodeBounds(gltf, nodeByName(gltf, 'housing.collar')!.index);
+    const radius = (b: typeof drum) => (b.max.x - b.min.x) / 2;
+    expect(radius(collar)).toBeGreaterThan(radius(drum) * 1.05);
+    expect(radius(collar)).toBeLessThan(radius(drum) * 1.15);
+    expect(radius(lid)).toBeGreaterThan(radius(drum));
+    expect(collar.min.y).toBeCloseTo(drum.min.y, 3); // starts at the drum base
+    expect(collar.max.y - collar.min.y).toBeLessThan(0.1); // a band, not a second drum
+    expect(collar.max.y).toBeLessThan(drum.min.y + 0.3 * (drum.max.y - drum.min.y));
+    // Sits on the head: its base is below the head surface at its own radius, its top above.
+    const upper = nodeBounds(gltf, nodeByName(gltf, 'shell.upper')!.index);
+    expect(collar.min.y).toBeLessThan(upper.max.y);
+    expect(collar.max.y).toBeGreaterThan(upper.min.y);
   });
 });

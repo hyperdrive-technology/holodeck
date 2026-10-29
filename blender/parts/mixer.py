@@ -13,9 +13,10 @@ whose radial facet lines show through.
 Three.js space, Y up, origin = floor centre under the axis. R 0.45, 2.01 tall.
 Flat base (reference has no legs; `SUPPORT = "pads"` adds the two small side
 pads the reference tanks have). Wall 0..1.45 with a rounded heel (r 0.10),
-elliptical head 1.45..1.75 (shaft hole at the apex), motor housing 1.68..1.98,
-lid to 2.01. The inner floor is a dish (rim 0.22, pole 0.06) so the liquid
-bottom reads as the reference's U.
+elliptical head 1.45..1.75 (shaft hole at the apex), motor housing 1.68..1.98
+with a wider collar band at its base (1.68..1.74) and a lid rim to 2.01. The
+inner floor is a dish (rim 0.22, pole 0.06) so the liquid bottom reads as the
+reference's U.
 
 Facets: 18 segments rotated by THETA0 = -5 deg so the boundaries sit at -5,
 15, ..., 95 deg: the window (-5..95 deg, i.e. 100 deg centred on the iso
@@ -73,6 +74,7 @@ RING_YS = (0.35, 0.55, 0.75, 0.95, 1.15, 1.35)  # inner back-wall ring lines
 HOUSING_R, HOUSING_H, HOUSING_SEG = 0.24, 0.30, 12
 HOUSING_Y0 = Y_APEX - 0.07  # sunk into the head so its rim meets the curve
 LID_R, LID_H = 0.255, 0.03
+COLLAR_SCALE, COLLAR_H = 1.08, 0.06  # base band: r 0.26, y 1.68..1.74; the head surface at r 0.26 is y 1.695
 Y_TOP = HOUSING_Y0 + HOUSING_H + LID_H  # 2.01
 # --- liquid -----------------------------------------------------------------------
 R_LIQ = R_IN - 0.01
@@ -108,12 +110,13 @@ def build() -> None:
              + pr.dish(R_IN, DISH_RIM_Y, DISH_DEPTH, 3))
     pr.cutaway_shell("shell", outer, inner, WINDOW, (Y_W0, Y_W1), SEG, flask, theta0=THETA0)
 
-    # Motor housing: squat 12-gon on the apex, vertex-on to the camera, with a lid rim.
+    # Motor housing: squat 12-gon on the apex, vertex-on to the camera, with a lid
+    # rim on top and a wider collar band where it sits on the head (both outline).
     yaw = math.pi / HOUSING_SEG
     hd.cylinder("housing", HOUSING_R, HOUSING_R, HOUSING_H, HOUSING_SEG, flask,
                 position_t=(0, HOUSING_Y0 + HOUSING_H / 2, 0), rotation_t=(0, yaw, 0))
-    hd.cylinder("housing.lid", LID_R, LID_R, LID_H, HOUSING_SEG, flask,
-                position_t=(0, HOUSING_Y0 + HOUSING_H + LID_H / 2, 0), rotation_t=(0, yaw, 0))
+    pr.ring("housing.lid", LID_R, LID_H, flask, (0, HOUSING_Y0 + HOUSING_H + LID_H / 2, 0), (0, yaw, 0), HOUSING_SEG)
+    pr.collar("housing.collar", HOUSING_R, HOUSING_Y0, COLLAR_H, flask, scale=COLLAR_SCALE, seg=HOUSING_SEG, yaw=yaw)
 
     # Slim nozzles with flange rings, on the back quadrants so they never cross the window.
     hd.add_port("in", pr.nozzle_with_flange("inlet", (0, PORT_IN_Y, -R + 0.02), "-z", NOZZLE_LEN, white, radius=NOZZLE_R))
