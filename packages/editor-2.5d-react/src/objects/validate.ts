@@ -230,6 +230,48 @@ export function linkProblems(placementId: string, link: unknown): string[] {
   return out;
 }
 
+/**
+ * What one pipe end is connected to (`placement.attach.from` / `.to`): a part
+ * and, optionally, one of its declared ports. No `port` = the part's centre
+ * (a bottom outlet, or an inline valve / cap sitting on the joint). The pipe's
+ * own coordinates stay the source of truth: an attachment only counts while
+ * the end really lies on that port (routing/attach.ts), like `onPipe`.
+ */
+export interface IsoPipeAttach {
+  object: string;
+  port?: string;
+}
+
+/** `placement.attach` on a pipe: `from` is its (x, y) end, `to` its (toX, toY) end. */
+export interface IsoPipeEnds {
+  from?: IsoPipeAttach;
+  to?: IsoPipeAttach;
+}
+
+/** Structural check of `placement.attach`. Dangling ids are allowed (geometry decides). */
+export function attachProblems(placementId: string, attach: unknown): string[] {
+  if (attach === undefined) return [];
+  if (!isRecord(attach)) return [`placement ${placementId}: attach must be an object`];
+  const out: string[] = [];
+  for (const key of Object.keys(attach)) {
+    if (key !== 'from' && key !== 'to') out.push(`placement ${placementId}: attach.${key.slice(0, 80)} is not an attach field`);
+  }
+  for (const end of ['from', 'to'] as const) {
+    const v = attach[end];
+    if (v === undefined) continue;
+    if (!isRecord(v) || typeof v.object !== 'string' || v.object.length === 0) {
+      out.push(`placement ${placementId}: attach.${end} must be { object, port? }`);
+      continue;
+    }
+    if (v.port !== undefined && (typeof v.port !== 'string' || v.port.length === 0)) {
+      out.push(`placement ${placementId}: attach.${end}.port must be a port name`);
+    }
+    const extra = Object.keys(v).filter((k) => k !== 'object' && k !== 'port');
+    if (extra.length) out.push(`placement ${placementId}: attach.${end} has unknown field(s) ${extra.join(', ').slice(0, 120)}`);
+  }
+  return out;
+}
+
 /** opacity (0..1) and z (integer, +-MAX_Z) on any placement. */
 export function appearanceProblems(placementId: string, raw: Record<string, unknown>): string[] {
   const out: string[] = [];

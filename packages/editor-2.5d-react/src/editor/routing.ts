@@ -5,7 +5,7 @@ import { footprint } from '../routing/footprint';
 import { buildOccupancy } from '../routing/occupancy';
 import { collapsePath, pathToPlacements, type CollapsedPath, type NextId } from '../routing/to-placements';
 import { sameCell } from './snap';
-import { MAX_GRID_COORD, type GridPoint } from '../routing/grid';
+import { MAX_GRID_COORD, type GridPoint, type Heading } from '../routing/grid';
 
 export type { GridPoint };
 export { footprint };
@@ -58,7 +58,17 @@ export function planRoute(
   registry: ContributionRegistry,
   from: RouteEnd,
   to: RouteEnd,
-  opts: { exclude?: ReadonlySet<string>; route?: RouteOptions } = {},
+  opts: {
+    exclude?: ReadonlySet<string>;
+    route?: RouteOptions;
+    /**
+     * Exact off-grid end points joined to `from.cell` / `to.cell` by a short
+     * straight (see `entryNode`). The A* path is extended to them, so the
+     * pipe still ends exactly where a hand-authored brewery pipe meets its
+     * vessel wall (16.8, not the 17 node). Used by follow-on-drag.
+     */
+    stubs?: { start?: GridPoint; end?: GridPoint };
+  } = {},
 ): PlannedRoute {
   // The fallback also becomes persisted geometry, including for half-cell
   // clicks. Invalid endpoints must fail without producing an out-of-bounds L.
@@ -71,12 +81,43 @@ export function planRoute(
   if (onGrid) {
     const path = routePipe(from, to, occ, opts.route);
     if (path) {
-      return { ...collapsePath(path.cells), points: path.cells, fallback: false, noRoute: false };
+      const points = withStubs(path.cells, opts.stubs);
+      return { ...collapsePath(points), points, fallback: false, noRoute: false };
     }
   }
   const { pipes, elbow } = manhattanRoute(from.cell, to.cell);
-  const points = pipes.length === 0 ? [] : elbow ? [from.cell, elbow, to.cell] : [from.cell, to.cell];
+  const corners = pipes.length === 0 ? [] : elbow ? [from.cell, elbow, to.cell] : [from.cell, to.cell];
+  const points = corners.length === 0 ? [] : withStubs(corners, opts.stubs);
   return { ...collapsePath(points), points, fallback: true, noRoute: onGrid || Boolean(occ.skipped?.length) };
+}
+
+function withStubs(points: readonly GridPoint[], stubs: { start?: GridPoint; end?: GridPoint } | undefined): GridPoint[] {
+  if (!stubs) return [...points];
+  const out = [...points];
+  if (stubs.start && !(out[0] && sameCell(out[0], stubs.start))) out.unshift(stubs.start);
+  if (stubs.end && !(out[out.length - 1] && sameCell(out[out.length - 1]!, stubs.end))) out.push(stubs.end);
+  return out;
+}
+
+/** Below this, a coordinate counts as on the integer grid (2-decimal authored scenes). */
+const NODE_EPS = 1e-6;
+
+/**
+ * Grid node where a route from exact point `p`, leaving along `heading`,
+ * can start: `p` itself when it is a node, else the next node along the
+ * heading (an end at 16.8 leaving west starts the search at 16). Null when
+ * the cross-axis coordinate is off-grid (no straight stub reaches a node).
+ */
+export function entryNode(p: GridPoint, heading: Heading | undefined): GridPoint | null {
+  const isNode = (v: number) => Math.abs(v - Math.round(v)) < NODE_EPS;
+  if (isNode(p.x) && isNode(p.y)) return { x: Math.round(p.x), y: Math.round(p.y) };
+  if (!heading) return null;
+  const horizontal = heading === 'e' || heading === 'w';
+  const across = horizontal ? p.y : p.x;
+  if (!isNode(across)) return null;
+  const along = horizontal ? p.x : p.y;
+  const step = heading === 'e' || heading === 's' ? Math.ceil(along - NODE_EPS) : Math.floor(along + NODE_EPS);
+  return horizontal ? { x: step, y: Math.round(across) } : { x: Math.round(across), y: step };
 }
 
 /**
@@ -91,7 +132,13 @@ export function routeToPlacements(
   from: RouteEnd,
   to: RouteEnd,
   nextId: NextId,
-  opts: { exclude?: ReadonlySet<string>; band?: string; route?: RouteOptions; reservedObjects?: readonly IsoPlacement[] } = {},
+  opts: {
+    exclude?: ReadonlySet<string>;
+    band?: string;
+    route?: RouteOptions;
+    reservedObjects?: readonly IsoPlacement[];
+    stubs?: { start?: GridPoint; end?: GridPoint };
+  } = {},
 ): { placements: IsoPlacement[]; fallback: boolean; noRoute: boolean } {
   const plan = planRoute(scene, registry, from, to, opts);
   return {

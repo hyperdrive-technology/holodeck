@@ -25,12 +25,14 @@ import {
   isRecord,
   layerGroupProblems,
   layersProblems,
+  attachProblems,
   linkProblems,
   metaProblems,
   type IsoLayer,
   paramsProblems,
   type IsoLink,
   type IsoMetaValue,
+  type IsoPipeEnds,
 } from '../objects/validate';
 
 export { GRID_CELL_SIZE, gridToWorld, worldToGrid };
@@ -95,6 +97,12 @@ export interface IsoPlacement {
   metaHidden?: boolean;
   /** Connector anchors (`connector` part); see `IsoLink`. */
   link?: IsoLink;
+  /**
+   * Pipes: the part (and port) each end is connected to, so the pipe follows
+   * when that part is dragged (routing/attach.ts). Optional: ends that lie on
+   * a port are inferred, so older scenes need no migration. Geometry wins.
+   */
+  attach?: IsoPipeEnds;
   /** Editor layer id (`scene.layers`); absent = the default layer. */
   layer?: string;
   /**
@@ -279,6 +287,7 @@ export function validatePlacementGeometry(raw: unknown, registry: ContributionRe
     ...appearanceProblems(raw.id, raw),
     ...metaProblems(raw.id, raw.meta),
     ...linkProblems(raw.id, raw.link),
+    ...attachProblems(raw.id, raw.attach),
     ...layerGroupProblems(raw.id, raw),
   ];
   if (objectProblems.length) throw new Error(objectProblems.join('; '));

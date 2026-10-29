@@ -2,17 +2,20 @@ import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import { validatePlacementGeometry, validatePlacementPart, validateSceneGeometry, type IsoPlacement, type IsoSceneFile } from '../iso/scene';
 import { getDefaultIsoRegistry } from '../registry/default';
 import type { IsoPartDefinition } from '../registry/types';
-import { rotateOffset, type Heading } from '../routing/grid';
-import { resolveRouteEnd } from '../routing/ports';
-import { carryHostedParts, chainFrom, hostPipeOf, inlineBodyLength, isPipePlacement, positionOnPipe, segOf, splitChainAtParts, withAttachment } from '../routing/inline';
-import { headingOf, pipeArmsAt } from '../routing/elbows';
+import type { Heading } from '../routing/grid';
+import { resolveRouteEnd, type ResolvedRouteEnd } from '../routing/ports';
+import { withPipeAttach } from '../routing/attach';
+import { isPipePlacement, withAttachment } from '../routing/inline';
 import { findRun, isInlinePart } from '../routing/run';
+import { applyFollow, blockedNotice, isFollowFrameNotice, FOLLOW_CANCELLED_NOTICE, FOLLOW_LOCKED_NOTICE, FOLLOW_SNAPPED_NOTICE, followsAnything, planFollow, sameObjects, type BlockedRun, type FollowPlan } from './follow';
+import { moveSnapTargets, snapMoveDelta, snapNewPlacement, type MoveSnapTargets } from './port-snap';
+import { replanRun } from './replan';
 import { routeToPlacements, type GridPoint } from './routing';
 import { sameCell } from './snap';
 import { snapParamValue } from '../registry/params';
 import type { IsoLayer, IsoLinkEnd } from '../objects/validate';
 import { MAX_LINK_VIA, MAX_Z } from '../objects/validate';
-import { alignObjects, distributeObjects, moveBy, moveObjects, rotateObjectsAbout, type AlignEdge, type DistributeAxis } from './arrange';
+import { alignObjects, distributeObjects, moveObjects, rotateObjectsAbout, type AlignEdge, type DistributeAxis } from './arrange';
 import { copyObjects, pasteObjects, removeObjects } from './clipboard';
 import { anchorAt, buildConnector, canInsertWaypoint, insertWaypoint, moveWaypoint, reanchor, removeWaypoint, sameLinkEnd } from './connect';
 import { DEFAULT_LAYER_ID, DEFAULT_LAYER_NAME, expandGroups, isPlacementEditable, isPlacementHidden, nextFreeId, sceneLayers, withLayer } from './layers';
@@ -23,15 +26,13 @@ export type ResizeHandle = 'radius' | 'height';
 /** Shown when A* finds no clear route and the manhattan L was drawn instead. */
 export const NO_ROUTE_NOTICE = 'No clear route — drew a straight L';
 export const ROUTE_FAILED_NOTICE = 'No route drawn — no replacement geometry';
-export const REROUTE_FAILED_NOTICE = 'Could not reroute — original run kept';
-
-/** Rerouting is atomic when the carried parts cannot fit on the new run. */
-export const INLINE_PARTS_NO_ROUTE_NOTICE = 'No clear route — inline parts do not fit';
-
-/** Reroute refused because part of the run (or a part on it) is on a locked or hidden layer. */
-export const REROUTE_LOCKED_NOTICE = 'Reroute rejected — part of the run is on a locked or hidden layer';
-
-export const RETAINED_CONNECTIONS_NO_ROUTE_NOTICE = 'Reroute rejected — could not verify retained connections';
+export {
+  INLINE_PARTS_NO_ROUTE_NOTICE,
+  REROUTE_FAILED_NOTICE,
+  REROUTE_LOCKED_NOTICE,
+  RETAINED_CONNECTIONS_NO_ROUTE_NOTICE,
+  inheritRunFields,
+} from './replan';
 
 /** `run` = view only; `edit` = place / drag / delete. Set by the host via `ProcessEditor`'s `mode`. */
 export type EditorHostMode = 'run' | 'edit';
@@ -88,6 +89,22 @@ export interface EditorState {
     inline: boolean;
     /** Origins of the other selected placements moving with `id` (multi-select drag). */
     others: Array<{ origin: IsoPlacement; inline: boolean }>;
+    /**
+     * The scene's placements when the drag started. Every frame is computed
+     * from these (moved parts, following pipes), Esc restores them and the
+     * drop pushes them as the single undo step.
+     */
+    base: IsoPlacement[];
+    /** Pipes following the dragged parts (follow.ts); computed on the first moving frame. */
+    plan?: FollowPlan;
+    /** `dx,dy,detach` of the frame on screen, so repeated pointer events in one cell cost nothing. */
+    key?: string;
+    /** Last frame where every following pipe found a route (null = none yet: the start). */
+    valid: IsoPlacement[] | null;
+    /** Runs that cannot follow at the current frame, with the ghost to draw. */
+    blocked: BlockedRun[];
+    /** Port / free pipe end pairs the move can snap together (port-snap.ts); with `plan`. */
+    snap?: MoveSnapTargets;
   } | null;
   /**
    * Live resize drag (radius / height handle). `param` is the number param
@@ -109,6 +126,12 @@ export interface EditorState {
 export type EditorAction =
   | { type: 'select-mode' }
   | { type: 'place-mode'; object: string }
+  /**
+   * Palette drag released over the canvas: stamp one `object` at (x, y) and
+   * return to the select tool with it selected. One action, so `placed` (and
+   * the host's `onPlaced`) survives (PR #212 review).
+   */
+  | { type: 'palette-drop'; object: string; x: number; y: number }
   | { type: 'pipe-mode' }
   | { type: 'cursor'; x: number; y: number }
   | { type: 'floor-click'; x: number; y: number }
@@ -161,7 +184,12 @@ export type EditorAction =
   /** Layer that new placements go on (editor state, not a commit). */
   | { type: 'set-active-layer'; id: string }
   | { type: 'drag-start'; id: string; x: number; y: number }
-  | { type: 'drag-move'; x: number; y: number }
+  /**
+   * Pointer frame of a move drag. Pipes attached to the moving parts follow
+   * (re-routed live, or translated when both ends move); `detach` (Alt held)
+   * moves the parts alone and frees their pipe ends.
+   */
+  | { type: 'drag-move'; x: number; y: number; detach?: boolean }
   | { type: 'drag-end' }
   /** Grab a resize handle on the selection (`def.resize` names the params). */
   | { type: 'resize-start'; id: string; handle: ResizeHandle }
@@ -305,7 +333,8 @@ function placeAt(state: EditorState, x: number, y: number): EditorState {
     return state;
   }
   const id = nextId(state.placing, state.scene.objects);
-  const stamped = stamp(state.registry, state.placing, x, y, id);
+  // A port dropped next to a free pipe end lands on it (port-snap.ts), so the pipe attaches.
+  const stamped = snapNewPlacement(stamp(state.registry, state.placing, x, y, id), state.scene.objects, state.registry);
   // A single-node part dropped inside a pipe records that pipe (holodeck#22).
   const added = withLayer(
     isInlinePart(stamped, state.registry) ? withAttachment(stamped, state.scene.objects) : stamped,
@@ -338,12 +367,17 @@ function finishPipe(state: EditorState, click: GridPoint): EditorState {
   if (placements.length === 0) {
     return { ...state, notice: ROUTE_FAILED_NOTICE };
   }
+  // Record which ports the new run connects (routing/attach.ts) so it follows
+  // when either part is dragged. The start counts only when it snapped to a
+  // port (a heading); a chained start is a bare cell.
+  const start = state.pipeStartHeading ? resolveRouteEnd(state.scene, state.registry, state.pipeStart) : null;
+  const drawn = recordRouteEnds(placements, start, end);
   // Chaining continues from the end cell with no required heading: a port's
   // outward heading points back out of the pipe we just drew into it.
   const layer = activeLayerOf(state);
   return commit(
     state,
-    { ...state.scene, objects: [...state.scene.objects, ...placements.map((o) => withLayer(o, layer))] },
+    { ...state.scene, objects: [...state.scene.objects, ...drawn.map((o) => withLayer(o, layer))] },
     {
       pipeStart: end.cell,
       pipeStartHeading: null,
@@ -353,187 +387,38 @@ function finishPipe(state: EditorState, click: GridPoint): EditorState {
   );
 }
 
+/** `placements` (pipes in route order, then elbows) with `attach` set on the first pipe's start and the last pipe's end. */
+function recordRouteEnds(placements: IsoPlacement[], start: ResolvedRouteEnd | null, end: ResolvedRouteEnd): IsoPlacement[] {
+  const pipes = placements.filter(isPipePlacement);
+  const first = pipes[0];
+  const last = pipes[pipes.length - 1];
+  const rec = (e: ResolvedRouteEnd | null) => (e?.partId && e.port ? { object: e.partId, port: e.port } : null);
+  return placements.map((p) => {
+    let next = p;
+    if (p === first && rec(start)) next = withPipeAttach(next, 'from', rec(start));
+    if (p === last && rec(end)) next = withPipeAttach(next, 'to', rec(end));
+    return next;
+  });
+}
+
 /**
  * Replace the selected run with a fresh route between its two ends. The run is
  * excluded from the obstacles so it does not block itself; its ends re-resolve
  * through `resolveRouteEnd` so a run that leaves a tank port keeps leaving it.
  * Inline parts without declared ports keep the original pipe's joint heading.
+ * The planning itself lives in replan.ts (shared with pipes following a drag).
  */
 function rerouteSelected(state: EditorState): EditorState {
   const run = state.selectedId ? findRun(state.scene.objects, state.selectedId, state.registry) : null;
   if (!run) {
     return state;
   }
-  if (sameCell(run.start, run.end)) {
-    return { ...state, notice: REROUTE_FAILED_NOTICE }; // closed loop: no replacement
-  }
-  const ids = new Set(run.ids);
-  // Inline parts drawn on the run's pipes (holodeck#22) ride along unless a
-  // retained pipe pins them in place. Movable parts are excluded as obstacles
-  // and re-seated near the same fraction, with room for every carried body.
-  const runPipes = state.scene.objects.filter((o) => ids.has(o.id) && isPipePlacement(o));
-  const hosted = state.scene.objects.filter((o) => {
-    const host = hostPipeOf(o, state.scene.objects);
-    return host !== null && ids.has(host.id) && !ids.has(o.id);
+  const result = replanRun(state.scene.objects, state.registry, run, {
+    editable: (o) => isPlacementEditable(state.scene, o),
+    nextId,
   });
-  // holodeck#122: a reroute replaces every run member and rewrites the parts
-  // hosted on it. If any of them is on a locked or hidden layer, refuse rather
-  // than silently replacing it with an unlocked, visible copy.
-  if (state.scene.objects.some((o) => (ids.has(o.id) || hosted.includes(o)) && !isPlacementEditable(state.scene, o))) {
-    return { ...state, notice: REROUTE_LOCKED_NOTICE };
-  }
-  const retainedPipes = state.scene.objects.filter((o) => !ids.has(o.id) && isPipePlacement(o));
-  // An onPipe attachment does not imply that this is the part's only
-  // connection. Retained branches (including a second pipe passing through
-  // the part) pin it in place; split the old chain there before routing.
-  // Check the centre AND every declared port in world space. Keep exact
-  // offsets: rounding a half-cell port would miss its retained branch.
-  const fixed = hosted.filter((part) => {
-    const def = state.registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, part.object);
-    const connections = [part, ...Object.values(def?.ports ?? {}).map((port) => {
-      const off = rotateOffset(port.x, port.y, part.rotation);
-      return { x: part.x + off.x, y: part.y + off.y };
-    })];
-    return connections.some((point) => pipeArmsAt(retainedPipes, point).length > 0
-      || retainedPipes.some((pipe) => positionOnPipe(segOf(pipe), point.x, point.y) !== null));
-  });
-  const fixedIds = new Set(fixed.map((o) => o.id));
-  const movable = hosted.filter((o) => !fixedIds.has(o.id));
-  const movableIds = new Set(movable.map((o) => o.id));
-  const rest = state.scene.objects.filter((o) => !ids.has(o.id) && !movableIds.has(o.id)).map((o) => {
-    if (!fixedIds.has(o.id)) return o;
-    // The fixed part becomes a joint between new pipes, rather than being
-    // hosted strictly inside one. Do not leave an attachment to the old ID.
-    const { onPipe: _onPipe, at: _at, ...joint } = o;
-    return joint;
-  });
-  const sections = splitChainAtParts(chainFrom(runPipes.map(segOf), run.start), fixed);
-  const band = state.scene.objects.find((o) => o.id === run.ids[0])?.band;
-  // Obstacle exclusion must not release IDs belonging to carried parts.
-  const reservedObjects = state.scene.objects.filter((o) => !ids.has(o.id));
-  const placements: IsoPlacement[] = [];
-  const carried: IsoPlacement[] = [];
-  const bodyLength = (part: IsoPlacement) =>
-    inlineBodyLength(state.registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, part.object), part);
-  for (const [i, section] of sections.entries()) {
-    const first = section[0]!;
-    const last = section[section.length - 1]!;
-    const without = { objects: [...rest, ...placements] };
-    // Outward headings of the ORIGINAL run at this section's two ends.
-    const firstOut = headingOf(first.to.x - first.from.x, first.to.y - first.from.y) ?? undefined;
-    const lastOut = headingOf(last.from.x - last.to.x, last.from.y - last.to.y) ?? undefined;
-    // `prefer` disambiguates coincident declared ports (holodeck#47): a part
-    // with east and west ports both at its centre keeps the side the run used.
-    const from = i === 0
-      ? resolveRouteEnd(without, state.registry, run.start, { prefer: firstOut })
-      : { cell: first.from, heading: firstOut };
-    const to = i === sections.length - 1
-      ? resolveRouteEnd(without, state.registry, run.end, { prefer: lastOut })
-      : { cell: last.to, heading: lastOut };
-    if (i === 0) from.heading ??= run.startHeading;
-    if (i === sections.length - 1) to.heading ??= run.endHeading;
-    const route = routeToPlacements(without, state.registry, from, to, nextId, {
-      band, reservedObjects: [...reservedObjects, ...placements],
-    });
-    // Both blocked and off-grid fallbacks skip heading/obstacle guarantees:
-    // half-cell endpoints set fallback=true but noRoute=false. Conservatively
-    // reject them for fixed sections and retained endpoint ports/flanges;
-    // staged placements must never partially replace the original run.
-    if (route.placements.length === 0) return { ...state, notice: REROUTE_FAILED_NOTICE };
-    if (route.fallback && (fixed.length > 0 || from.heading !== undefined || to.heading !== undefined)) {
-      return { ...state, notice: RETAINED_CONNECTIONS_NO_ROUTE_NOTICE };
-    }
-    // Per-part body lengths (holodeck#54): retained endpoint parts and carried
-    // parts each reserve their own inline length, not the built-in valve's.
-    const endpointLength = (cell: GridPoint) => Math.max(0, ...rest
-      .filter((o) => sameCell(o, cell) && isInlinePart(o, state.registry))
-      .map(bodyLength));
-    const parts = carryHostedParts(
-      movable.filter((part) => section.some((seg) => seg.id === part.onPipe && positionOnPipe(seg, part.x, part.y) !== null)),
-      section,
-      route.placements.filter(isPipePlacement).map(segOf),
-      { start: endpointLength(from.cell), end: endpointLength(to.cell) },
-      // Snap: land carried parts where a click can hit them, so a branch
-      // drawn to one connects and pins it on the next reroute (holodeck#53).
-      { bodyLength, snap: true },
-    );
-    // A failed plan (even one offering an obstructed L) must not replace a
-    // working run; invalid resolved ports can also produce no geometry.
-    if (route.noRoute) return { ...state, notice: REROUTE_FAILED_NOTICE };
-    if (parts === null) return { ...state, notice: INLINE_PARTS_NO_ROUTE_NOTICE };
-    placements.push(...route.placements);
-    carried.push(...parts);
-  }
-  if (carried.length !== movable.length) return { ...state, notice: INLINE_PARTS_NO_ROUTE_NOTICE };
-  const originals = state.scene.objects.filter((o) => ids.has(o.id));
-  return commit(
-    state,
-    { ...state.scene, objects: [...rest, ...inheritRunFields(placements, originals), ...carried] },
-    { selectedId: placements[0]?.id ?? null, notice: null },
-  );
-}
-
-/** Fields a reroute recomputes; everything else on the old run belongs to the user and must survive. */
-const ROUTE_OWNED_FIELDS = new Set(['id', 'object', 'x', 'y', 'toX', 'toY', 'rotation', 'onPipe', 'at', 'link']);
-/**
- * Per-object data bags. Copying them onto every new segment would duplicate
- * metadata planes and live bindings, so they are merged (in run order) onto
- * the FIRST replacement of that kind instead.
- */
-const ROUTE_IDENTITY_FIELDS = ['meta', 'metaHidden', 'bindings', 'extensions', 'animation'] as const;
-/** Assignment fields an elbow takes from the run's pipes when the old run had no elbow. */
-const ROUTE_SHARED_FIELDS = ['layer', 'group', 'opacity', 'z'] as const;
-
-/**
- * Carry the old run's user fields onto its replacement (PR #114 review: a
- * reroute used to drop `layer` / `group`, silently moving pipes back to the
- * default layer and out of their groups). Each new pipe / elbow takes every
- * non-route field of the first old placement of the same part (`band`,
- * `params`, `layer`, `group`, `opacity`, `z`...); identity bags go to the
- * first replacement only; elbows with no old elbow take the pipes' layer,
- * group, opacity and z.
- */
-export function inheritRunFields(replacements: readonly IsoPlacement[], originals: readonly IsoPlacement[]): IsoPlacement[] {
-  const template = (kind: string): Record<string, unknown> | null => {
-    const first = originals.find((o) => o.object === kind);
-    if (!first) return null;
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(first)) {
-      if (!ROUTE_OWNED_FIELDS.has(k) && !(ROUTE_IDENTITY_FIELDS as readonly string[]).includes(k)) out[k] = structuredClone(v);
-    }
-    return out;
-  };
-  const pipeTemplate = template('pipe');
-  const templates = new Map<string, Record<string, unknown> | null>();
-  const templateFor = (kind: string) => {
-    if (!templates.has(kind)) {
-      let t = template(kind);
-      if (!t && pipeTemplate) {
-        t = {};
-        for (const k of ROUTE_SHARED_FIELDS) if (pipeTemplate[k] !== undefined) t[k] = pipeTemplate[k];
-      }
-      templates.set(kind, t);
-    }
-    return templates.get(kind) ?? null;
-  };
-  const seenKind = new Set<string>();
-  return replacements.map((r) => {
-    const t = templateFor(r.object);
-    const next: Record<string, unknown> = t ? { ...t, ...r } : { ...r };
-    // Values the router set (band from the run) win over the template except where it left them undefined.
-    for (const [k, v] of Object.entries(t ?? {})) if (next[k] === undefined) next[k] = v;
-    if (!seenKind.has(r.object)) {
-      seenKind.add(r.object);
-      for (const field of ROUTE_IDENTITY_FIELDS) {
-        const merged = originals.filter((o) => o.object === r.object && o[field] !== undefined).map((o) => o[field]);
-        if (merged.length === 0) continue;
-        next[field] = merged.every((m) => typeof m === 'object' && m !== null)
-          ? structuredClone(Object.assign({}, ...(merged as object[])))
-          : merged[merged.length - 1];
-      }
-    }
-    return next as unknown as IsoPlacement;
-  });
+  if (!result.ok) return { ...state, notice: result.notice };
+  return commit(state, { ...state.scene, objects: result.objects }, { selectedId: result.firstId, notice: null });
 }
 
 function updateSelected(state: EditorState, fn: (o: IsoPlacement) => IsoPlacement): EditorState {
@@ -766,6 +651,97 @@ function numberParam(obj: IsoPlacement, param: string, fallback: unknown): numbe
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
+/** Arrow-key nudge refused: an attached pipe has no clear route at the new position. */
+export const NUDGE_BLOCKED_NOTICE = 'No clear route for an attached pipe there — nudge cancelled';
+
+/**
+ * One move-drag frame (pure). Starts from `drag.base` every time: the moved
+ * parts by the pointer delta, plus pipes following them (follow.ts). When
+ * pipes follow, the delta snaps to whole cells (routes live on grid nodes).
+ * A frame for the same snapped delta as the one on screen is a no-op, so
+ * pointer events inside one cell never re-run A*.
+ */
+function dragMove(state: EditorState, x: number, y: number, detach: boolean): EditorState {
+  const drag = state.drag;
+  if (!drag) {
+    return { ...state, cursor: { x, y } };
+  }
+  const editable = (o: IsoPlacement) => isPlacementEditable(state.scene, o);
+  const moving = new Set([drag.id, ...drag.others.map((o) => o.origin.id)]);
+  const plan = drag.plan ?? planFollow(drag.base, state.registry, moving, editable);
+  const targets = drag.snap ?? moveSnapTargets(drag.base, state.registry, moving, new Set(plan.runs.flatMap((r) => r.run.ids)));
+  const whole = followsAnything(plan) && !detach;
+  let dx = whole ? Math.round(x - drag.grab.x) : x - drag.grab.x;
+  let dy = whole ? Math.round(y - drag.grab.y) : y - drag.grab.y;
+  // A port within a cell of a free pipe end snaps onto it (Alt: no snapping, like most editors).
+  // Back at the start is back at the start: never snap a zero delta (PR #212
+  // review: a tank next to a free end jumped onto it after an out-and-back drag).
+  if (!detach && (dx !== 0 || dy !== 0)) ({ x: dx, y: dy } = snapMoveDelta(targets, state.registry, dx, dy));
+  const key = `${dx},${dy},${detach ? 1 : 0}`;
+  const cursor = { x, y };
+  if (key === drag.key) {
+    return drag.plan ? { ...state, cursor } : { ...state, cursor, drag: { ...drag, plan, snap: targets } };
+  }
+  const clearOurs = isFollowFrameNotice(state.notice) ? null : state.notice;
+  if (plan.locked && !detach && (dx !== 0 || dy !== 0)) {
+    // holodeck#122: never re-route a locked / hidden pipe. Hold everything at
+    // the start (Alt still moves the part alone) and say why.
+    return {
+      ...state,
+      cursor,
+      scene: { ...state.scene, objects: drag.base },
+      drag: { ...drag, plan, snap: targets, key, blocked: [] },
+      notice: FOLLOW_LOCKED_NOTICE,
+    };
+  }
+  const inline = new Set([...(drag.inline ? [drag.id] : []), ...drag.others.filter((o) => o.inline).map((o) => o.origin.id)]);
+  const frame = applyFollow(drag.base, state.registry, plan, dx, dy, { editable, nextId, detach, inline });
+  const routed = frame.blocked.length === 0;
+  return {
+    ...state,
+    cursor,
+    scene: { ...state.scene, objects: frame.objects },
+    // Only a frame where the pipes really followed may be the drop fallback:
+    // an Alt (detach) frame left them behind (#217).
+    drag: { ...drag, plan, snap: targets, key, blocked: frame.blocked, valid: routed && !detach ? frame.objects : drag.valid },
+    notice: routed ? clearOurs : blockedNotice(frame.blocked),
+  };
+}
+
+/**
+ * Drop. The whole move (parts + following pipes) is ONE undo step: the
+ * scene at drag start goes on the history. Dropping where an attached pipe
+ * has no route lands on the last frame where every pipe could follow
+ * (holding the user's intent as closely as the pipes allow, never leaving a
+ * vessel disconnected); with no such frame nothing moves.
+ */
+function dragEnd(state: EditorState): EditorState {
+  const drag = state.drag;
+  if (!drag) {
+    return state;
+  }
+  let objects = state.scene.objects;
+  let notice = state.notice !== FOLLOW_LOCKED_NOTICE && isFollowFrameNotice(state.notice) ? null : state.notice;
+  if (drag.blocked.length > 0) {
+    objects = drag.valid ?? drag.base;
+    notice = drag.valid && !sameObjects(drag.valid, drag.base) ? FOLLOW_SNAPPED_NOTICE : FOLLOW_CANCELLED_NOTICE;
+  }
+  if (sameObjects(objects, drag.base)) {
+    // A drag out and back is a no-op, including attachment metadata.
+    const scene = state.scene.objects === drag.base ? state.scene : { ...state.scene, objects: drag.base };
+    return { ...state, scene, drag: null, notice };
+  }
+  return {
+    ...state,
+    scene: { ...state.scene, objects },
+    drag: null,
+    notice,
+    past: [...state.past, cloneScene({ ...state.scene, objects: drag.base })].slice(-HISTORY_CAP),
+    future: [],
+    revision: state.revision + 1,
+  };
+}
+
 export function editorReducer(state: EditorState, action: EditorAction): EditorState {
   const out = reduceChecked(state, action);
   // Notices can quote untrusted input (clipboard records, validator messages): cap them (holodeck#119).
@@ -876,6 +852,11 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
         return { ...state, mode: 'draw-pipe', placing: null, pipeStart: null, pipeStartHeading: null, linkStart: null, ...selection([]), drag: null };
       }
       return { ...state, mode: 'place', placing: action.object, pipeStart: null, linkStart: null, ...selection([]), drag: null };
+    case 'palette-drop': {
+      if (!Number.isFinite(action.x) || !Number.isFinite(action.y) || isRunPart(state, action.object)) return state;
+      const placed = placeAt({ ...state, mode: 'place', placing: action.object }, action.x, action.y);
+      return { ...placed, mode: 'select', placing: null, pipeStart: null, linkStart: null, cursor: { x: action.x, y: action.y } };
+    }
     case 'pipe-mode':
       return { ...state, mode: 'draw-pipe', placing: null, pipeStart: null, pipeStartHeading: null, linkStart: null, ...selection([]), drag: null };
     case 'connector-mode':
@@ -921,67 +902,22 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
         placing: null,
         pipeStart: null,
         linkStart: null,
-        drag: { id: action.id, origin: structuredClone(obj), grab: { x: action.x, y: action.y }, inline: isInlinePart(obj, state.registry), others },
+        drag: {
+          id: action.id,
+          origin: structuredClone(obj),
+          grab: { x: action.x, y: action.y },
+          inline: isInlinePart(obj, state.registry),
+          others,
+          base: state.scene.objects,
+          valid: null,
+          blocked: [],
+        },
       };
     }
-    case 'drag-move': {
-      if (!state.drag) {
-        return { ...state, cursor: { x: action.x, y: action.y } };
-      }
-      const drag = state.drag;
-      const dx = action.x - drag.grab.x;
-      const dy = action.y - drag.grab.y;
-      if (drag.others.length === 0) {
-        const objects = state.scene.objects.map((o) => {
-          if (o.id !== drag.id) {
-            return o;
-          }
-          const moved = moveBy(drag.origin, dx, dy);
-          // Keep the pipe attachment in step with where the part is dropped.
-          return drag.inline ? withAttachment(moved, state.scene.objects) : moved;
-        });
-        return { ...state, cursor: { x: action.x, y: action.y }, scene: { ...state.scene, objects } };
-      }
-      const origins = new Map([[drag.id, { origin: drag.origin, inline: drag.inline }], ...drag.others.map((o) => [o.origin.id, o] as const)]);
-      const moved = state.scene.objects.map((o) => {
-        const from = origins.get(o.id);
-        return from ? moveBy(from.origin, dx, dy) : o;
-      });
-      // Inline parts re-attach against the moved pipes (a valve dragged with its pipe stays on it).
-      const objects = moved.map((o) => (origins.get(o.id)?.inline ? withAttachment(o, moved) : o));
-      return { ...state, cursor: { x: action.x, y: action.y }, scene: { ...state.scene, objects } };
-    }
-    case 'drag-end': {
-      if (!state.drag) {
-        return state;
-      }
-      const current = state.scene.objects.find((o) => o.id === state.drag?.id);
-      const moved = current && (current.x !== state.drag.origin.x || current.y !== state.drag.origin.y);
-      const allOrigins = new Map([state.drag.origin, ...state.drag.others.map((o) => o.origin)].map((o) => [o.id, o]));
-      if (!moved) {
-        // A drag out and back is a no-op, including attachment metadata.
-        const origin = state.drag.origin;
-        if (state.drag.others.length === 0 && current && JSON.stringify(current) === JSON.stringify(origin)) return { ...state, drag: null };
-        const objects = state.scene.objects.map((o) => {
-          const back = allOrigins.get(o.id);
-          return back ? { ...back } : o;
-        });
-        return { ...state, scene: { ...state.scene, objects }, drag: null };
-      }
-      const before = cloneScene(state.scene);
-      before.objects = before.objects.map((o) => {
-        // Coordinates alone lose onPipe/at after withAttachment detaches it.
-        const back = allOrigins.get(o.id);
-        return back ? { ...back } : o;
-      });
-      return {
-        ...state,
-        drag: null,
-        past: [...state.past, before].slice(-HISTORY_CAP),
-        future: [],
-        revision: state.revision + 1,
-      };
-    }
+    case 'drag-move':
+      return dragMove(state, action.x, action.y, action.detach === true);
+    case 'drag-end':
+      return dragEnd(state);
     case 'resize-start': {
       const obj = state.scene.objects.find((o) => o.id === action.id);
       if (!obj) {
@@ -1093,6 +1029,17 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
     case 'nudge': {
       if (!Number.isFinite(action.dx) || !Number.isFinite(action.dy)) return state;
       const ids = new Set(state.selectedIds);
+      // Arrow keys move like a drag: attached pipes follow, as one undo step.
+      const plan = planFollow(state.scene.objects, state.registry, ids, (o) => isPlacementEditable(state.scene, o));
+      if (followsAnything(plan)) {
+        if (plan.locked) return { ...state, notice: FOLLOW_LOCKED_NOTICE };
+        const frame = applyFollow(state.scene.objects, state.registry, plan, action.dx, action.dy, {
+          editable: (o) => isPlacementEditable(state.scene, o),
+          nextId,
+        });
+        if (frame.blocked.length) return { ...state, notice: NUDGE_BLOCKED_NOTICE };
+        return commitObjects(state, frame.objects);
+      }
       const moved = moveObjects(state.scene.objects, ids, action.dx, action.dy);
       return commitObjects(state, moved === state.scene.objects ? moved : reattach(moved, ids, state.registry));
     }
@@ -1215,6 +1162,10 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
     case 'cancel':
       return {
         ...state,
+        // Esc mid-drag puts every moved part and following pipe back (nothing was committed)
+        // and drops the drag's own notice (#221).
+        ...(state.drag ? { scene: { ...state.scene, objects: state.drag.base } } : {}),
+        ...(isFollowFrameNotice(state.notice) ? { notice: null } : {}),
         mode: 'select',
         placing: null,
         pipeStart: null,

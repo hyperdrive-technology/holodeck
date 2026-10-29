@@ -20,8 +20,60 @@ A valve drawn on the middle of one long pipe (as in `tests/scene.json`) is not a
 - Reroute (`rerouteSelected`): hosted parts of the run's pipes are removed from the obstacles, but every retained placement's ID remains reserved for route allocation. `carryHostedParts` allocates positions jointly in their original geometric order, preferring each part's fraction of the old run length (`chainFrom` orders the old pipes start to end; the new pipes are already in travel order). Bodies are 0.6 grid units long with a 0.1-unit margin: centres stay at least 0.7 apart, and 0.4 from straight ends beyond any `ELBOW_RADIUS` trim. Straights too short for that clearance are skipped. A backward pass reserves room for later parts before the forward pass chooses positions. If all parts cannot fit, reroute leaves the scene and history unchanged and shows "No clear route — inline parts do not fit". Rotation changes by the difference between the old and new pipe axes, so yawed extension parts keep their orientation relative to the pipe. `onPipe`/`at` are rewritten for the new pipe. A successful reroute is one undo step.
 - Retained branches pin hosted parts in place. Reroute splits the run at those parts and preserves each section's endpoint headings. Any fallback in a run with fixed parts or a section with a required endpoint heading rejects the entire reroute, including previously staged sections, with "Reroute rejected — could not verify retained connections". This conservatively rejects even a potentially safe fallback: the Manhattan L has no heading or obstacle guarantees, and half-cell endpoints skip A* without setting `noRoute`.
 - Route flag audit: `fallback` controls acceptance for constrained reroutes. The remaining `noRoute` checks control the drawing ghost colour, new-pipe notice, and unconstrained reroute notice; they intentionally distinguish an unsuccessful A* search from half-cell drawing. `planRoute` defines that distinction and `routeToPlacements` forwards both flags. Unconstrained reroutes keep the same fallback behavior as new-pipe drawing.
-- Not done: dragging a pipe does not drag its hosted parts (they detach geometrically); an unattached part on a pipe is still treated as an obstacle.
+- Not done: dragging a pipe does not drag its hosted parts (they detach geometrically); an unattached part on a pipe is still treated as an obstacle by Reroute (follow-on-drag infers riders, see below).
 - Why not split the pipe at the valve (valve becomes a joint, `findRun` already handles it)? It rewrites authored scenes (one pipe id becomes two; hosts bind tags and animation to placement ids), needs band/colour copying, and adds a joint to pipe-cutaway / flange rendering. `onPipe` is additive metadata.
+
+## Pipes follow a dragged part (drag-and-drop building)
+
+Dragging (or arrow-nudging) a vessel takes the pipework with it. Modules: `routing/attach.ts` (what a pipe end is attached to), `editor/follow.ts` (what each attached run does), `editor/replan.ts` (the re-route itself, shared with Reroute), `editor/port-snap.ts` (ports snapping onto free pipe ends).
+
+### How it worked before
+
+- Move drag (`editor-state.ts` `drag-start` / `drag-move` / `drag-end`): the selection (and its groups) moved rigidly by the pointer delta (half-cell snap); inline parts re-derived `onPipe` against the moved pipes; the drop pushed one history step. Esc dropped the drag state but left the moved scene uncommitted on screen.
+- Pipes stored only coordinates: `x, y` -> `toX, toY`. Ports (`IsoPartDefinition.ports`) were used once, when a pipe was drawn (`resolveRouteEnd` snaps a click to the nearest port and takes its outward heading), and on Reroute; nothing recorded which part an end belonged to.
+- A* (`routePipe`) / Reroute (`findRun` + `carryHostedParts`) worked on an explicit selected run. Moving a vessel left every attached pipe where it was: disconnected, through or away from the vessel.
+
+### Attachment model (`placement.attach`)
+
+`attach: { from?: { object, port? }, to?: { object, port? } }` on a pipe (`from` = its `x, y` end, `to` = `toX, toY`). No `port` = the part's centre (a bottom outlet, an inline valve or end cap on the joint). Schema: `$defs/pipeAttach`; parse checks the shape only (dangling ids allowed, like `onPipe`).
+
+- **Geometry wins.** A record counts only while the end lies on that port (along its outward axis, within `PORT_ATTACH_TOLERANCE` = 0.5) or centre; a stale record is ignored, never teleports anything.
+- **Inferred when absent**, so older scenes need no migration: an end on a port's outward axis within 0.5 of the port point whose pipe leaves the port outward, or an end exactly on a part's centre. The tolerance absorbs hand-authored ends that stop at the wall surface (brewery kettle r = 0.65: port at 16.5, pipe end at 16.8). Elbows, floor annotations, connectors and run parts are never targets; later placements win ties.
+- **Recorded** when a pipe is drawn from / to a port, on the new terminal pipes of a follow re-route, kept by Reroute (records are route-owned: middle segments never inherit them).
+- **Copy / paste / duplicate** remap records to the pasted ids; records to parts left behind are dropped (the copy is pasted elsewhere). **Delete** frees the pipe end (geometry kept), like connector anchors.
+
+### What a run does when one of its parts moves (`planFollow`, once per drag)
+
+Every pipe end attached to a moving part belongs to a run (`findRun`). Then:
+
+| case | behaviour |
+| --- | --- |
+| both run ends move (multi-select), or the far end is a free stub (no other pipe there; at most an end cap / valve nothing else connects to) | **translate** the run, its riders and the stub's fitting by the drag delta |
+| one end moves, the other is fixed (a port, a valve on a joint, a tee) | **re-route** between the moved end and the fixed one (`replanRun` with given ends) |
+| a run member, or a part riding on it, is itself selected | left alone: the user is moving it |
+| any run member or rider on a locked / hidden layer | the move **refuses** with a notice (holodeck#122); Alt still moves the part alone |
+
+Re-route details: port headings kept at both ends (port `dir`, else the old pipe's direction at a joint / tee); off-grid ends (brewery wall ends) are joined to the first grid node along their heading by a straight stub (`entryNode`), so authored offsets survive; riders are carried (`carryHostedParts`): `onPipe` parts plus, for hand-authored scenes, single-node parts and one-cell-wide parts lying along the pipe (`isPipeRider`: the brewery's 2x1 pump); a snapped position is preferred, continuous if only that fits; replacements reuse the run's pipe / elbow ids in run order and keep their own fields (hosts bind tags and flow animation to ids) and keep the run's slot in scene order. A branch teed into the MIDDLE of a run (cellar glycol header, no joint) pins that point: `splitAtMidTees` splits the pipe there first, so only the section between the moved port and the tee re-routes; every placement the split changes (pipes, riders re-attached to a new piece) must be editable, else the move refuses like a locked run. When the new route has fewer segments than the run, the surplus ids disappear: a segment may only go when every user-authored field (anything outside the replan-owned allowlist `id, object, x, y, toX, toY, rotation, onPipe, at, attach`; an elbow's `params.bend` is a fitting setting) is absent or equal on the surviving segment of its kind, and nothing points at it (connector anchor, `attach`, `onPipe`). Otherwise that position is unroutable with a notice naming the segment and the fields, never a silent delete (Reroute instead merges all old data onto the first new segment).
+
+### Frames, drop, undo
+
+- `drag-move` recomputes from the scene at drag start (`drag.base`) every frame, so frames never build on each other. While pipes follow, the delta snaps to whole cells (routes live on grid nodes). A frame for the same snapped delta is a no-op; `ProcessEditor` coalesces pointer moves to one dispatch per animation frame.
+- Interactive search budget: `FOLLOW_MAX_EXPANSIONS` (30k) per run and frame; more is reported as unroutable. Measured (`follow-brewery.test.ts`): brewhouse kettle frame ~0.4 ms median, 9x brewhouse (369 objects) ~1.3 ms median, a capped failing search ~13 ms.
+- **Unroutable position:** the run keeps its old geometry in the preview and the route it would need is drawn as a translucent red tube over a dashed red floor line, with a notice ("No clear route ..." or "Valves / pumps ... do not fit ..."). **Drop there lands on the last position where every pipe could follow** (one undo step, notice). Why not "keep the last route but put the vessel where it was dropped": the pipe would end in mid-air at the old port, i.e. silently disconnected; why not "refuse and snap back": a long drag that ends one cell too far would lose the whole move. With no routable frame at all, nothing moves.
+- **One undo step** for the whole move (parts + every re-routed run): the drop pushes `drag.base`.
+- A pointer delta back at zero never snaps (out and back = no move, no history). Alt frames drop records from the real, unsplit base (`plan.attached` is computed before any tee split).
+- Only frames where the pipes followed (not Alt frames) become the drop fallback, so releasing Alt before a blocked drop never lands the detached position under a "followed" notice (#217).
+- **Esc** mid-drag restores `drag.base` (nothing committed) and clears the drag's notice. **Alt** (held, or pressed mid-drag) moves the parts alone: pipes stay, explicit records naming the moved parts are dropped, nothing snaps.
+- Arrow-key nudge uses the same plan / frame; an unroutable nudge is refused with a notice.
+
+### Palette drag and port snapping
+
+- Drag a part from the palette onto the canvas: pointer events (HTML5 drag and drop would stop the canvas pointer moves, so no live ghost); past 4 px the part is armed and the editor's ghost follows with grid snap; release over the editor's own canvas stamps one part and returns to the select tool with it selected, as one `palette-drop` action (so `onPlaced` fires); release elsewhere (another canvas on the page included) cancels. A plain click still arms click-to-place. Pipes only arm the pipe tool.
+- Port snap (`port-snap.ts`): when a moving / placed part's port comes within one cell of a free pipe end whose pipe would leave that port outward (or a moving pipe's free end comes near such a port), the move is pulled so they coincide; inference then attaches the end. Alt disables the snap.
+
+### Not done (follow-ups)
+
+Align / distribute / rotate do not move attached pipes yet; dragging a pipe does not carry its hosted parts (holodeck#31); one-cell sideways offsets cannot be routed (two elbows need two cells, `minBendSpacing`), so they show as unroutable or take a detour; hand-authored off-grid cross-axis ends (cellar glycol at y = 3.2) cannot be re-routed and show as unroutable.
 
 ## Geometry conventions
 

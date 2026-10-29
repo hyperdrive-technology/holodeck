@@ -9,13 +9,13 @@
  * another document).
  *
  * PASTE (`pasteObjects`): every record validated first (`sanitizeClip`), then fresh ids (`<part>-N`, like the palette), fresh
- * group ids, internal references remapped (connector anchors, `onPipe`),
+ * group ids, internal references remapped (connector anchors, `onPipe`, pipe `attach`),
  * layers kept only when the target scene declares them, then the whole set is
  * offset by (k, k) for the smallest k >= 0 where no pasted placement lands on
  * an identical part at the same cell, so repeated pastes cascade.
  *
  * DELETE (`removeObjects`): parts hosted on a removed pipe lose their
- * attachment, and connector ends anchored to a removed placement are detached
+ * attachment, pipe ends attached to a removed part (`attach`) become free, and connector ends anchored to a removed placement are detached
  * to a free point where the anchor was (Arcentry keeps the dangling line;
  * holodeck#91 asked for "delete-cascade or detach", detach loses nothing).
  */
@@ -23,6 +23,7 @@ import type { ContributionRegistry } from '@holodeck/sdk';
 import { validatePlacementGeometry, validatePlacementPart, type IsoPlacement, type IsoSceneFile } from '../iso/scene';
 import { resolveLinkEnd } from '../objects/connector';
 import type { IsoLink, IsoLinkEnd } from '../objects/validate';
+import { detachPipeEnds, remapPipeEnds } from '../routing/attach';
 import { detachFrom, withAttachment } from '../routing/inline';
 import { isInlinePart } from '../routing/run';
 import { moveBy } from './arrange';
@@ -72,7 +73,9 @@ export function copyObjects(
   const byId = new Map(scene.objects.map((o) => [o.id, o]));
   return scene.objects
     .filter((o) => ids.has(o.id))
-    .map((o) => structuredClone(detachLink(o, (id) => !ids.has(id), byId, registry)));
+    // Pipe end attachments to parts left behind are dropped too: the copy is
+    // pasted elsewhere, and in another document the id may name anything.
+    .map((o) => structuredClone(detachPipeEnds(detachLink(o, (id) => !ids.has(id), byId, registry), (id) => !ids.has(id))));
 }
 
 /** Remove `ids` from the scene: hosted parts detach, anchored connector ends become free points. */
@@ -84,7 +87,8 @@ export function removeObjects(
   const byId = new Map(objects.map((o) => [o.id, o]));
   let rest: IsoPlacement[] = objects.filter((o) => !ids.has(o.id));
   for (const id of ids) rest = detachFrom(rest, id);
-  return rest.map((o) => detachLink(o, (id) => ids.has(id), byId, registry));
+  // Pipes attached to a removed part keep their geometry; their end is free now.
+  return rest.map((o) => detachPipeEnds(detachLink(o, (id) => ids.has(id), byId, registry), (id) => ids.has(id)));
 }
 
 export interface PasteResult {
@@ -176,6 +180,11 @@ export function pasteObjects(
       o.link = { ...o.link };
       if (o.link.from) o.link.from = remapEnd(o.link.from);
       if (o.link.to) o.link.to = remapEnd(o.link.to);
+    }
+    if (o.attach) {
+      const remapped = remapPipeEnds(o, idMap);
+      if (remapped.attach) o.attach = remapped.attach;
+      else delete o.attach;
     }
     if (src.onPipe !== undefined) {
       if (idMap.has(src.onPipe)) o.onPipe = idMap.get(src.onPipe)!;
