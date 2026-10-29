@@ -185,10 +185,9 @@ describe('scene document', () => {
     expect(TANK_WINDOW_YAW).toBe(45);
     expect(DEFAULT_TANK_PARAMS.windowDeg).toBe(TANK_WINDOW_DEG);
     expect(DEFAULT_TANK_PARAMS.windowYawDeg).toBe(TANK_WINDOW_YAW);
-    expect(MIXER_WINDOW_DEG).toBe(70);
-    expect(MIXER_WINDOW_DEG).toBeLessThan(TANK_WINDOW_DEG);
-    expect(MIXER_WINDOW_YAW).toBe(40);
-    expect(MIXER_WINDOW_YAW).toBeLessThan(TANK_WINDOW_YAW);
+    // Agitated vessels are mixer.glb since 2026-10-30: its 100° window centred on the camera (agitated-vessel.test.ts).
+    expect(MIXER_WINDOW_DEG).toBe(100);
+    expect(MIXER_WINDOW_YAW).toBe(45);
     expect(MIXER_SHOULDER_RATIO).toBeCloseTo(0.18);
     expect(MIXER_SHOULDER_TOP).toBeCloseTo(0.82);
     expect(bottleShoulderEase(0)).toBeCloseTo(0);

@@ -851,11 +851,11 @@ export const MIXER_IMPELLER_COLOR = '#c9cdd1';
 
 /** Mixer keep-arc must show a right-hand bottle wall. Tank window 91° ate
  *  the +X silhouette so s-mixer read as a cutaway cylinder vs r-mixer's bottle. */
-export const MIXER_WINDOW_DEG = 70;
+export const MIXER_WINDOW_DEG = 100; // = MIXER_GLB.windowDeg: agitated vessels are mixer.glb since 2026-10-30 (was 70 procedural)
 
 /** Inherited 45 opened the cut a tad toward +X vs r-mixer keep-arc on the
  *  right-hand bottle wall. Tanks stay TANK_WINDOW_YAW 45. */
-export const MIXER_WINDOW_YAW = 40;
+export const MIXER_WINDOW_YAW = 45; // = MIXER_GLB.windowYawDeg (was 40 procedural); routing clips pipes on this cutout
 
 /** Mixer body tapers into the dome. A silo (ratio 0) read as cylinder+hemisphere
  *  vs r-mixer's bottle shoulders. */

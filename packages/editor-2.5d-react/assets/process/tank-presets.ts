@@ -86,11 +86,10 @@ export const HLT_PRESET: TankPreset = {
 };
 
 /**
- * Mash tun = the agitated mixer bottle on short legs. Was a squat 1.7-high
- * dish-bottom can with the agitator bolted on (Des 2026-10-29: "squat,
- * octagonal flat disc hat"). Radius stays 1.0 (brewery footprint / ports);
- * height 2.5 gives reference.jpg's slim, tall mixer proportions. The heel
- * (outerBowlHeight) is the bottom closure, so `bottom` stays flat.
+ * Mash tun = the agitated mixer (mixer.glb via AgitatedVessel since
+ * 2026-10-30), scaled to R 1.0 (brewery footprint / ports) and a 2.5 straight
+ * wall: reference.jpg's slim, tall mixer. mixer.glb stands flat on the floor,
+ * so no stand / bottom closure (they would only shift the layout floor).
  */
 export const MASH_TUN_PRESET: TankPreset = {
   height: 2.5,
@@ -98,8 +97,7 @@ export const MASH_TUN_PRESET: TankPreset = {
   params: {
     ...MIXER_BODY_PRESET,
     bottom: 'flat',
-    support: 'legs',
-    standHeight: 0.22,
+    support: 'none',
     ...AGITATOR_PRESET,
   },
 };

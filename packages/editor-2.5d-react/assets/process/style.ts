@@ -233,7 +233,7 @@ export const HOLODECK_STYLE: HolodeckStyle = {
     // any instanced band that falls back to it.
     bandInstanced: '#e74c3c',
     pipeWire: '#888888',
-    liquid: '#4aa3d9',
+    liquid: '#5cc8e6',
     alarm: '#e85d5d',
     bore: '#3a3a3a',
   },

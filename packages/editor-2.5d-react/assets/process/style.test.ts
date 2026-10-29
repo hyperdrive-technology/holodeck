@@ -33,7 +33,7 @@ describe('HOLODECK_STYLE tokens', () => {
       band: '#c0392b',
       bandInstanced: '#e74c3c',
       pipeWire: '#888888',
-      liquid: '#4aa3d9',
+      liquid: '#5cc8e6',
       alarm: '#e85d5d',
       bore: '#3a3a3a',
     });
@@ -89,7 +89,7 @@ describe('HOLODECK_STYLE tokens', () => {
   it('keeps the legacy constant names as aliases with the old values', () => {
     expect(EDGE).toBe('#666666');
     expect(BODY).toBe('#ffffff');
-    expect(FILL).toBe('#4aa3d9');
+    expect(FILL).toBe('#5cc8e6'); // 2026-10-30: light cyan like reference.jpg (was #4aa3d9 under an opaque fill)
     expect(TANK_SHADE_MIN).toBe(0.22);
     expect(TANK_SHADE_MAX).toBe(0.95);
     expect(TANK_HUB_WHITE).toBe(0.85);
@@ -107,7 +107,7 @@ describe('HOLODECK_STYLE tokens', () => {
     expect(DEFAULT_TANK_PARAMS.edgeColor).toBe('#666666');
     expect(DEFAULT_TANK_PARAMS.lineWidth).toBe(1.5);
     expect(DEFAULT_TANK_PARAMS.capLineWidth).toBe(1.5);
-    expect(DEFAULT_TANK_PARAMS.fillColor).toBe('#4aa3d9');
+    expect(DEFAULT_TANK_PARAMS.fillColor).toBe('#5cc8e6');
     expect(DEFAULT_TANK_PARAMS.shadeMin).toBe(0.22);
     expect(DEFAULT_TANK_PARAMS.shadeMax).toBe(0.95);
     expect(DEFAULT_TANK_PARAMS.hubWhite).toBe(0.85);
