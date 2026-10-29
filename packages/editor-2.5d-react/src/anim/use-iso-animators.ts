@@ -74,7 +74,10 @@ export function useIsoAnimators(
   animation?: IsoPlacement['animation'],
 ): void {
   const registry = useIsoRegistry();
-  const nodes = useMemo(() => (root ? findAnimNodes(root) : {}), [root]);
+  // Re-scanned (below) while a bound node is missing: a GLB under `root` (e.g. the agitated
+  // vessel's mixer.glb inside AnimatedPartRoot) loads after the root group mounts.
+  const nodes = useRef<Record<string, Object3D>>({});
+  const scanned = useRef<Object3D | null>(null);
   const bindings = useMemo(
     () => planAnimations(def, animation, (id) => registry.get<IsoAnimator>(HOLODECK_KINDS.isoAnimator, id)),
     [def, animation, registry],
@@ -86,8 +89,24 @@ export function useIsoAnimators(
   useEffect(() => {
     elapsed.current = 0;
   }, [root]);
+  const sinceScan = useRef(0);
   useFrame((_, dt) => {
     elapsed.current += dt;
-    applyAnimations(bindings, nodes, live.current, dt, elapsed.current);
+    if (scanned.current !== root) {
+      scanned.current = root;
+      nodes.current = root ? findAnimNodes(root) : {};
+      sinceScan.current = 0;
+    } else if (root && bindings.some((b) => !nodes.current[b.nodeName])) {
+      // A traverse every RESCAN_FRAMES frames, only while something bound is still missing.
+      sinceScan.current += 1;
+      if (sinceScan.current >= RESCAN_FRAMES) {
+        nodes.current = findAnimNodes(root);
+        sinceScan.current = 0;
+      }
+    }
+    applyAnimations(bindings, nodes.current, live.current, dt, elapsed.current);
   });
 }
+
+/** Frames between re-scans of a root whose bound `anim.*` node has not appeared yet. */
+export const RESCAN_FRAMES = 10;

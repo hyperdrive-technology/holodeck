@@ -8,7 +8,7 @@ import { Supports } from './Supports';
 import { BackSide, BufferAttribute, BufferGeometry, Vector2, type Vector3Tuple } from 'three';
 import { ShadedMesh, WhiteFill } from './Shell';
 import { useHolodeckStyle } from './style-context';
-import { TankAgitator } from './TankAgitator';
+import { AgitatedVessel } from './AgitatedVessel';
 import {
   mergeTankParams,
   liquidShades,
@@ -270,6 +270,23 @@ export function Tank({
     Math.max(0.2, tankR * TANK_NOZZLE_LENGTH),
     nozzleR,
   );
+  if (p.agitator) {
+    // Agitated vessels are the Blender mixer (AgitatedVessel / mixer.glb) since 2026-10-30; the
+    // procedural bottle + TankAgitator path is retired. Floor = the layout floor (mixer.glb has no stand).
+    return (
+      <group position={position}>
+        <AgitatedVessel
+          radius={tankR}
+          height={tankH}
+          floorY={layout.floorY}
+          fill={level}
+          color={color}
+          opacity={p.liquidOpacity}
+          edgeColor={p.edgeColor}
+        />
+      </group>
+    );
+  }
   return (
     <group position={position}>
       <group key={meshKey}>
@@ -529,10 +546,6 @@ export function Tank({
           />
         ) : null}
       </group>
-      {/* Outside the keyed group so the `anim.agitator` node survives level / size changes (findAnimNodes memoises on the root). */}
-      {p.agitator ? (
-        <TankAgitator tankH={tankH} params={{ ...p, radius: tankR }} apexY={layout.apexY} />
-      ) : null}
     </group>
   );
 }
