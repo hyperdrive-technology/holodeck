@@ -28,7 +28,9 @@ jobs:
         # provider-aws runs the real AWS SDK against an in-process fake backend
         # (ProviderContext.fetch); no AWS credentials and no network.
         package: [editor-2.5d-react, editor-2d-react, viewer-3d-react, flow-runtime, provider-http, library-cloud, provider-aws, assets-aws]
-    timeout-minutes: 30
+    # Job > the editor-2.5d Test step (25 min) + ~10 min of checkout / SDK build / install / tsc / build,
+    # so the step timeout (which logs which test was running) fires first (holodeck#231).
+    timeout-minutes: 40
     steps:
       # The packages depend on the SDK via `file:../../../holodeck-sdk/ts`, so the
       # SDK must be checked out as a sibling of this repo. Actions can only check
