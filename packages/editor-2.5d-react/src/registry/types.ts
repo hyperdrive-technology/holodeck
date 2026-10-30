@@ -173,6 +173,12 @@ export interface IsoPartDefinition extends Contribution {
    */
   cutoutOf?: (placement: Pick<IsoPlacement, 'params'>) => { windowYawDeg: number; windowDeg: number } | undefined;
   /**
+   * Wall radius of a placement when it is not simply its `radius` param (the
+   * built-in `tank`'s `preset` carries its own radius). Pipes clip at it
+   * (routing/vessel-ports.ts `vesselRadius`). Undefined = the usual rule.
+   */
+  radiusOf?: (placement: Pick<IsoPlacement, 'params' | 'height'>) => number | undefined;
+  /**
    * World Y range of the straight (windowed) wall, for vessels raised on
    * legs or a skirt: a floor-level pipe below `bottomY` passes under the
    * window rather than through it. Absent = the wall stands on the floor up

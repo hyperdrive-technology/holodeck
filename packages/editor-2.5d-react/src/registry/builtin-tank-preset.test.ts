@@ -8,7 +8,8 @@ import { BUILTIN_ISO_PARTS, TANK_SHAPES, TANK_SHAPE_PLAIN, tankPlacementShape } 
 import { TANK_PRESETS } from '../../assets/process/tank-presets';
 import { DEFAULT_TANK_PARAMS, MIXER_WINDOW_DEG, TANK_WINDOW_DEG, mergeTankParams } from '../../assets/process/tank-params';
 import { vesselCutout, vesselRadius, vesselWallSpan } from '../routing/vessel-ports';
-import { resolveParams } from './params';
+import { placementFootprint, resolveParams } from './params';
+import { createIsoRegistryWithBuiltins } from './default';
 import type { IsoPlacement } from '../iso/scene';
 
 const tankDef = BUILTIN_ISO_PARTS.find((p) => p.id === 'tank')!;
@@ -70,5 +71,37 @@ describe('tank preset param', () => {
     expect(wp.bottomY).toBeCloseTo(0.25);
     expect(wp.topY).toBeCloseTo(0.25 + TANK_PRESETS.whirlpool.height);
     expect(vesselRadius(tankDef, tank({ preset: 'kettle', radius: 0.65 }))).toBe(0.65);
+  });
+});
+
+/** Review of #228, findings 1 and 2. */
+describe('tank radius: one effective radius for drawing, tuning and routing', () => {
+  it('the TankTuner Radius slider (tankParams.radius) resizes a plain tank', () => {
+    expect(tankPlacementShape({ params: {} }, { radius: 2 }).radius).toBe(2);
+    expect(tankPlacementShape({ params: { preset: 'plain' } }, { radius: 0.5 }).radius).toBe(0.5);
+  });
+
+  it('precedence: placement radius param, then tankParams.radius, then the preset, then the default', () => {
+    expect(tankPlacementShape({ params: { preset: 'kettle', radius: 0.8 } }, { radius: 2 }).radius).toBe(0.8);
+    expect(tankPlacementShape({ params: { preset: 'kettle' } }, { radius: 2 }).radius).toBe(2);
+    expect(tankPlacementShape({ params: { preset: 'kettle' } }).radius).toBe(TANK_PRESETS.kettle.radius);
+    expect(tankPlacementShape({ params: {} }).radius).toBe(DEFAULT_TANK_PARAMS.radius);
+  });
+
+  it('routing clips a preset tank with no radius param at the radius it is drawn with', () => {
+    const kettle = tank({ preset: 'kettle' });
+    expect(vesselRadius(tankDef, kettle)).toBe(TANK_PRESETS.kettle.radius);
+    expect(vesselRadius(tankDef, kettle)).toBe(tankPlacementShape(kettle).radius);
+    expect(vesselRadius(tankDef, tank({ preset: 'whirlpool' }))).toBe(TANK_PRESETS.whirlpool.radius);
+    expect(vesselRadius(tankDef, tank())).toBe(1);
+  });
+});
+
+describe('tank footprint follows the effective radius', () => {
+  it('plain and kettle stay 2x2; the whirlpool preset (R 1.1) covers 3x3', () => {
+    expect(placementFootprint(createIsoRegistryWithBuiltins(), tank())).toEqual({ w: 2, h: 2 });
+    expect(tankDef.footprintOf?.(tank({ preset: 'kettle' }))).toEqual({ w: 2, h: 2 });
+    expect(tankDef.footprintOf?.(tank({ preset: 'whirlpool' }))).toEqual({ w: 3, h: 3 });
+    expect(tankDef.footprintOf?.(tank({ preset: 'whirlpool', radius: 1 }))).toEqual({ w: 2, h: 2 });
   });
 });

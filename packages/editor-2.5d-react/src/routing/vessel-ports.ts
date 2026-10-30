@@ -134,14 +134,17 @@ export function vesselCutout(
 }
 
 /**
- * Wall radius used for the pipe band. A `radius` param wins (the parametric
- * Tank); otherwise half the smaller footprint side, which is what a 2x2
- * vessel of radius 1 fills.
+ * Wall radius used for the pipe band: `def.radiusOf(placement)` when the
+ * part declares it (built-in `tank` presets), else a `radius` param (the
+ * parametric Tank), else half the smaller footprint side, which is what a
+ * 2x2 vessel of radius 1 fills.
  */
 export function vesselRadius(
-  def: Pick<IsoPartDefinition, 'params' | 'footprint' | 'footprintOf'>,
+  def: Pick<IsoPartDefinition, 'params' | 'footprint' | 'footprintOf' | 'radiusOf'>,
   placement: IsoPlacement,
 ): number {
+  const own = num(def.radiusOf?.(placement));
+  if (own !== undefined && own > 0) return own;
   const r = num(resolveParams(def, placement).radius);
   if (r !== undefined && r > 0) return r;
   const fp = def.footprintOf?.(placement) ?? def.footprint;

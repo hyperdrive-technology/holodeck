@@ -19,6 +19,7 @@ import {
   tankLayout,
   tankWallSpan,
   tunedVesselHeight,
+  vesselFootprint,
   MIXER_WINDOW_DEG,
   MIXER_WINDOW_YAW,
   type TankParams,
@@ -85,7 +86,10 @@ export function tankPlacementShape(
   const preset = presetOf(placement.params);
   const params: Partial<TankParams> = { ...preset?.params, ...tankParams };
   const height = tunedVesselHeight(placement.height ?? preset?.height ?? 3.05, tankParams);
-  const radius = num(placement.params?.radius) ?? preset?.radius ?? DEFAULT_TANK_PARAMS.radius;
+  // Placement param (scene file / inspector), then the TankTuner's Radius slider, then the preset.
+  // Review of #228: the tuner's radius was skipped, and TankPart's explicit `radius` prop then beat it.
+  const radius =
+    num(placement.params?.radius) ?? num(tankParams?.radius) ?? preset?.radius ?? DEFAULT_TANK_PARAMS.radius;
   return { radius, height, params, layout: tankLayout(height, radius, mergeTankParams(params)) };
 }
 
@@ -272,6 +276,10 @@ export const BUILTIN_ISO_PARTS: readonly IsoPartDefinition[] = [
       return { windowYawDeg: p.windowYawDeg, windowDeg: p.windowDeg };
     },
     wallSpan: (placement) => tankWallSpan(tankPlacementShape(placement).layout),
+    // The radius it is drawn with (a preset's own radius when the placement sets none), so pipes clip at the wall.
+    radiusOf: (placement) => tankPlacementShape(placement).radius,
+    // Same radius for the halo / occupancy box (a plain tank stays 2x2; a whirlpool preset, R 1.1, is 3x3).
+    footprintOf: (placement) => vesselFootprint(tankPlacementShape(placement).radius),
     params: {
       // 0..1 fraction. The host maps REAL percent (0..100) to this range.
       level: LEVEL,
