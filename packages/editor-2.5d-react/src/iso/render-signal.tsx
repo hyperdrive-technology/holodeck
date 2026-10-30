@@ -18,9 +18,11 @@
  * minimum that guarantees a presented frame contains the revision.
  *
  * Holds are counted, not flagged, so any number of loaders can overlap.
- * HolodeckModel registers its suspended loader promise before rethrowing it,
- * so even a host's `Suspense fallback={null}` waits for GLBs. A fallback that
- * mounts `<PendingAsset />` additionally holds until its boundary commits.
+ * HolodeckModel wraps its suspending body in its own boundary and holds from
+ * its own (committed) mount until the body mounts, so even a host's
+ * `Suspense fallback={null}` waits for GLBs, and removing the model while it
+ * loads releases the hold. A fallback that mounts `<PendingAsset />` holds until
+ * its boundary commits.
  */
 import { useFrame, useThree } from '@react-three/fiber';
 import { createContext, useContext, useLayoutEffect, useRef, useState } from 'react';
@@ -54,52 +56,154 @@ export function createRenderTracker(): RenderTracker {
 /** Null outside an IsoCanvas: holds are then no-ops (parts can render in any canvas). */
 export const RenderTrackerContext = createContext<RenderTracker | null>(null);
 
-// Suspended mounts have no effects/ref state to clean up. Own these holds by
-// the cached loader promise instead, and deduplicate React retries and models
-// sharing that promise separately for each canvas.
+// Suspended mounts have no effects/ref state to clean up, and React discards
+// the hooks of an uncommitted component on every retry (even useId changes), so
+// a hold cannot be keyed by a hook. Keyed holds are therefore owned by a
+// caller-supplied INSTANCE key (the placement id; see `assetHoldKey`): one hold
+// per (tracker, key), registered synchronously at render time. The network
+// request is deduplicated by the loader cache; the hold is not (holodeck#199).
 const pendingAssets = new WeakMap<RenderTracker, WeakSet<PromiseLike<unknown>>>();
-// Holds whose load succeeded but whose model has not mounted yet, by mount key.
-const awaitingMount = new WeakMap<RenderTracker, Map<string, () => void>>();
-/** Safety net: a model abandoned between load and mount must not hold forever. */
-export const MOUNT_HANDOFF_TIMEOUT_MS = 2000;
+
+interface InstanceHold {
+  release: () => void;
+  state: 'loading' | 'settled' | 'rendered';
+  timer?: ReturnType<typeof setTimeout>;
+}
+const instanceHolds = new WeakMap<RenderTracker, Map<string, InstanceHold>>();
 
 /**
- * Holds `tracker` until `promise` settles. With `mountKey`, a successful load
- * keeps the hold until `confirmAssetMounted(tracker, mountKey)` (or the safety
- * timeout): the promise settles BEFORE React retries and commits the suspended
- * model, so releasing on settle lets the two-frame gate report a frame that
- * does not contain the model yet (seen in embed-render.test.ts, "null Suspense
- * fallback"). Failures release immediately; nothing will mount.
+ * After a request settles React retries (re-renders) a still-mounted instance
+ * within a scheduler task. If no retry render arrives in this long, the
+ * instance was removed while loading and nothing committed can tell us, so the
+ * hold is dropped. (Instances with a committed owner release immediately.)
+ */
+export const RETRY_GRACE_MS = 2000;
+/**
+ * Backstop for an instance that rendered after its load but never committed
+ * (abandoned between render and commit): warn and release after this long.
+ */
+export const MOUNT_HANDOFF_TIMEOUT_MS = 10_000;
+
+/** Hold key of one asset load by one instance: `owner` is the placement id (or any per-instance string). */
+export function assetHoldKey(owner: string | undefined, url: string): string {
+  return `${owner ?? ''}\u0000${url}`;
+}
+
+/**
+ * Holds `tracker` for one instance's load. Without `mountKey`: until `promise`
+ * settles (deduplicated per promise, the legacy behaviour). With `mountKey`
+ * (`assetHoldKey`): registered synchronously at render time, ONE hold per key
+ * (render retries of that instance are no-ops, other instances loading the
+ * same URL get their own), and released by the first of:
+ *  - `confirmAssetMounted(tracker, key)`: the instance committed after load, or
+ *    its committed owner/fallback unmounted (removal mid-load, load error);
+ *  - the request failing;
+ *  - the request settling with no retry render within `RETRY_GRACE_MS`
+ *    (removed before React could retry it), or, once it did render again
+ *    (`noteAssetRendered`), `MOUNT_HANDOFF_TIMEOUT_MS` without a commit.
+ * It never depends on any component committing to be registered.
  */
 export function holdPendingAsset(tracker: RenderTracker, promise: PromiseLike<unknown>, mountKey?: string): void {
-  let assets = pendingAssets.get(tracker);
-  if (!assets) {
-    assets = new WeakSet();
-    pendingAssets.set(tracker, assets);
-  }
-  if (assets.has(promise)) return;
-  assets.add(promise);
-  const release = tracker.hold();
   if (mountKey === undefined) {
+    let assets = pendingAssets.get(tracker);
+    if (!assets) {
+      assets = new WeakSet();
+      pendingAssets.set(tracker, assets);
+    }
+    if (assets.has(promise)) return;
+    assets.add(promise);
+    const release = tracker.hold();
     Promise.resolve(promise).then(release, release);
     return;
   }
-  Promise.resolve(promise).then(() => {
-    let waiting = awaitingMount.get(tracker);
-    if (!waiting) awaitingMount.set(tracker, (waiting = new Map()));
-    const previous = waiting.get(mountKey);
-    waiting.set(mountKey, () => { previous?.(); release(); });
-    setTimeout(() => confirmAssetMounted(tracker, mountKey), MOUNT_HANDOFF_TIMEOUT_MS);
-  }, release);
+  let holds = instanceHolds.get(tracker);
+  if (!holds) instanceHolds.set(tracker, (holds = new Map()));
+  if (holds.has(mountKey)) return;
+  const entry: InstanceHold = { release: tracker.hold(), state: 'loading' };
+  holds.set(mountKey, entry);
+  Promise.resolve(promise).then(
+    () => {
+      if (instanceHolds.get(tracker)?.get(mountKey) !== entry || entry.state !== 'loading') return;
+      entry.state = 'settled';
+      entry.timer = setTimeout(() => confirmAssetMounted(tracker, mountKey), RETRY_GRACE_MS);
+    },
+    () => {
+      if (instanceHolds.get(tracker)?.get(mountKey) === entry) confirmAssetMounted(tracker, mountKey);
+    },
+  );
 }
 
-/** The model for `mountKey` is committed: release holds waiting on its mount. */
+/** The instance re-rendered after its load settled (React's retry): it is alive, so wait for its commit. */
+export function noteAssetRendered(tracker: RenderTracker, mountKey: string): void {
+  const entry = instanceHolds.get(tracker)?.get(mountKey);
+  if (!entry || entry.state === 'rendered') return;
+  if (entry.state === 'loading') return; // a still-pending promise cannot have been retried
+  clearTimeout(entry.timer);
+  entry.state = 'rendered';
+  entry.timer = setTimeout(() => {
+    if (instanceHolds.get(tracker)?.get(mountKey) !== entry) return;
+    console.warn(`holodeck: ${mountKey.split('\u0000')[1] ?? mountKey} loaded but never committed within ${MOUNT_HANDOFF_TIMEOUT_MS / 1000}s; releasing its render hold`);
+    confirmAssetMounted(tracker, mountKey);
+  }, MOUNT_HANDOFF_TIMEOUT_MS);
+}
+
+/** This instance's load is over (committed, removed or failed): release its hold, once. */
 export function confirmAssetMounted(tracker: RenderTracker, mountKey: string): void {
-  const waiting = awaitingMount.get(tracker);
-  const release = waiting?.get(mountKey);
-  if (!release) return;
-  waiting!.delete(mountKey);
-  release();
+  const holds = instanceHolds.get(tracker);
+  const entry = holds?.get(mountKey);
+  if (!entry) return;
+  holds!.delete(mountKey);
+  clearTimeout(entry.timer);
+  entry.release();
+}
+
+/**
+ * How long a mounted-but-not-yet-loaded model may hold before we warn. It is a
+ * diagnostic only: the hold is NOT released (holodeck#63) because reporting
+ * ready without the model would be a lie. A model that is removed or fails
+ * releases through its own unmount instead (holodeck#58).
+ */
+export const MOUNT_WARN_MS = 15_000;
+
+/**
+ * Holds `tracker` until the returned function is called, warning once if that
+ * takes longer than `MOUNT_WARN_MS`. Idempotent. Plain function (no React) so
+ * the timing is unit-tested; `useMountHold` ties it to a component lifecycle.
+ */
+export function holdUntilMounted(tracker: RenderTracker, label: string, warn: (message: string) => void = console.warn): () => void {
+  const release = tracker.hold();
+  const timer = setTimeout(
+    () => warn(`holodeck: ${label} is still not mounted after ${MOUNT_WARN_MS / 1000}s; the canvas stays not-ready until it loads or is removed`),
+    MOUNT_WARN_MS,
+  );
+  return () => {
+    clearTimeout(timer);
+    release();
+  };
+}
+
+/**
+ * Holds the rendered signal from the commit of the calling component until
+ * `mountedKey === key` (its content committed) or the component unmounts.
+ * The caller must itself sit OUTSIDE the Suspense boundary it waits on: a
+ * component whose child suspends commits its own effects at once, while a
+ * suspending component never does. That is what lets removal during a load
+ * (or a failed load, which unmounts through the error boundary) release.
+ * `requestKey` is the body's keyed request hold (`assetHoldKey`): the wrapper
+ * takes it over once its own hold exists, and abandons it on unmount. Only that
+ * one instance's key, so other instances of the same URL are untouched.
+ */
+export function useMountHold(key: string, mountedKey: string | null, requestKey?: string): void {
+  const tracker = useContext(RenderTrackerContext);
+  useLayoutEffect(() => {
+    if (!tracker || mountedKey === key) return undefined;
+    const release = holdUntilMounted(tracker, key);
+    if (requestKey !== undefined) confirmAssetMounted(tracker, requestKey);
+    return () => {
+      release();
+      if (requestKey !== undefined) confirmAssetMounted(tracker, requestKey);
+    };
+  }, [tracker, key, mountedKey, requestKey]);
 }
 
 /** Holds the rendered signal while `active` (inside an IsoCanvas). */
@@ -108,9 +212,23 @@ export function useRenderHold(active = true): void {
   useLayoutEffect(() => (active && tracker ? tracker.hold() : undefined), [active, tracker]);
 }
 
-/** Suspense fallback that holds the rendered signal until its boundary resolves. */
-export function PendingAsset() {
-  useRenderHold(true);
+/**
+ * Suspense fallback that holds the rendered signal until its boundary resolves.
+ * Pass `requestKey` (`assetHoldKey`) so unmounting the fallback (the boundary
+ * committed, was removed, or failed into an error boundary) also ends that
+ * instance's keyed request hold at once. The fallback is only an extra,
+ * committed owner: the request hold itself never relies on it committing.
+ */
+export function PendingAsset({ requestKey }: { requestKey?: string } = {}) {
+  const tracker = useContext(RenderTrackerContext);
+  useLayoutEffect(() => {
+    if (!tracker) return undefined;
+    const release = tracker.hold();
+    return () => {
+      release();
+      if (requestKey !== undefined) confirmAssetMounted(tracker, requestKey);
+    };
+  }, [tracker, requestKey]);
   return null;
 }
 

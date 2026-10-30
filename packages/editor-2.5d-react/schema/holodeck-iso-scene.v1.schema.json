@@ -65,6 +65,16 @@
         { "$ref": "#/$defs/point" }
       ]
     },
+    "pipeAttach": {
+      "description": "Pipe end attachment: a placement and optionally one of its ports (no port = the part centre).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object"],
+      "properties": {
+        "object": { "type": "string", "minLength": 1 },
+        "port": { "type": "string", "minLength": 1 }
+      }
+    },
     "link": {
       "type": "object",
       "additionalProperties": false,
@@ -145,6 +155,15 @@
         "meta": { "$ref": "#/$defs/meta" },
         "metaHidden": { "type": "boolean" },
         "link": { "$ref": "#/$defs/link" },
+        "attach": {
+          "description": "Pipes: what each end connects to (from = x,y end; to = toX,toY end). Geometry wins: a stale attachment is ignored.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "from": { "$ref": "#/$defs/pipeAttach" },
+            "to": { "$ref": "#/$defs/pipeAttach" }
+          }
+        },
         "layer": { "$ref": "#/$defs/shortId" },
         "group": { "$ref": "#/$defs/shortId" }
       }

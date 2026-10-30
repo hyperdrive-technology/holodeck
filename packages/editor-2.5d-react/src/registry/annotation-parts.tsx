@@ -50,6 +50,7 @@ function ImagePart({ placement, params }: IsoPartProps) {
     <ImageMark
       x={wx}
       z={wz}
+      owner={placement.id}
       src={typeof params.src === 'string' ? params.src : ''}
       width={numberOr(params.width, 2)}
       height={numberOr(params.height, 0)}

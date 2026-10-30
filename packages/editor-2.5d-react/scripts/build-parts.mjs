@@ -19,6 +19,8 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const PKG_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+export { compareGlb, splitGlb } from './glb-compare.mjs';
+
 export const BLENDER_DIR = resolve(PKG_DIR, '../../blender');
 export const PARTS_DIR = join(BLENDER_DIR, 'parts');
 export const HELPER = join(BLENDER_DIR, 'holodeck_bpy.py');

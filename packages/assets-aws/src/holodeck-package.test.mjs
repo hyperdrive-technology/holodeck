@@ -9,7 +9,8 @@ import entry, { AWS_PACKAGE_MANIFEST, awsPackage, createAwsExtension } from './h
 import { AWS_CATEGORIES, AWS_PART_DEFINITIONS, AWS_SERVICES, CLOUDWATCH_NAMESPACE_PARTS, createAwsParts } from './parts';
 import { MAX_ICON_BYTES, sanitizeSvg, svgProblems, tileColour } from '../scripts/svg-sanitize.mjs';
 // Pure engine contracts only: no React, renderer or editor installation required in this CI job.
-import { ISO_KINDS, isIsoPartDefinition } from '../../editor-2.5d-react/src/registry/kinds';
+// (the editor's ./contracts entry; vitest.config.ts maps it to source, holodeck#137).
+import { ISO_KINDS, isIsoPartDefinition } from '@holodeck/editor-2.5d-react/contracts';
 // Source-level imports keep the check cheap: no AWS SDK needed in this job.
 import { DEFAULT_PART_HINTS } from '../../provider-aws/src/discovery';
 

@@ -5,7 +5,7 @@ import { Vector3 } from 'three';
 import { afterAll, describe, expect, it } from 'vitest';
 import { DEFAULT_FITTING_PARAMS as P } from '../../assets/process/fitting-params';
 // @ts-expect-error — plain .mjs build script, no type declarations.
-import { buildPart, findBlender } from '../../scripts/build-parts.mjs';
+import { buildPart, compareGlb, findBlender } from '../../scripts/build-parts.mjs';
 import { nodeBounds, nodeByName, parseGlbJson, sceneBounds, worldMatrices, type GltfJson } from './glb-json';
 
 /**
@@ -149,16 +149,24 @@ describe('assets/models/valve.glb', () => {
 
 const blender = findBlender() as string | null;
 
+// HOLODECK_REQUIRE_BLENDER=1 (set by .github/workflows/blender-drift.yml, holodeck#136): the job
+// exists to run the rebuild below, so a missing Blender must fail it, not skip it quietly.
+it.runIf(process.env.HOLODECK_REQUIRE_BLENDER === '1')('finds Blender when HOLODECK_REQUIRE_BLENDER=1', () => {
+  expect(blender, 'Blender not found: set $BLENDER or put blender on PATH').toBeTruthy();
+});
+
 describe.skipIf(!blender)('valve.glb rebuild (needs Blender)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'hd-parts-'));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  it('rebuilds byte-identical to the committed asset (deterministic + not stale)', async () => {
+  it('rebuilds to the committed asset (deterministic + not stale)', async () => {
     await buildPart('valve', { outDir: dir, blender, quiet: true });
     const out = join(dir, 'valve.glb');
     expect(existsSync(out)).toBe(true);
-    // Structural check first so a failure explains *what* changed.
-    expect(load(out)).toEqual(load(GLB));
-    expect(Buffer.compare(readFileSync(out), readFileSync(GLB))).toBe(0);
+    // Byte-identical on the authoring platform; across macOS/Linux a node
+    // quaternion may differ by one float32 ULP, which compareGlb tolerates
+    // (holodeck#136, scripts/glb-compare.mjs). Its problems name the JSON path
+    // that changed, so a failure explains *what* changed.
+    expect(compareGlb(readFileSync(out), readFileSync(GLB)).problems).toEqual([]);
   });
 });

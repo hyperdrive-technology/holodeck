@@ -6,7 +6,7 @@ import { Box3, Mesh, Object3D, Raycaster, Vector3 } from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // @ts-expect-error Build scripts are plain Node ESM, not part of the published TS API.
-import { buildPart, findBlender, listParts, PARTS_DIR } from '../scripts/build-parts.mjs';
+import { buildPart, compareGlb, findBlender, listParts, PARTS_DIR } from '../scripts/build-parts.mjs';
 import { CLOUD_PART_DEFINITIONS } from './parts';
 
 const assets = fileURLToPath(new URL('../assets/', import.meta.url));
@@ -154,11 +154,20 @@ describe.each(CLOUD_PART_DEFINITIONS)('$id GLB', (part) => {
 });
 
 const blender = findBlender();
+// HOLODECK_REQUIRE_BLENDER=1 (set by .github/workflows/blender-drift.yml, holodeck#136): the job
+// exists to run the rebuild below, so a missing Blender must fail it, not skip it quietly.
+it.runIf(process.env.HOLODECK_REQUIRE_BLENDER === '1')('finds Blender when HOLODECK_REQUIRE_BLENDER=1', () => {
+  expect(blender, 'Blender not found: set $BLENDER or put blender on PATH').toBeTruthy();
+});
 describe.skipIf(!blender)('deterministic Blender rebuild (requires Blender)', () => {
   const directory = mkdtempSync(join(tmpdir(), 'holodeck-cloud-'));
   afterAll(() => rmSync(directory, { recursive: true, force: true }));
-  it.each(CLOUD_PART_DEFINITIONS)('$id matches its authored script byte-for-byte', async (part) => {
+  // Byte-identical on the authoring platform; across macOS/Linux node
+  // quaternions may differ by a float32 ULP, so compareGlb also accepts an
+  // identical BIN chunk plus JSON equal within 1e-6 (holodeck#136, glb-compare.mjs).
+  it.each(CLOUD_PART_DEFINITIONS)('$id matches its authored script', async (part) => {
     await buildPart(part.id.slice(6), { outDir: directory, blender, quiet: true });
-    expect(readFileSync(join(directory, part.model.slice('models/'.length))).equals(readFileSync(join(assets, part.model)))).toBe(true);
+    const rebuilt = readFileSync(join(directory, part.model.slice('models/'.length)));
+    expect(compareGlb(rebuilt, readFileSync(join(assets, part.model))).problems).toEqual([]);
   }, 60_000);
 });

@@ -58,6 +58,23 @@ export function isInlinePart(o: IsoPlacement, registry: ContributionRegistry): b
   return w <= 1 && h <= 1;
 }
 
+/**
+ * May `o` ride on pipe `seg` without an explicit `onPipe` (hand-authored
+ * scenes)? Single-node parts, or a part one cell wide whose long side runs
+ * along the pipe: core's brewery pump is 2x1 and drawn over its run, which
+ * keeps passing through it. Vessels, floor annotations and run parts never.
+ */
+export function isPipeRider(o: IsoPlacement, registry: ContributionRegistry, seg: { from: GridPoint; to: GridPoint }): boolean {
+  if (o.object === 'pipe' || o.object === 'elbow') return false;
+  const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, o.object);
+  if (isFloorPart(o.object, def) || def?.connector || def?.draw === 'run') return false;
+  const { w, h } = rotatedFootprint(def, o.rotation, o);
+  if (w <= 1 && h <= 1) return true;
+  const horizontal = seg.from.y === seg.to.y;
+  const vertical = seg.from.x === seg.to.x;
+  return (horizontal && h <= 1) || (vertical && w <= 1);
+}
+
 export function findRun(
   objects: readonly IsoPlacement[],
   selectedId: string,

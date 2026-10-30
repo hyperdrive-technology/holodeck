@@ -29,6 +29,41 @@ function editingScene(): IsoSceneFile {
 }
 
 /**
+ * `?scene=follow`: drag-and-drop building (pipes follow a dragged vessel).
+ * Tank a's east port feeds tank b's west port through a valve; tank c stands
+ * south of b as an obstacle the re-route has to go around, and tank w walls
+ * off cell (8, 9) so b's west port cannot be reached at (10, 9).
+ */
+function followScene(): IsoSceneFile {
+  return {
+    ...emptyScene('follow'),
+    objects: [
+      { id: 'tank-a', object: 'tank', x: 0, y: 0, height: 3.05, params: { level: 0.6 } },
+      { id: 'tank-b', object: 'tank', x: 10, y: 0, height: 3.05, params: { level: 0.3 } },
+      { id: 'pipe-1', object: 'pipe', x: 1, y: 0, toX: 9, toY: 0, band: '#e74c3c', attach: { from: { object: 'tank-a', port: 'east' }, to: { object: 'tank-b', port: 'west' } } },
+      { id: 'valve-1', object: 'valve', x: 4, y: 0, onPipe: 'pipe-1', at: 0.375 },
+      { id: 'tank-c', object: 'tank', x: 5, y: 4, height: 3.05, params: { level: 0.8 } },
+      { id: 'tank-w', object: 'tank', x: 7, y: 9, height: 3.05, params: { level: 0.5 } },
+    ],
+  };
+}
+
+/**
+ * `?scene=palette`: tank a with a pipe stub on its east port ending free at
+ * (6, 0), for dragging a tank from the palette onto that free end.
+ */
+function paletteScene(): IsoSceneFile {
+  return {
+    ...emptyScene('palette'),
+    objects: [
+      { id: 'tank-a', object: 'tank', x: 0, y: 0, height: 3.05, params: { level: 0.6 } },
+      { id: 'stub', object: 'pipe', x: 1, y: 0, toX: 6, toY: 0, band: '#e74c3c' },
+      { id: 'tank-c', object: 'tank', x: 4, y: 5, height: 3.05, params: { level: 0.4 } },
+    ],
+  };
+}
+
+/**
  * `?image=<url>`: add an `image` placement (width 2, `height` from
  * `?imageHeight=`, default 0 = keep the loaded aspect) at grid (3, -10), for
  * the late-aspect refit browser test (holodeck#108 / #127).
@@ -46,6 +81,8 @@ function initialScene(): IsoSceneFile {
 
 function baseScene(): IsoSceneFile {
   if (params.get('scene') === 'editing') return editingScene();
+  if (params.get('scene') === 'follow') return followScene();
+  if (params.get('scene') === 'palette') return paletteScene();
   if (params.get('scene') !== 'routing') {
     return PROCESS_SCENE;
   }

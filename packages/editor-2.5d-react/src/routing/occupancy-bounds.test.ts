@@ -98,3 +98,28 @@ describe('resolveRouteEnd with bad geometry', () => {
     expect(end.partId).toBe('t');
   });
 });
+
+// holodeck#56: nodeRange checked the ROUNDED integer bounds, so an endpoint a
+// fraction past the scene limit (rounds back inside) was accepted although
+// scene validation rejects it. The original coordinates must be validated.
+describe('runCells validates the original (unrounded) endpoints', () => {
+  const over = MAX_GRID_COORD + 0.5;
+  it.each([
+    ['axis-aligned toX', { x: 0, y: 0, toX: over, toY: 0 }],
+    ['axis-aligned toY', { x: 0, y: 0, toX: 0, toY: -over }],
+    ['axis-aligned origin', { x: -over, y: 1, toX: 0, toY: 1 }],
+    ['diagonal toX', { x: 0, y: 0, toX: over, toY: 1 }],
+    ['diagonal origin y', { x: 0, y: over, toX: 3, toY: 1 }],
+    ['just past the limit', { x: 0, y: 0, toX: MAX_GRID_COORD + 1e-4, toY: 0 }],
+  ])('%s just past the limit throws GeometryRangeError', (_name, run) => {
+    expect(() => runCells(run)).toThrow(GeometryRangeError);
+  });
+  it('accepts fractional endpoints inside the limit, axis-aligned and diagonal', () => {
+    expect(runCells({ x: MAX_GRID_COORD - 0.5, y: 0, toX: MAX_GRID_COORD, toY: 0 })).toEqual([{ x: MAX_GRID_COORD, y: 0 }]);
+    expect(runCells({ x: 0, y: 0, toX: -(MAX_GRID_COORD - 0.5), toY: 1 })).toHaveLength(2);
+  });
+  it('buildOccupancy reports the out-of-range run as skipped (the GPT repro)', () => {
+    expect(occOf([pipe('p', 0, 0, 16384.5, 1)]).skipped).toEqual(['p']);
+    expect(occOf([pipe('p', 0, 0, 16384.5, 0)]).skipped).toEqual(['p']);
+  });
+});

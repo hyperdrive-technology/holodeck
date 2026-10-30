@@ -19,8 +19,9 @@
  * id. A registry holds one or the other: both together collide on part ids.
  */
 
-import { defineHolodeckPackage, parseHolodeckPackageManifest, type HolodeckExtension } from '@holodeck/sdk';
+import { HOLODECK_KINDS, defineHolodeckPackage, parseHolodeckPackageManifest, type HolodeckExtension } from '@holodeck/sdk';
 import manifestJson from '../holodeck.package.json';
+import { ISO_PARTS_INSTALLED_CHECK } from './engine/document-check';
 import { BUILTIN_ISO_EXTENSION } from './registry/builtin';
 
 /** `holodeck.package.json`, validated (a malformed manifest fails at import, and in tests). */
@@ -31,6 +32,9 @@ export function createIsoPackageExtension(): HolodeckExtension {
   // Fresh arrays per call: a host mutating one install's lists cannot reach another's.
   const contributions: HolodeckExtension['contributions'] = {};
   for (const [kind, items] of Object.entries(BUILTIN_ISO_EXTENSION.contributions)) contributions[kind] = [...items];
+  // Package-only (holodeck#61): BUILTIN_ISO_EXTENSION goes into plain iso
+  // registries, which have no document-check kind; a HolodeckHost does.
+  contributions[HOLODECK_KINDS.documentCheck] = [ISO_PARTS_INSTALLED_CHECK];
   return {
     id: ISO_PACKAGE_MANIFEST.id,
     version: ISO_PACKAGE_MANIFEST.version,

@@ -200,6 +200,41 @@ describe.skipIf(!CHROMIUM)('ProcessEditor.exportImage (tiled PNG)', () => {
     }
   }, 120_000);
 
+  type RetryOutcome = { changed: number; calls: number; results: string[] };
+  const retry = (page: Page, changes: number) =>
+    page.evaluate((n) => (window as any).__export.changeDuringReadbacks(n) as Promise<RetryOutcome>, changes);
+
+  it('one scene change during capture restarts the export, which then succeeds (holodeck#191)', async () => {
+    const { page } = await open();
+    try {
+      const out = await retry(page, 1);
+      expect(out.changed).toBe(1);
+      // Both queued exports succeed; the first needed a second, full pass.
+      expect(out.results.map((r) => r.split(':')[0])).toEqual(['ok', 'ok']);
+      const tiles = Number(out.results[0]!.split(':')[1]);
+      expect(out.calls).toBe(1 + tiles + tiles);
+    } finally {
+      await page.close();
+    }
+  }, 120_000);
+
+  it('continuous changes reject after 3 attempts with the pause-live-data hint and release the queued export (holodeck#191)', async () => {
+    const { page } = await open();
+    try {
+      const out = await retry(page, 3);
+      expect(out.changed).toBe(3);
+      expect(out.results[0]).toMatch(/^SceneChangedError: .*pause live data/);
+      // The queued export was not stuck behind the failure: it ran (quiet scene) and succeeded.
+      expect(out.results[1]).toMatch(/^ok:/);
+      const tiles = Number(out.results[1]!.split(':')[1]);
+      expect(out.calls).toBe(3 + tiles);
+      // And the editor still exports afterwards.
+      expect(await run(page, { scale: 1 })).toMatchObject({ width: PANE.width, height: PANE.height });
+    } finally {
+      await page.close();
+    }
+  }, 120_000);
+
   it('settles every queued export when the editor unmounts (holodeck#154)', async () => {
     const { page } = await open();
     try {

@@ -13,6 +13,12 @@
  *   latePack     leave the pump unresolved until __embed.installPump()
  *   canvas       mount a standalone IsoCanvas for host-resize checks
  *   directModel  with canvas, load the public HolodeckModel in a null fallback
+ *   ownBoundary  with directModel, pass <HolodeckModel ownBoundary> (exact removal/mount holds)
+ *   sibling      with directModel, a second child of the SAME Suspense that suspends
+ *                until __embed.releaseSibling() (an ancestor suspension keeps the
+ *                model's own wrapper from committing: GPT review of #197)
+ *   directModel=removable  as above; __embed.removeModel() unmounts the model
+ *                (holodeck#58: a removed model's load must not hold the signal)
  *   selected=id  show the inspector for this placement
  *
  * Exposes window.__embed.rendered: every revision `onRendered` reported.
@@ -60,20 +66,32 @@ const embed = {
   modelReady: false,
   renderedBeforeModel: false,
   installPump,
+  removeModel: () => {},
+  releaseSibling: () => {},
 };
+const sibling = new Promise<void>((resolve) => { embed.releaseSibling = resolve; });
+let siblingDone = false;
+void sibling.then(() => { siblingDone = true; });
+function Sibling() {
+  if (!siblingDone) throw sibling;
+  return null;
+}
 (window as unknown as { __embed: typeof embed }).__embed = embed;
 
 function Editor() {
   const [scene, setScene] = useState(initial);
+  const [modelShown, setModelShown] = useState(true);
+  embed.removeModel = () => setModelShown(false);
   if (params.has('canvas')) {
     return (
       <IsoCanvas registry={registry} showControls={false} onRendered={(revision) => {
         embed.rendered.push(revision);
         if (params.has('directModel') && !embed.modelReady) embed.renderedBeforeModel = true;
       }}>
-        {params.has('directModel') ? (
+        {params.has('directModel') && modelShown ? (
           <Suspense fallback={null}>
-            <HolodeckModel url={pumpUrl} onReady={() => { embed.modelReady = true; }} />
+            <HolodeckModel url={pumpUrl} ownBoundary={params.has('ownBoundary')} onReady={() => { embed.modelReady = true; }} />
+            {params.has('sibling') ? <Sibling /> : null}
           </Suspense>
         ) : null}
       </IsoCanvas>
