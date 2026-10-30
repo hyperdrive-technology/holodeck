@@ -21,6 +21,9 @@ import { agitatedVesselScale, MIXER_GLB } from './agitated-vessel';
  * - Its own Suspense boundary + render-signal hold (`ownBoundary`), so a Tank
  *   needs no Suspense around it.
  */
+/** Name of AgitatedVessel's root group (scene inspection, tests). */
+export const AGITATED_VESSEL_NODE = 'agitated-vessel';
+
 export function AgitatedVessel({
   radius,
   height,
@@ -59,7 +62,7 @@ export function AgitatedVessel({
     liquid.visible = fill > 0;
   }, [root, fill]);
   return (
-    <group position={[0, floorY, 0]} scale={[scale.xz, scale.y, scale.xz]}>
+    <group name={AGITATED_VESSEL_NODE} position={[0, floorY, 0]} scale={[scale.xz, scale.y, scale.xz]}>
       <HolodeckModel
         url={modelUrl(MIXER_GLB.model)}
         ownBoundary

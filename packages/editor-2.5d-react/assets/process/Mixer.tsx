@@ -1,6 +1,7 @@
 import type { Vector3Tuple } from 'three';
 import { Tank } from './Tank';
 import type { TankParams } from './tank-params';
+import { MIXER_BODY_PRESET } from './tank-presets';
 
 /**
  * The agitated vessel: the base `Tank` with `agitator: true`, so the Mixer
@@ -35,7 +36,9 @@ export function Mixer({
       height={height}
       alarm={alarm}
       cap="dome"
-      params={{ agitator: true, mixerModel: true, ...params }}
+      // The mixer body's shape (mixer.glb's window and closures) under the caller's params, so a bare
+      // <Mixer> draws the GLB; shape overrides fall back to the procedural agitated body (usesMixerModel).
+      params={{ ...MIXER_BODY_PRESET, agitator: true, mixerModel: true, ...params }}
     />
   );
 }

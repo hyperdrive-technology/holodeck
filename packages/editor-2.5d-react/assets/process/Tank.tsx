@@ -283,7 +283,7 @@ export function Tank({
     Math.max(0.2, tankR * TANK_NOZZLE_LENGTH),
     nozzleR,
   );
-  if (usesMixerModel(p)) {
+  if (usesMixerModel({ ...p, top })) {
     // The Mixer part and the mash tun preset are the Blender mixer (AgitatedVessel / mixer.glb) since
     // 2026-10-30. Only an explicit `mixerModel` picks it: `agitator` alone keeps the vessel's own body
     // plus the procedural TankAgitator below (review of #228). Floor = the layout floor (mixer.glb has no stand).

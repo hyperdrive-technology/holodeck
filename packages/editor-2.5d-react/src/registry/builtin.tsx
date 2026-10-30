@@ -60,6 +60,18 @@ function mixerDefaults(style: HolodeckStyle): Partial<TankParams> {
 const levelOf = (params: Record<string, unknown>): number =>
   typeof params.level === 'number' ? params.level : 0;
 
+/**
+ * The tuner's `tankParams` minus what it must not change: `mixerModel` is a
+ * part / preset choice (Mixer, mash tun), and the TankTuner passes a FULL
+ * TankParams whose default `mixerModel: false` would switch mixer.glb off
+ * whenever the tuner is open (holodeck#233).
+ */
+function tunable(tankParams: Partial<TankParams> | undefined): Partial<TankParams> {
+  if (!tankParams) return {};
+  const { mixerModel: _choice, ...rest } = tankParams;
+  return rest;
+}
+
 /** `tank` shape param: `plain` (the original built-in tank) or one of the vessel presets (tank-presets.ts). */
 export const TANK_SHAPE_PLAIN = 'plain';
 export const TANK_SHAPES = [TANK_SHAPE_PLAIN, ...(Object.keys(TANK_PRESETS) as TankPresetId[])] as const;
@@ -84,7 +96,7 @@ export function tankPlacementShape(
   tankParams?: Partial<TankParams>,
 ): { radius: number; height: number; params: Partial<TankParams>; layout: ReturnType<typeof tankLayout> } {
   const preset = presetOf(placement.params);
-  const params: Partial<TankParams> = { ...preset?.params, ...tankParams };
+  const params: Partial<TankParams> = { ...preset?.params, ...tunable(tankParams) };
   const height = tunedVesselHeight(placement.height ?? preset?.height ?? 3.05, tankParams);
   // Placement param (scene file / inspector), then the TankTuner's Radius slider, then the preset.
   // Review of #228: the tuner's radius was skipped, and TankPart's explicit `radius` prop then beat it.
@@ -121,7 +133,7 @@ function MixerPart({ placement, params, style, tuning }: IsoPartProps) {
       fillColor={alarm ? style.colors.alarm : placement.fillColor}
       height={height}
       alarm={alarm}
-      params={{ ...mixerDefaults(style), ...tuning?.tankParams }}
+      params={{ ...mixerDefaults(style), ...tunable(tuning?.tankParams) }}
     />
   );
 }

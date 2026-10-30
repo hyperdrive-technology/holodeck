@@ -38,3 +38,19 @@ describe('mixer.glb liquid', () => {
     expect(mixerModelFill({ showLiquid: false }, 0.5, false)).toBe(0);
   });
 });
+
+describe('mixer.glb only while the shape matches it (second review of #228)', () => {
+  const mash = TANK_PRESETS['mash-tun'].params;
+  it.each([
+    ['top', { top: 'flat' as const }],
+    ['bottom', { bottom: 'cone' as const }],
+    ['support', { support: 'skirt' as const }],
+    ['windowDeg', { windowDeg: 120 }],
+    ['windowYawDeg', { windowYawDeg: 0 }],
+  ])('a mash tun with %s overridden falls back to the procedural body', (_k, o) => {
+    expect(usesMixerModel(mergeTankParams({ ...mash, ...o }))).toBe(false);
+  });
+  it('restating the preset values keeps the GLB', () => {
+    expect(usesMixerModel(mergeTankParams({ ...mash, top: 'dome', bottom: 'flat', support: 'none', windowDeg: 100, windowYawDeg: 45 }))).toBe(true);
+  });
+});

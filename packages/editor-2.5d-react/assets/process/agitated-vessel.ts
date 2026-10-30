@@ -40,9 +40,41 @@ export function agitatedVesselTop(height: number): number {
   return MIXER_GLB.topY * agitatedVesselScale(1, height).y;
 }
 
-/** Does a Tank with these params draw as mixer.glb (`AgitatedVessel`)? */
-export function usesMixerModel(p: { mixerModel?: boolean }): boolean {
-  return p.mixerModel === true;
+/** The shape mixer.glb has baked in: a domed bottle standing flat on the floor, window 100° at 45°. */
+export const MIXER_GLB_SHAPE = {
+  top: 'dome',
+  bottom: 'flat',
+  support: 'none',
+  windowDeg: MIXER_GLB.windowDeg,
+  windowYawDeg: MIXER_GLB.windowYawDeg,
+} as const;
+
+/**
+ * Does a Tank with these params draw as mixer.glb (`AgitatedVessel`)? Only
+ * when `mixerModel` is set AND the shape params still match the GLB
+ * (`MIXER_GLB_SHAPE`). Core passes `top` / `bottom` / `support` / window
+ * overrides over the mash tun preset; mixer.glb cannot show them, and on main
+ * they applied, so an overridden mash tun keeps the procedural agitated body
+ * (which draws them, and which routing's cutout / wall span already follow).
+ * Second review of #228.
+ */
+export function usesMixerModel(p: {
+  mixerModel?: boolean;
+  top?: string;
+  bottom?: string;
+  support?: string;
+  windowDeg?: number;
+  windowYawDeg?: number;
+}): boolean {
+  if (p.mixerModel !== true) return false;
+  const same = (a: number | undefined, b: number) => a === undefined || Math.abs(a - b) < 1e-6;
+  return (
+    (p.top ?? MIXER_GLB_SHAPE.top) === MIXER_GLB_SHAPE.top &&
+    (p.bottom ?? MIXER_GLB_SHAPE.bottom) === MIXER_GLB_SHAPE.bottom &&
+    (p.support ?? MIXER_GLB_SHAPE.support) === MIXER_GLB_SHAPE.support &&
+    same(p.windowDeg, MIXER_GLB_SHAPE.windowDeg) &&
+    same(p.windowYawDeg, MIXER_GLB_SHAPE.windowYawDeg)
+  );
 }
 
 /** The fill mixer.glb shows: none for an empty vessel or one whose liquid is switched off (`showLiquid`). */

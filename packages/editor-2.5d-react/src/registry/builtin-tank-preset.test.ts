@@ -105,3 +105,13 @@ describe('tank footprint follows the effective radius', () => {
     expect(tankDef.footprintOf?.(tank({ preset: 'whirlpool', radius: 1 }))).toEqual({ w: 2, h: 2 });
   });
 });
+
+/** holodeck#233: the TankTuner passes a FULL TankParams (mixerModel: false by default). */
+describe('the tuner cannot switch mixerModel off', () => {
+  it('a mash tun under the tuner defaults keeps mixerModel', () => {
+    expect(tankPlacementShape({ params: { preset: 'mash-tun' } }, DEFAULT_TANK_PARAMS).params.mixerModel).toBe(true);
+  });
+  it('and a plain tank does not gain it', () => {
+    expect(tankPlacementShape({ params: {} }, { ...DEFAULT_TANK_PARAMS, mixerModel: true }).params.mixerModel).toBeUndefined();
+  });
+});
