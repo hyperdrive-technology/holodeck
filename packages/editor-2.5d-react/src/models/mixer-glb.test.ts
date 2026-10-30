@@ -215,7 +215,7 @@ describe('assets/models/mixer.glb', () => {
   it('spins a shaft and a 3-blade impeller low in the vessel; nothing else rises above the liquid', () => {
     const ag = nodeByName(gltf, 'anim.agitator')!;
     expect(ag.node.mesh).toBeUndefined();
-    const kids = (ag.node.children ?? []).map((i) => gltf.nodes[i].name).sort();
+    const kids = (ag.node.children ?? []).map((i) => gltf.nodes[i].name ?? '').sort();
     // Round 5 (Des): the reference's flat cross bar at y 1.30 read as a stray diagonal above
     // the liquid (at fill 0.5 the surface is at ~0.76), so only the impeller is in the vessel.
     expect(kids).toEqual(['impeller.blade.0', 'impeller.blade.1', 'impeller.blade.2', 'impeller.hub', 'shaft']);
