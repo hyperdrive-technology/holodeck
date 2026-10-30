@@ -5,7 +5,8 @@
  * straight-wall height. No React / three imports.
  *
  * mixer.glb dimensions (mixer.py header, pinned by src/models/mixer-glb.test.ts):
- * R 0.45, floor at y 0, straight wall 0..1.45, head to 1.75, housing lid 2.01;
+ * R 0.45, floor at y 0, straight wall 0..1.45, head to 1.75, housing lid rim
+ * 2.024 (2.01 before the round-5 collar seat on the head);
  * window 100° centred on theta 45° (the default iso camera); `anim.liquid`
  * at the dish pole, liquid mesh 0..1.39 at full scale; `anim.agitator` spins about Y.
  */
@@ -13,7 +14,7 @@ export const MIXER_GLB = {
   model: 'mixer',
   radius: 0.45,
   wallHeight: 1.45,
-  topY: 2.01,
+  topY: 2.024,
   apexY: 1.75,
   windowYawDeg: 45,
   windowDeg: 100,
