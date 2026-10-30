@@ -55,7 +55,7 @@ describe.each(presetIds)('Tank preset %s: every vertical line ends on a ring', (
   const p = mergeTankParams(preset.params);
 
   it.each([0.12, 0.5, 0.95])('lines at fill %s', (level) => {
-    if (p.agitator) return; // mixer.glb (checked below), no procedural lines
+    if (p.mixerModel) return; // mixer.glb (checked below), no procedural lines
     const plan = tankLinePlan(p, p.top, preset.height, preset.radius, level);
     const lines = concat(Object.values(plan));
     expect(lines.length).toBeGreaterThan(0);
@@ -63,7 +63,7 @@ describe.each(presetIds)('Tank preset %s: every vertical line ends on a ring', (
   });
 
   it('mesh creases (legs, hatch, nozzle) end on rings too', () => {
-    if (p.agitator) return;
+    if (p.mixerModel) return;
     const layout = tankLayout(preset.height, preset.radius, p);
     const parts: Float32Array[] = [];
     if (p.support === 'legs') {
@@ -117,7 +117,7 @@ describe.each(presetIds)('Tank preset %s: liquid bowl lines stay inside the wind
   const lateral = (x: number, z: number) => Math.abs(Math.hypot(x, z) * Math.sin(Math.atan2(x, z) - win.centre));
 
   it.each([0.03, 0.12, 0.5, 0.95])('fill %s', (level) => {
-    if (p.agitator || !p.showLiquid || !p.showBowl) return;
+    if (p.mixerModel || !p.showLiquid || !p.showBowl) return;
     const { bowl } = tankLinePlan(p, p.top, preset.height, preset.radius, level);
     let radials = 0;
     for (let i = 0; i < bowl.length; i += 6) {
@@ -170,7 +170,7 @@ describe('empty vessel (fill 0): no liquid lines', () => {
   it.each(presetIds)('%s: level 0 draws no waterline or bowl; any positive fill does', (id) => {
     const preset = TANK_PRESETS[id];
     const p = mergeTankParams(preset.params);
-    if (p.agitator) return; // mixer.glb: AgitatedVessel hides anim.liquid at 0
+    if (p.mixerModel) return; // mixer.glb: AgitatedVessel hides anim.liquid at 0
     for (const level of [0, -0.5, Number.NaN]) {
       const plan = tankLinePlan(p, p.top, preset.height, preset.radius, level);
       expect(plan.waterline).toHaveLength(0);
@@ -190,7 +190,7 @@ describe.each(presetIds)('Tank preset %s: no hoops on the inner wall', (id) => {
   const p = mergeTankParams(preset.params);
 
   it('interior horizontals sit only at the two rims; every seam spans rim to rim', () => {
-    if (p.agitator) return; // mixer.glb
+    if (p.mixerModel) return; // mixer.glb
     const { y0, bodyTop } = tankLayout(preset.height, preset.radius, p);
     const { interior } = tankLinePlan(p, p.top, preset.height, preset.radius, 0.5);
     expect(interior.length).toBeGreaterThan(0);

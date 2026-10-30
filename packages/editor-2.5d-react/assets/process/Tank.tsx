@@ -10,6 +10,8 @@ import { BackSide, BufferAttribute, BufferGeometry, Vector2, type Vector3Tuple }
 import { ShadedMesh, WhiteFill } from './Shell';
 import { useHolodeckStyle } from './style-context';
 import { AgitatedVessel } from './AgitatedVessel';
+import { mixerModelFill, usesMixerModel } from './agitated-vessel';
+import { TankAgitator } from './TankAgitator';
 import {
   mergeTankParams,
   liquidShades,
@@ -281,16 +283,18 @@ export function Tank({
     Math.max(0.2, tankR * TANK_NOZZLE_LENGTH),
     nozzleR,
   );
-  if (p.agitator) {
-    // Agitated vessels are the Blender mixer (AgitatedVessel / mixer.glb) since 2026-10-30; the
-    // procedural bottle + TankAgitator path is retired. Floor = the layout floor (mixer.glb has no stand).
+  if (usesMixerModel(p)) {
+    // The Mixer part and the mash tun preset are the Blender mixer (AgitatedVessel / mixer.glb) since
+    // 2026-10-30. Only an explicit `mixerModel` picks it: `agitator` alone keeps the vessel's own body
+    // plus the procedural TankAgitator below (review of #228). Floor = the layout floor (mixer.glb has no stand).
     return (
       <group position={position}>
         <AgitatedVessel
           radius={tankR}
           height={tankH}
           floorY={layout.floorY}
-          fill={empty ? 0 : level}
+          fill={mixerModelFill(p, level, empty)}
+          agitator={p.agitator}
           color={color}
           opacity={p.liquidOpacity}
           edgeColor={p.edgeColor}
@@ -505,6 +509,11 @@ export function Tank({
           />
         ) : null}
       </group>
+      {/* An agitator on the vessel's own body (e.g. core's fermenter with `agitator` on). Outside the keyed
+          group so the `anim.agitator` node survives level / size changes. */}
+      {p.agitator ? (
+        <TankAgitator tankH={tankH} fill={level} params={{ ...p, radius: tankR }} apexY={layout.apexY} />
+      ) : null}
     </group>
   );
 }

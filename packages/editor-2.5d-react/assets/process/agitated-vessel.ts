@@ -1,6 +1,6 @@
 /**
  * Pure layout for the GLB-backed agitated vessel (Mixer palette part, mash
- * tun preset, any Tank with `agitator: true`): `assets/models/mixer.glb`
+ * tun preset: any Tank with `mixerModel: true`): `assets/models/mixer.glb`
  * from holodeck/blender/parts/mixer.py, scaled onto the Tank's radius and
  * straight-wall height. No React / three imports.
  *
@@ -38,4 +38,14 @@ export function agitatedVesselScale(radius: number, height: number): { xz: numbe
 /** World height of the scaled vessel's apex / top above its floor (resize handles, labels). */
 export function agitatedVesselTop(height: number): number {
   return MIXER_GLB.topY * agitatedVesselScale(1, height).y;
+}
+
+/** Does a Tank with these params draw as mixer.glb (`AgitatedVessel`)? */
+export function usesMixerModel(p: { mixerModel?: boolean }): boolean {
+  return p.mixerModel === true;
+}
+
+/** The fill mixer.glb shows: none for an empty vessel or one whose liquid is switched off (`showLiquid`). */
+export function mixerModelFill(p: { showLiquid?: boolean }, level: number, empty: boolean): number {
+  return empty || p.showLiquid === false ? 0 : level;
 }

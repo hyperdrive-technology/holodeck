@@ -26,6 +26,7 @@ export function AgitatedVessel({
   height,
   floorY,
   fill,
+  agitator = true,
   color,
   opacity,
   edgeColor,
@@ -35,6 +36,8 @@ export function AgitatedVessel({
   height: number;
   floorY: number;
   fill: number;
+  /** Show the GLB's `anim.agitator` (shaft + impeller); false hides it (`TankParams.agitator` off). */
+  agitator?: boolean;
   color: string;
   opacity?: number;
   edgeColor?: string;
@@ -43,6 +46,10 @@ export function AgitatedVessel({
   const scale = agitatedVesselScale(radius, height);
   const [root, setRoot] = useState<Object3D | null>(null);
   const onReady = useCallback((o: Object3D) => setRoot(o), []);
+  useEffect(() => {
+    const spinner = root ? findAnimNodes(root)['anim.agitator'] : undefined;
+    if (spinner) spinner.visible = agitator;
+  }, [root, agitator]);
   useEffect(() => {
     const liquid = root ? findAnimNodes(root)['anim.liquid'] : undefined;
     if (!liquid) return;

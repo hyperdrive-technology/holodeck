@@ -97,6 +97,8 @@ export const MASH_TUN_PRESET: TankPreset = {
     bottom: 'flat',
     support: 'none',
     ...AGITATOR_PRESET,
+    // Drawn as mixer.glb (an explicit choice: `agitator` alone keeps a vessel's own body).
+    mixerModel: true,
   },
 };
 

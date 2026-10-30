@@ -35,7 +35,7 @@ export function Mixer({
       height={height}
       alarm={alarm}
       cap="dome"
-      params={{ agitator: true, ...params }}
+      params={{ agitator: true, mixerModel: true, ...params }}
     />
   );
 }

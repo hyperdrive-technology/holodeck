@@ -200,8 +200,20 @@ export type TankParams = {
   bottom: TankBottom;
   /** Stand below the bottom closure (lifts the vessel by `standHeight`). */
   support: TankSupport;
-  /** Draw the agitator (drive hat on the top, shaft + 3-blade impeller in the window). */
+  /**
+   * Draw the agitator. On a vessel's own body that is the procedural
+   * `TankAgitator` (drive hat, shaft, 3-blade impeller); on `mixerModel`
+   * vessels it shows / hides mixer.glb's own `anim.agitator`.
+   */
   agitator: boolean;
+  /**
+   * Draw the whole vessel as the Blender mixer (mixer.glb, `AgitatedVessel`)
+   * instead of the parametric body. A preset-level choice (the Mixer part and
+   * the mash tun preset), NOT implied by `agitator`: core exposes `agitator`
+   * on every brewery vessel, and a fermenter with an agitator must keep its
+   * cone, legs and window (review of #228).
+   */
+  mixerModel: boolean;
   /** Side nozzle on the kept arc. */
   nozzle: TankNozzle;
   /** Cone lid height (world units) for `top: 'cone'`. */
@@ -276,6 +288,7 @@ export const DEFAULT_TANK_PARAMS: TankParams = {
   bottom: 'flat',
   support: 'none',
   agitator: false,
+  mixerModel: false,
   nozzle: 'none',
   coneTopHeight: 0.3,
   coneTopRatio: 0.3,

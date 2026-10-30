@@ -22,12 +22,14 @@ export const AGITATOR_ANIM_NODE = 'anim.agitator';
 const HAT_EDGE_THRESHOLD = 20;
 
 /**
- * @deprecated since 2026-10-30: `Tank` draws agitated vessels as mixer.glb
- * (`AgitatedVessel`), which has its own `anim.agitator`. Kept exported (with
- * `AGITATOR_ANIM_NODE`, which core's brewery pack binds its spin to) for
- * hosts that compose a procedural agitator themselves.
+ * The procedural agitator `Tank` adds to a vessel's OWN body when
+ * `agitator` is on (e.g. core's fermenter with its agitator switched on).
+ * `mixerModel` vessels (the Mixer part, the mash tun preset) are mixer.glb
+ * (`AgitatedVessel`) instead, with the GLB's own `anim.agitator`; until the
+ * review of #228 every `agitator` vessel was, which dropped a fermenter's cone
+ * and legs. `AGITATOR_ANIM_NODE` is what core's brewery pack binds its spin to.
  *
- * Agitator pieces formerly shared by `Mixer` and the base `Tank` (`agitator` param):
+ * Pieces:
  * a round drive hat (neck + drum + cover plate) on the top apex, a shaft from
  * the hat down into the liquid, and a hub with three pitched blades. The
  * shaft ends inside the hub (`mixerShaftLayout`), so the impeller can never
