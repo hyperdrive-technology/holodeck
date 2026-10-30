@@ -1124,11 +1124,18 @@ export const TANK_WALL_MERIDIAN_STEP = 1;
 export const TANK_DOME_MERIDIAN_STEP = 1;
 
 /**
- * Liquid bowl radial lines: every facet, like the reference's liquid bottom
- * (a radial per facet + rings). Seen through the liquid, so they read
- * tinted, not as a cage.
+ * Liquid bowl radial lines: every 4th vertex of the liquid lathe
+ * (`windowFillSegments`, 32 on a 15-facet tank -> 8 radials), like the
+ * reference's liquid bottom (radials + rings). Seen through the liquid, so
+ * they read tinted, not as a cage.
+ *
+ * Round 5 (2026-10-30): was 1 on the 15-facet SHELL grid (clamped to every
+ * 2nd by `everyNthMeridian`), so the radials sat between the liquid
+ * lathe's vertices (32-gon) and ran off its facets. They are on the lathe
+ * grid now, and `tank-lines.ts` drops the ones that would run into a window
+ * jamb (`bowlWindow`).
  */
-export const TANK_BOWL_MERIDIAN_STEP = 1;
+export const TANK_BOWL_MERIDIAN_STEP = 4;
 
 /** Inner flask meridians. Step 2 (every second of 15) read dense vs r-holdbody. */
 export const FLASK_MERIDIAN_STEP = 3;

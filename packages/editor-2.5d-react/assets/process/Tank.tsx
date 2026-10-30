@@ -5,7 +5,7 @@ import { LineSet } from './LineSet';
 import { LiquidVolume } from './LiquidVolume';
 import { NozzleStub } from './NozzleStub';
 import { Supports } from './Supports';
-import { flatLidHatch, tankLinePlan } from './tank-lines';
+import { bowlMeridianThetas, bowlWindow, flatLidHatch, tankLinePlan } from './tank-lines';
 import { BackSide, BufferAttribute, BufferGeometry, Vector2, type Vector3Tuple } from 'three';
 import { ShadedMesh, WhiteFill } from './Shell';
 import { useHolodeckStyle } from './style-context';
@@ -53,7 +53,6 @@ import {
   LINER_SHADE,
   TANK_DOME_MERIDIAN_STEP,
   TANK_WALL_MERIDIAN_STEP,
-  TANK_BOWL_MERIDIAN_STEP,
   LEG_RADIUS_RATIO,
   type TankCap,
   type TankParams,
@@ -141,9 +140,12 @@ export function Tank({
   const domeThetas = cylinderThetasKept(segs, keepStart, keepLen, TANK_DOME_MERIDIAN_STEP);
   const mixerWallThetas = cylinderThetasKept(segs, keepStart, keepLen, MIXER_WALL_MERIDIAN_STEP);
   const flaskThetas = cylinderThetasEven(segs, 0, LIQUID_THETA_LENGTH, true, FLASK_MERIDIAN_STEP);
-  const bowlThetas = useMemo(
-    () => cylinderThetasEven(segs, 0, LIQUID_THETA_LENGTH, true, TANK_BOWL_MERIDIAN_STEP),
-    [segs],
+  // Bowl radials on the liquid lathe's vertex grid, only those seen whole through the window (tank-lines.ts).
+  const bowlThetas = useMemo(() => bowlMeridianThetas(fillSegs), [fillSegs]);
+  const bowlWin = useMemo(
+    () => bowlWindow(p, tankR),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- p is rebuilt every render; key on what bowlWindow reads.
+    [p.windowDeg, p.windowYawDeg, p.linerRatio, tankR],
   );
   const ullageCage = innerCageSpan(y0, bodyTop, liquidTop);
   const windowArgs = [segs, bodySegs, true, keepStart, keepLen] as const;
@@ -497,6 +499,7 @@ export function Tank({
             lineWidth={TANK_LINE_WIDTH}
             bowlLines={p.showBowl}
             meridianThetas={bowlThetas}
+            window={bowlWin}
           />
         ) : null}
         {/* Interior rims + seams (shouldered bodies keep InteriorLines on their heel..shoulder wall). */}

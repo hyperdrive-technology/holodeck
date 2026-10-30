@@ -15,7 +15,12 @@
  *   rim and outlet ring; dish bottom: bottom rim and the pole;
  * - interior seams: the interior bottom / top rims (InteriorLines);
  * - liquid bowl meridians: the waterline when the liquid is inside the bowl,
- *   else the bowl equator ring (added here) -- and the pole;
+ *   else the bowl equator ring (added here) -- and the pole. Only the
+ *   radials whose rim end is seen through the window are drawn
+ *   (`bowlWindow`): one heading for a jamb ran past the visible rim and was
+ *   cut by the wall instead of ending on a ring (Des, round 5). Bowl rings
+ *   and radials are on the liquid lathe's own vertex grid (`ringSegments`),
+ *   so they lie on its facets instead of poking out of the silhouette;
  * - flat-lid hatch: its Edges creases plus `hatchBase`, the ring where the
  *   open neck meets the lid (the neck's bottom boundary z-fought the lid, so
  *   its facet lines hung loose).
@@ -52,6 +57,7 @@ import {
   TANK_WALL_MERIDIAN_STEP,
   bodyShoulder,
   bodyOuterBowl,
+  windowFillSegments,
 } from './tank-params';
 
 /** Bottom rim segments: a fine circle so meridians at any theta end on it (chord sag < 0.0013 R). */
@@ -78,6 +84,38 @@ function liftScaleY(pts: Float32Array, oy: number, sy: number): Float32Array {
   return out;
 }
 
+/**
+ * What the camera sees of a vessel's inside through its window, for the
+ * liquid's bowl radials. The window faces the iso camera (`windowYawDeg` is
+ * its centre), so in the orthographic view a point inside the tank is seen
+ * through the opening when its sideways offset from the window's centre
+ * plane, `|r sin(theta - centre)|`, is inside the jambs' half chord; past
+ * that it is behind the wall. Depth does not matter (orthographic), and the
+ * camera looks down, so a point above the bottom rim never hides behind it.
+ */
+export type BowlWindow = {
+  /** Window centre (cylinder theta, radians). */
+  centre: number;
+  /** Largest sideways offset a radial's rim end may have (world units, margin applied). */
+  halfChord: number;
+};
+
+/** Gap (fraction of the tank radius) a bowl radial's rim end keeps from a jamb, so it never grazes one. */
+export const BOWL_JAMB_MARGIN = 0.05;
+
+export function bowlWindow(p: Pick<TankParams, 'windowDeg' | 'windowYawDeg' | 'linerRatio'>, tankR: number): BowlWindow {
+  const { windowRad } = tankWindow(p.windowDeg, p.windowYawDeg);
+  const liner = tankR * p.linerRatio;
+  // Past a half turn the opening's widest point is the full liner diameter.
+  const chord = windowRad >= Math.PI ? liner : liner * Math.sin(Math.max(0, windowRad) / 2);
+  return { centre: (p.windowYawDeg * Math.PI) / 180, halfChord: Math.max(0, chord - BOWL_JAMB_MARGIN * tankR) };
+}
+
+/** Bowl radial angles: every `TANK_BOWL_MERIDIAN_STEP`-th vertex of the liquid lathe (`ringSegments` around). */
+export function bowlMeridianThetas(ringSegments: number): number[] {
+  return cylinderThetasEven(ringSegments, 0, LIQUID_THETA_LENGTH, true, TANK_BOWL_MERIDIAN_STEP);
+}
+
 /** Liquid outline: waterline ring, bowl meridians + latitude rings (+ equator ring when submerged). */
 export function liquidLines({
   inner,
@@ -87,6 +125,8 @@ export function liquidLines({
   stacks,
   thetas,
   bowlLines,
+  ringSegments = 48,
+  window,
 }: {
   inner: number;
   bowlH: number;
@@ -95,17 +135,28 @@ export function liquidLines({
   stacks: number;
   thetas: number[];
   bowlLines: boolean;
+  /** Segments of every ring: pass the liquid lathe's own count so the rings lie on its facets. */
+  ringSegments?: number;
+  /** Drop radials whose rim end is behind a jamb (see `BowlWindow`); all are drawn when omitted. */
+  window?: BowlWindow;
 }): { waterline: Float32Array; bowl: Float32Array; surfaceR: number } {
   const profile = flaskLathePoints(inner, bowlH, originY, liquidTop, stacks);
   // Radius of the waterline: the last non-axis profile point (inside the bowl it is < inner).
   const rim = [...profile].reverse().find(([r]) => r > 1e-6);
   const surfaceR = rim ? rim[0] : inner;
-  const waterline = profile.length > 2 ? cylinderArcSegments(surfaceR, liquidTop, 0, Math.PI * 2, 48) : empty;
+  const segs = Math.max(3, Math.round(ringSegments));
+  const waterline = profile.length > 2 ? cylinderArcSegments(surfaceR, liquidTop, 0, Math.PI * 2, segs) : empty;
   if (!bowlLines || profile.length < 3) return { waterline, bowl: empty, surfaceR };
   const yMax = Math.min(originY, liquidTop);
-  const parts = [flaskMeridianSegments(bowlProfile(profile, yMax), thetas), bowlLatitudeRings(profile, yMax, BOWL_RING_STEP)];
+  const bowl = bowlProfile(profile, yMax);
+  // The radials widen from the pole to their rim end, so the end decides whether one is seen whole.
+  const rimR = bowl.length ? bowl[bowl.length - 1][0] : 0;
+  const shown = window
+    ? thetas.filter((th) => rimR * Math.abs(Math.sin(th - window.centre)) <= window.halfChord + 1e-9)
+    : thetas;
+  const parts = [flaskMeridianSegments(bowl, shown), bowlLatitudeRings(profile, yMax, BOWL_RING_STEP, segs)];
   // Submerged bowl: the meridians stop at the bowl equator, below the waterline -- ring them there.
-  if (liquidTop > originY + 1e-6) parts.push(cylinderArcSegments(inner, originY, 0, Math.PI * 2, 48));
+  if (liquidTop > originY + 1e-6) parts.push(cylinderArcSegments(inner, originY, 0, Math.PI * 2, segs));
   return { waterline, bowl: concat(parts), surfaceR };
 }
 
@@ -223,14 +274,17 @@ export function tankLinePlan(p: TankParams, top: TankTop, tankH: number, tankR: 
     const shoulder = bodyShoulder(tankH, tankR, p);
     const outer = bodyOuterBowl(shoulder.cylH, p.outerBowlHeight);
     const flask = flaskBowl(y0, inner, outer.bowlH, p.bowlHeight, p.bowlYOffset);
+    const fillSegs = windowFillSegments(segs);
     const liquid = liquidLines({
       inner,
       bowlH: flask.bowlH,
       originY: flask.originY,
       liquidTop: y0 + tankH * Math.min(1, Math.max(0.02, level)),
       stacks: Math.max(4, Math.round(p.bowlHeightSegments) * 4),
-      thetas: cylinderThetasEven(segs, 0, LIQUID_THETA_LENGTH, true, TANK_BOWL_MERIDIAN_STEP),
+      thetas: bowlMeridianThetas(fillSegs),
       bowlLines: p.showBowl,
+      ringSegments: fillSegs,
+      window: bowlWindow(p, tankR),
     });
     plan.waterline = liquid.waterline;
     plan.bowl = liquid.bowl;

@@ -5,7 +5,7 @@ import { createFinishMaterial } from './materials';
 import { liquidFinish } from './style';
 import { useHolodeckStyle } from './style-context';
 import { flaskLathePoints, liquidShades } from './tank-params';
-import { liquidLines } from './tank-lines';
+import { liquidLines, type BowlWindow } from './tank-lines';
 
 /**
  * The liquid in a vessel: one closed flask (bowl + wall lathe, flat
@@ -31,6 +31,7 @@ export function LiquidVolume({
   lineWidth,
   bowlLines,
   meridianThetas,
+  window,
 }: {
   /** Flask radius. */
   inner: number;
@@ -49,6 +50,8 @@ export function LiquidVolume({
   bowlLines: boolean;
   /** Bowl meridian angles (cylinder theta). */
   meridianThetas: number[];
+  /** The vessel's window: radials that would run into a jamb are left out (`bowlWindow`). */
+  window?: BowlWindow;
 }) {
   const style = useHolodeckStyle();
   const finish = liquidFinish(style);
@@ -77,8 +80,9 @@ export function LiquidVolume({
     if (surface.current) surface.current.renderOrder = finish.renderOrder;
   });
   const lines = useMemo(
-    () => liquidLines({ inner, bowlH, originY, liquidTop, stacks, thetas: meridianThetas, bowlLines }),
-    [inner, bowlH, originY, liquidTop, stacks, meridianThetas, bowlLines],
+    () =>
+      liquidLines({ inner, bowlH, originY, liquidTop, stacks, thetas: meridianThetas, bowlLines, ringSegments: segments, window }),
+    [inner, bowlH, originY, liquidTop, stacks, meridianThetas, bowlLines, segments, window],
   );
   if (lathe.length < 2) return null;
   return (
