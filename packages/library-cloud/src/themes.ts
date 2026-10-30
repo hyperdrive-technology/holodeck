@@ -26,6 +26,8 @@ function style(dark: boolean) {
       shaded: { kind: 'iso' as const, shadeMin: dark ? 0.18 : 0.5, shadeMax: dark ? 0.48 : 0.92, hubWhite: dark ? 0.5 : 0.92, whiteHub: false, offset: true },
       vessel: { kind: 'iso' as const, shadeMin: dark ? 0.14 : 0.22, shadeMax: dark ? 0.5 : 0.9, hubWhite: dark ? 0.55 : 1, whiteHub: true, offset: true },
       flask: { kind: 'iso' as const, shadeMin: dark ? 0.2 : 0.5, shadeMax: dark ? 0.55 : 0.92, hubWhite: dark ? 0.6 : 1, whiteHub: true, offset: true },
+      // Colour comes from colors.liquid; same tokens as LIQUID_FINISH (GLB `hd.liquid`).
+      liquid: { kind: 'liquid' as const, opacity: 0.78, renderOrder: 2, depthWrite: false as const, offset: false },
     },
     annotation: {
       connector: edge, connectorWidth: 0.07, flow: accent, text, icon: text,
