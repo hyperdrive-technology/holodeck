@@ -76,8 +76,7 @@ export function useIsoAnimators(
   const registry = useIsoRegistry();
   // Re-scanned (below) while a bound node is missing: a GLB under `root` (e.g. the agitated
   // vessel's mixer.glb inside AnimatedPartRoot) loads after the root group mounts.
-  const nodes = useRef<Record<string, Object3D>>({});
-  const scanned = useRef<Object3D | null>(null);
+  const scan = useRef<AnimNodeScan>(emptyAnimNodeScan());
   const bindings = useMemo(
     () => planAnimations(def, animation, (id) => registry.get<IsoAnimator>(HOLODECK_KINDS.isoAnimator, id)),
     [def, animation, registry],
@@ -89,24 +88,59 @@ export function useIsoAnimators(
   useEffect(() => {
     elapsed.current = 0;
   }, [root]);
-  const sinceScan = useRef(0);
   useFrame((_, dt) => {
     elapsed.current += dt;
-    if (scanned.current !== root) {
-      scanned.current = root;
-      nodes.current = root ? findAnimNodes(root) : {};
-      sinceScan.current = 0;
-    } else if (root && bindings.some((b) => !nodes.current[b.nodeName])) {
-      // A traverse every RESCAN_FRAMES frames, only while something bound is still missing.
-      sinceScan.current += 1;
-      if (sinceScan.current >= RESCAN_FRAMES) {
-        nodes.current = findAnimNodes(root);
-        sinceScan.current = 0;
-      }
-    }
-    applyAnimations(bindings, nodes.current, live.current, dt, elapsed.current);
+    const nodes = syncAnimNodes(scan.current, root, bindings);
+    applyAnimations(bindings, nodes, live.current, dt, elapsed.current);
   });
 }
 
 /** Frames between re-scans of a root whose bound `anim.*` node has not appeared yet. */
 export const RESCAN_FRAMES = 10;
+
+/** Per-hook cache of the `anim.*` nodes found under a root. */
+export interface AnimNodeScan {
+  root: Object3D | null;
+  nodes: Record<string, Object3D>;
+  sinceScan: number;
+}
+
+export const emptyAnimNodeScan = (): AnimNodeScan => ({ root: null, nodes: {}, sinceScan: 0 });
+
+/** Is `node` still in `root`'s subtree? (Walks up the parents: a GLB clone is a few levels deep.) */
+export function isUnder(node: Object3D, root: Object3D): boolean {
+  for (let o: Object3D | null = node; o; o = o.parent) if (o === root) return true;
+  return false;
+}
+
+/**
+ * The `anim.*` nodes to animate this frame (mutates `scan`). Scans when the
+ * root changes, and right away when a cached node has left the root's
+ * subtree: HolodeckModel swaps in a new styled clone (same node names) when
+ * the liquid colour / opacity changes, e.g. an alarm flip, and the old nodes
+ * would otherwise keep being animated off-screen (review of #228). Re-scans
+ * every RESCAN_FRAMES frames while a bound node is missing (a GLB under the
+ * root loads after the root mounts).
+ */
+export function syncAnimNodes(
+  scan: AnimNodeScan,
+  root: Object3D | null,
+  bindings: readonly AnimationBinding[],
+): Record<string, Object3D> {
+  if (scan.root !== root) {
+    scan.root = root;
+    scan.nodes = root ? findAnimNodes(root) : {};
+    scan.sinceScan = 0;
+  } else if (root && Object.values(scan.nodes).some((n) => !isUnder(n, root))) {
+    scan.nodes = findAnimNodes(root);
+    scan.sinceScan = 0;
+  } else if (root && bindings.some((b) => !scan.nodes[b.nodeName])) {
+    // A traverse every RESCAN_FRAMES frames, only while something bound is still missing.
+    scan.sinceScan += 1;
+    if (scan.sinceScan >= RESCAN_FRAMES) {
+      scan.nodes = findAnimNodes(root);
+      scan.sinceScan = 0;
+    }
+  }
+  return scan.nodes;
+}
