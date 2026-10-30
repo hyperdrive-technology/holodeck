@@ -139,6 +139,14 @@ export type TankParams = {
   windowYawDeg: number;
   radialSegments: number;
   bodyHeightSegments: number;
+  /**
+   * @deprecated Ignored since #228 (Des 2026-10-30: "remove the horizontal
+   * rings on the inside of the tank"): body hoops are no longer drawn. Kept
+   * optional so params objects written against earlier releases still compile.
+   */
+  bodyRings?: number;
+  /** @deprecated Ignored since #228, with `bodyRings`. */
+  bodyRingWidth?: number;
   cageThreshold: number;
   wallThreshold: number;
   domeHeightSegments: number;
