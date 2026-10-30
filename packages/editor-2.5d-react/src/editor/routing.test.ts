@@ -136,7 +136,8 @@ describe('manhattanRoute', () => {
   });
 
   it('cannot report success through a valid origin whose effective footprint was skipped', () => {
-    const def = { ...registry.get('holodeck.iso.part', 'tank')!, id: 'oversized', footprint: { w: 256, h: 256 } };
+    // footprintOf: undefined -- the tank sizes itself from its radius; this fixture is about the static footprint.
+    const def = { ...registry.get('holodeck.iso.part', 'tank')!, id: 'oversized', footprint: { w: 256, h: 256 }, footprintOf: undefined };
     const custom = { get: (_kind: string, id: string) => id === 'oversized' ? def : registry.get('holodeck.iso.part', id) } as typeof registry;
     const scene = { objects: [{ id: 'bad', object: 'oversized', x: 2, y: 0 }] };
     expect(buildOccupancy(scene, custom).skipped).toEqual(['bad']);
