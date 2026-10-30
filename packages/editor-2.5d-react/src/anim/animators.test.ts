@@ -67,6 +67,18 @@ describe('fill', () => {
     FILL_ANIMATOR.apply(ctx(node, 'x'));
     expect(node.scale.y).toBe(0.001);
   });
+
+  it('hides the liquid node when empty and shows it again once filled (no floor disc)', () => {
+    const node = new Object3D();
+    FILL_ANIMATOR.apply(ctx(node, 0));
+    expect(node.visible).toBe(false);
+    FILL_ANIMATOR.apply(ctx(node, 0.01));
+    expect(node.visible).toBe(true);
+    FILL_ANIMATOR.apply(ctx(node, 0, { settings: { scale: 100 } }));
+    expect(node.visible).toBe(false);
+    FILL_ANIMATOR.apply(ctx(node, 40, { settings: { scale: 100 } }));
+    expect(node.visible).toBe(true);
+  });
 });
 
 describe('fill scale setting', () => {

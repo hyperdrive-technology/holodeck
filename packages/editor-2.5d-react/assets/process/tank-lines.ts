@@ -270,7 +270,8 @@ export function tankLinePlan(p: TankParams, top: TankTop, tankH: number, tankR: 
       plan.interior = interiorLineSegments(r, heights, arc, keepStart, facetStep, p.interiorMeridianStep);
     }
   }
-  if (p.showLiquid) {
+  // level <= 0: an empty vessel draws no liquid, so no waterline / bowl lines either (Tank.tsx).
+  if (p.showLiquid && level > 0) {
     const shoulder = bodyShoulder(tankH, tankR, p);
     const outer = bodyOuterBowl(shoulder.cylH, p.outerBowlHeight);
     const flask = flaskBowl(y0, inner, outer.bowlH, p.bowlHeight, p.bowlYOffset);

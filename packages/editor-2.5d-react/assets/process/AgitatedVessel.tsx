@@ -13,7 +13,8 @@ import { agitatedVesselScale, MIXER_GLB } from './agitated-vessel';
  *
  * - Placed with its floor at `floorY` (Tank frame), scaled by
  *   `agitatedVesselScale(radius, height)`.
- * - `fill` (0..1) scales `anim.liquid` directly (the GLB liquid convention);
+ * - `fill` (0..1) scales `anim.liquid` directly (the GLB liquid convention;
+ *   0 hides it);
  *   `color` / `opacity` restyle its `hd.liquid` material.
  * - `anim.agitator` keeps its authored name, so a parent's `spin` binding
  *   (AnimatedPartRoot / useIsoAnimators) finds it once the GLB has loaded.
@@ -44,8 +45,11 @@ export function AgitatedVessel({
   const onReady = useCallback((o: Object3D) => setRoot(o), []);
   useEffect(() => {
     const liquid = root ? findAnimNodes(root)['anim.liquid'] : undefined;
-    // Same floor as the fill animator: a zero Y scale makes a singular matrix.
-    if (liquid) liquid.scale.y = Math.max(0.001, Math.min(1, fill));
+    if (!liquid) return;
+    // Same floor as the fill animator: a zero Y scale makes a singular matrix. An empty vessel hides the
+    // liquid instead (the 0.001 sliver read as a disc on the floor; round 5, 2026-10-30).
+    liquid.scale.y = Math.max(0.001, Math.min(1, fill));
+    liquid.visible = fill > 0;
   }, [root, fill]);
   return (
     <group position={[0, floorY, 0]} scale={[scale.xz, scale.y, scale.xz]}>

@@ -119,7 +119,12 @@ export function Tank({
   const top = cap ?? p.top;
   const tankH = height ?? p.height;
   const tankR = radius ?? p.radius;
-  const level = Math.min(1, Math.max(0.02, fill ?? p.fill));
+  // fill <= 0 (or not a number) is an EMPTY vessel: no liquid, no waterline, no bowl lines. Round 5
+  // (2026-10-30): the 2% floor used to apply to 0 too, so an empty whirlpool showed a small floating disc.
+  // Any positive fill keeps that floor so a nearly empty vessel still shows a film.
+  const requested = fill ?? p.fill;
+  const empty = !(requested > 0);
+  const level = Math.min(1, Math.max(0.02, empty ? 0 : requested));
   const color = alarm ? style.colors.alarm : (fillColor ?? p.fillColor);
   const liquidTones = liquidShades(color);
   const inner = tankR * p.innerRatio;
@@ -252,9 +257,9 @@ export function Tank({
   // Every line set (except the retired shoulder path's) comes from tank-lines.ts, where the
   // line-termination rule is tested.
   const linePlan = useMemo(
-    () => tankLinePlan(p, top, tankH, tankR, level),
+    () => tankLinePlan(p, top, tankH, tankR, empty ? 0 : level),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- p is rebuilt every render; key on what the plan reads.
-    [JSON.stringify(p), top, tankH, tankR, level],
+    [JSON.stringify(p), top, tankH, tankR, level, empty],
   );
   const meshKey = `${segs}-${bodySegs}-${domeSegs}-${p.windowDeg}-${p.windowYawDeg}-${tankH}-${tankR}-${top}-${p.bottom}-${p.support}-${p.domeHeight}-${p.bowlHeight}-${level}-${p.shoulderRatio}-${p.shoulderTopRatio}-${p.outerBowlHeight}-${layout.bottomDepth}-${layout.topHeight}`;
   const bodyRingFs = Array.from({ length: Math.max(0, Math.round(p.bodyRings)) }, (_, i) => {
@@ -289,7 +294,7 @@ export function Tank({
           radius={tankR}
           height={tankH}
           floorY={layout.floorY}
-          fill={level}
+          fill={empty ? 0 : level}
           color={color}
           opacity={p.liquidOpacity}
           edgeColor={p.edgeColor}
@@ -485,7 +490,7 @@ export function Tank({
             shade={shade}
           />
         ) : null}
-        {p.showLiquid ? (
+        {p.showLiquid && !empty ? (
           <LiquidVolume
             inner={inner}
             bowlH={flask.bowlH}

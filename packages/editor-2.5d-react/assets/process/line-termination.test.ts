@@ -165,3 +165,17 @@ describe('bowlWindow', () => {
     expect(shown).toBeGreaterThan(0);
   });
 });
+
+describe('empty vessel (fill 0): no liquid lines', () => {
+  it.each(presetIds)('%s: level 0 draws no waterline or bowl; any positive fill does', (id) => {
+    const preset = TANK_PRESETS[id];
+    const p = mergeTankParams(preset.params);
+    if (p.agitator) return; // mixer.glb: AgitatedVessel hides anim.liquid at 0
+    for (const level of [0, -0.5, Number.NaN]) {
+      const plan = tankLinePlan(p, p.top, preset.height, preset.radius, level);
+      expect(plan.waterline).toHaveLength(0);
+      expect(plan.bowl).toHaveLength(0);
+    }
+    expect(tankLinePlan(p, p.top, preset.height, preset.radius, 0.001).waterline.length).toBeGreaterThan(0);
+  });
+});

@@ -167,6 +167,12 @@ export interface IsoPartDefinition extends Contribution {
    */
   cutout?: { windowYawDeg: number; windowDeg: number };
   /**
+   * Per-placement window for parts whose window follows a param that is not
+   * `windowYaw` / `windowDeg` (the built-in `tank`'s `preset`). Returning
+   * undefined falls back to `cutout`.
+   */
+  cutoutOf?: (placement: Pick<IsoPlacement, 'params'>) => { windowYawDeg: number; windowDeg: number } | undefined;
+  /**
    * World Y range of the straight (windowed) wall, for vessels raised on
    * legs or a skirt: a floor-level pipe below `bottomY` passes under the
    * window rather than through it. Absent = the wall stands on the floor up
