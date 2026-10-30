@@ -6,11 +6,15 @@ reference.jpg: a slim tall bottle with vertical facet panel lines on body and
 dome, latitude rings on the rounded shoulder/dome, a squat cylindrical motor
 housing (collar band + drum + lid rim) on the apex, a needle shaft with a
 3-blade propeller low in the liquid, a wide cutaway (about 100 deg) whose
-arched top runs up into the shoulder, the inner back wall with facet lines
-and horizontal rings, and a translucent light-blue liquid with a dished
-bottom whose radial facet lines show through. (The reference also shows a
-flat bar across the top of the window; round 5 dropped it, Des: it read as a
-stray diagonal above the liquid. Only the impeller shows in the liquid.)
+arched top runs up into the shoulder, the inner back wall with facet lines,
+and a translucent light-blue liquid with a dished bottom whose radial facet
+lines show through. (The reference also shows a flat bar across the top of
+the window and horizontal rings on the inner back wall; round 5 dropped the
+bar, Des: it read as a stray diagonal above the liquid, and round 6 dropped
+the rings, Des 2026-10-30: "remove the horizontal rings on the inside of the
+tank". Only the impeller shows in the liquid; the inner wall is one plain
+band whose facet lines run from the inner head's equator down to the dish
+rim, the two structural rims that terminate them.)
 
 Three.js space, Y up, origin = floor centre under the axis. R 0.45, ~2.02 tall.
 Flat base (reference has no legs; `SUPPORT = "pads"` adds the two small side
@@ -24,7 +28,7 @@ Facets: 18 segments rotated by THETA0 = -5 deg so the boundaries sit at -5,
 15, ..., 95 deg: the window (-5..95 deg, i.e. 100 deg centred on the iso
 camera at 45 deg) lands exactly on facets, and the nozzles sit on facet
 CENTRES (theta 185 and 265 deg) so their base rings seat flat on a panel.
-Built from blender/primitives.py (cutaway_shell, interior_rings, dish,
+Built from blender/primitives.py (cutaway_shell, ellipse_head, dish,
 stack_cylinders, nozzle_with_flange, impeller, liquid_volume).
 
 Line termination rule (primitives.check_terminations, run at build time):
@@ -92,7 +96,8 @@ HOLE_R = 0.06  # shaft hole through the apex (hidden under the housing)
 DISH_RIM_Y, DISH_DEPTH = 0.22, 0.16  # inner floor dish; pole = inner floor bottom
 DISH_ANGLES = (22, 50)  # tilts ~25 / 60 / 81 deg: radial lines on the rim band, ending on the 35 deg ring
 Y_FLOOR = DISH_RIM_Y - DISH_DEPTH  # 0.06 (= T, so the base is T thick on the axis)
-RING_YS = (0.35, 0.55, 0.75, 0.95, 1.15, 1.35)  # inner back-wall ring lines
+# No decorative rings on the inner wall (round 6, Des): the back wall is one straight band
+# from the inner head's equator (R_IN, Y_WALL1) to the dish rim (R_IN, DISH_RIM_Y).
 # --- motor housing on the apex ---------------------------------------------------
 HOUSING_SEG = 12
 DRUM_R, DRUM_H = 0.24, 0.24
@@ -127,8 +132,9 @@ def build() -> None:
     # Full outer / inner surface profiles, TOP -> BOTTOM.
     head = pr.ellipse_head(R, Y_WALL1, DOME_H, HOLE_R, HEAD_ANGLES)
     outer = head + [(R, HEEL)] + pr.round_corner(R, HEEL, 0.0, HEEL_ANGLES)[1:] + [(0.0, 0.0)]
+    # Inner head ends at (R_IN, Y_WALL1) and the dish starts at (R_IN, DISH_RIM_Y): the
+    # wall between them is one plain vertical band, so its 18 facet lines run rim to rim.
     inner = (pr.ellipse_head(R_IN, Y_WALL1, DOME_H - T, HOLE_R, HEAD_ANGLES)
-             + pr.interior_rings(R_IN, RING_YS)
              + pr.dish(R_IN, DISH_RIM_Y, DISH_DEPTH, DISH_ANGLES))
     # Every cut lands on a ring of ITS profile (no seam rings, no open arcs). Sill: outer on the
     # heel's top ring, inner on the dish rim, joined by a conical bevel, so the dish stays whole

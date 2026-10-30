@@ -16,7 +16,6 @@ Profiles are [(r, y), ...] ordered TOP -> BOTTOM like brewery.lathe.
   cutaway_shell(...)      thick-walled vessel with a window: three closed solids;
                           cuts land on rings of BOTH profiles (conical caps
                           join rings at different heights), sill on a wall
-  interior_rings(...)     ridge profile points that outline as ring lines
   ellipse_head(...)       elliptical head profile with a hole at the apex
   round_corner(...)       quarter-round corner profile (heels)
   dish(...)               elliptical dish profile (floors, liquid bottoms)
@@ -46,6 +45,13 @@ True)` seats a ring on the wall so stub lines end there.
 `theta0` rotates the facet boundaries so a window can be centred on the camera
 with any segment count (18 segments + theta0 = -5 deg puts boundaries at -5 deg
 and 95 deg, a 100 deg window centred on 45 deg).
+
+NO DECORATIVE RINGS ON INNER WALLS (Des, 2026-10-30, mixer round 6): an inner
+wall is one plain band between the structural rims where it meets the floor
+dish and the head; the only ring lines inside a vessel are those rims and the
+window's cut edges. (An `interior_rings` helper that spliced shallow ridge
+rings into the inner profile existed through round 5 and was removed with the
+mixer's rings; don't reintroduce it.)
 """
 
 import math
@@ -210,7 +216,7 @@ def sweep(name, loop, seg, mat, arc=None, arc_steps=None, parent=None, theta0=0.
     with bmesh.recalc_face_normals, then the solid is checked: it must be
     manifold with positive signed volume. Materials are single-sided, so an
     inside-out shell would silently render as its own interior (culled walls,
-    no outlines on interior ridges) instead of failing.
+    no outlines on the inner wall) instead of failing.
     `check=True` runs check_terminations on the loop.
     """
     if check:
@@ -322,20 +328,6 @@ def dish(r, y_rim, depth, steps):
     """Elliptical dish TOP -> BOTTOM: rim (r, y_rim) down to the pole (0, y_rim - depth).
     `steps`: int or interior angles (deg) from the rim."""
     return [(r * math.cos(math.radians(a)), y_rim - depth * math.sin(math.radians(a))) for a in _angles(steps, 90.0)]
-
-
-def interior_rings(r_in, ys, depth=0.006, half_h=0.03):
-    """Inner-wall profile points (TOP -> BOTTOM) for horizontal ring lines.
-
-    Each ring is a shallow ridge protruding into the cavity: its apex crease
-    is 2*atan(depth/half_h) (22.6 deg at the defaults, above the 15 deg edge
-    threshold -> one line) while its feet are half that (below it -> no line).
-    Splice between the straight-wall points of an inner profile.
-    """
-    pts = []
-    for y in sorted(ys, reverse=True):
-        pts += [(r_in, y + half_h), (r_in - depth, y), (r_in, y - half_h)]
-    return pts
 
 
 def _cut_heights(v):

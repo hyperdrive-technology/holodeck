@@ -89,8 +89,8 @@ function danglingMeridianEnds(glb: Glb, threshold = HOLODECK_STYLE.edges.thresho
  * height, different azimuths) is chained through shared vertices. A ring must
  * close, or be an arc whose two ends each sit on a window cut edge that
  * continues straight DOWN a wall: a drawn constant-azimuth segment from the
- * end to a lower vertex whose radius differs by at most WALL_DR (a wall, or
- * the flank of an interior ridge ring). That is what a window cut through a
+ * end to a lower vertex whose radius differs by at most WALL_DR (a vertical
+ * wall, allowing a shallow step). That is what a window cut through a
  * wall looks like. A sill that slices through a floor dish instead leaves the
  * dish's rings as open arcs whose cut edges wander inward across the dish
  * (the C), and a top that slices mid-band through a head does the same upside
@@ -98,7 +98,7 @@ function danglingMeridianEnds(glb: Glb, threshold = HOLODECK_STYLE.edges.thresho
  * upper/lower solid (its own cap rings) merge into closed loops here.
  */
 function openRingArcs(glb: Glb, names: string[], threshold = HOLODECK_STYLE.edges.threshold) {
-  const WALL_DR = 0.01; // > interior_rings' ridge depth (0.006), far below a dish band's radial run (0.03+)
+  const WALL_DR = 0.01; // a wall cut edge is vertical to within this; far below a dish band's radial run (0.03+)
   const r = (p: number[]) => Math.hypot(p[0], p[2]);
   const az = (p: number[]) => (Math.atan2(p[0], p[2]) * 180) / Math.PI;
   const vkey = (p: number[]) => `${p[1].toFixed(3)}|${r(p).toFixed(3)}|${az(p).toFixed(1)}`;
@@ -168,6 +168,18 @@ describe('assets/models/mixer.glb', () => {
     const b = bounds(name);
     return (b.max[axis] - b.min[axis]) / 2;
   };
+  /** Unique vertex positions of a mesh node as (r, y) (flat shading makes the exporter split every vertex per face). */
+  const uniqueVerts = (name: string) => {
+    const node = nodeByName(gltf, name)!.node;
+    const p = readAccessor(glb, gltf.meshes[node.mesh!].primitives[0].attributes.POSITION) as Float32Array;
+    const seen = new Map<string, { r: number; y: number }>();
+    for (let i = 0; i < p.length; i += 3) {
+      seen.set([p[i], p[i + 1], p[i + 2]].map((v) => v.toFixed(4)).join(','), { r: Math.hypot(p[i], p[i + 2]), y: p[i + 1] });
+    }
+    return [...seen.values()];
+  };
+  const SHELL = ['shell.upper', 'shell.band', 'shell.lower'];
+  const shellSegments = () => SHELL.flatMap((name) => drawnSegments(glb, nodeByName(gltf, name)!.node, HOLODECK_STYLE.edges.threshold));
 
   it('uses only hd.* materials, stays under the triangle bound and sits on the floor', () => {
     expectBreweryBasics(gltf, { height: 2.02 });
@@ -299,17 +311,7 @@ describe('assets/models/mixer.glb', () => {
     // (rim 0.22), leaving the rim ring and the dish's first band ring as 260 deg C-shaped
     // arcs whose cut edges hooked inward across the dish. Now the outer cut is the heel ring
     // (0.45, 0.10) and the inner cut the dish rim (0.39, 0.22), joined by a conical bevel.
-    // Unique vertex positions (flat shading makes the exporter split every vertex per face).
-    const verts = (name: string) => {
-      const node = nodeByName(gltf, name)!.node;
-      const p = readAccessor(glb, gltf.meshes[node.mesh!].primitives[0].attributes.POSITION) as Float32Array;
-      const seen = new Map<string, { r: number; y: number }>();
-      for (let i = 0; i < p.length; i += 3) {
-        seen.set([p[i], p[i + 1], p[i + 2]].map((v) => v.toFixed(4)).join(','), { r: Math.hypot(p[i], p[i + 2]), y: p[i + 1] });
-      }
-      return [...seen.values()];
-    };
-    const band = verts('shell.band');
+    const band = uniqueVerts('shell.band');
     // The band's inner surface never goes below the dish rim; its outer bottom is the heel ring.
     for (const v of band.filter((v) => v.r < 0.42)) expect(v.y).toBeGreaterThan(0.22 - 1e-3);
     expect(band.filter((v) => Math.abs(v.y - 0.1) < 1e-3).every((v) => Math.abs(v.r - 0.45) < 1e-3)).toBe(true);
@@ -318,7 +320,7 @@ describe('assets/models/mixer.glb', () => {
     expect(band.some((v) => Math.abs(v.y - 1.5877) < 1e-3 && Math.abs(v.r - 0.3195) < 1e-3)).toBe(true);
     // The lower solid owns the whole dish: a full 18-vertex rim ring at (0.39, 0.22) and the
     // bevel's outer ring at (0.45, 0.10); nothing of it reaches above the rim.
-    const lower = verts('shell.lower');
+    const lower = uniqueVerts('shell.lower');
     expect(lower.filter((v) => Math.abs(v.y - 0.22) < 1e-3 && Math.abs(v.r - 0.39) < 1e-3)).toHaveLength(18);
     expect(lower.filter((v) => Math.abs(v.y - 0.1) < 1e-3 && Math.abs(v.r - 0.45) < 1e-3)).toHaveLength(18);
     expect(Math.max(...lower.map((v) => v.y))).toBeCloseTo(0.22, 3);
@@ -329,8 +331,35 @@ describe('assets/models/mixer.glb', () => {
     expect(rim).toHaveLength(18);
   });
 
+  it('inner back wall is plain: no rings between the dish rim and the head equator, facet lines run rim to rim', () => {
+    // Round 6 (Des, 2026-10-30: "remove the horizontal rings on the inside of the tank").
+    // Rounds 2-5 spliced six shallow ridge rings (apex r 0.384 at y 0.35..1.35, feet at
+    // r 0.39 +-0.03) into the inner profile. Now the inner wall is ONE vertical band at
+    // R_IN 0.39 whose only vertices are its two structural rims: the inner head's equator
+    // (1.45) and the dish rim (0.22). Nothing of the shell has a vertex on the inner wall
+    // between them (no ridge apex, no ridge foot, no seam ring).
+    const onInnerWall = (v: { r: number; y: number }) => v.r > 0.37 && v.r < 0.4 && v.y > 0.22 + 1e-3 && v.y < 1.45 - 1e-3;
+    for (const name of SHELL) expect(uniqueVerts(name).filter(onInnerWall), name).toEqual([]);
+    const segs = shellSegments();
+    const atInner = (p: number[]) => Math.abs(Math.hypot(p[0], p[2]) - 0.39) < 1e-3;
+    // The runtime draws exactly two ring heights at the inner-wall radius: the rims (the
+    // dish rim as the lower solid's closed ring + the band's arc, the equator as an arc).
+    const ringYs = segs.filter(({ a, b }) => atInner(a) && atInner(b) && Math.abs(a[1] - b[1]) < 1e-4).map(({ a }) => a[1].toFixed(3));
+    expect([...new Set(ringYs)].sort()).toEqual(['0.220', '1.450']);
+    // ... and every inner meridian is one segment from the equator straight down to the
+    // dish rim: 13 keep-arc facets -> 12 facet boundaries + the 2 cut edges = 14 lines,
+    // none of them stopping part-way (nothing to stop on).
+    const meridians = segs.filter(({ a, b }) => atInner(a) && atInner(b) && Math.abs(a[1] - b[1]) > 1e-3);
+    expect(meridians).toHaveLength(14);
+    for (const { a, b } of meridians) {
+      expect(Math.min(a[1], b[1])).toBeCloseTo(0.22, 3);
+      expect(Math.max(a[1], b[1])).toBeCloseTo(1.45, 3);
+      expect(sameAzimuth(a, b)).toBe(true);
+    }
+  });
+
   it('every drawn ring of the shell closes or ends on a wall cut edge (no open C rings)', () => {
-    expect(openRingArcs(glb, ['shell.upper', 'shell.band', 'shell.lower'])).toEqual([]);
+    expect(openRingArcs(glb, SHELL)).toEqual([]);
   });
 
   it('motor housing is a collar seated on the head, a drum and a lid rim with touching caps', () => {
@@ -461,10 +490,12 @@ describe('assets/models/mixer.glb', () => {
       expect(report[0]).toContain('-20 deg'); // 340 deg
     });
 
-    it('accepts ring arcs that end on a wall cut edge (ridge rings) and arcs closed by another solid', () => {
-      // Same keep arc with an interior ridge ring (apex crease 22.6 deg, drawn; flanks dr 0.006
-      // <= WALL_DR) and a straight wall down to (0.45, 0.3), where a full lathe's top cap ring
-      // closes the band's bottom arc. The band's top boundary ring ends on the wall cut edge.
+    it('accepts ring arcs that end on a wall cut edge (within WALL_DR) and arcs closed by another solid', () => {
+      // Same keep arc with a shallow ridge in the wall (apex crease 22.6 deg, drawn; flanks dr
+      // 0.006 <= WALL_DR, so the cut edge still counts as running down a wall) and a straight
+      // wall down to (0.45, 0.3), where a full lathe's top cap ring closes the band's bottom
+      // arc. The band's top boundary ring ends on the wall cut edge. (The mixer itself has no
+      // such ridges since round 6; this probes the audit's wall tolerance only.)
       const good = probeGlb([
         { name: 'band', profile: [[0.45, 1.0], [0.45, 0.6], [0.444, 0.57], [0.45, 0.54], [0.45, 0.3]], seg: 18, arc: [100, 340] },
         { name: 'floor', profile: [[0.45, 0.3], [0.45, 0.0]], seg: 18 },

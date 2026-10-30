@@ -64,7 +64,7 @@ before committing (the GLB tests check the pivot is unscaled).
    position and rotation is in **three.js space** (Y-up, R3F Euler `XYZ`), and the
    segment parametrisation matches three's geometries. You can port R3F code
    one-to-one, and facets line up with hand-coded parts. Vessel-level builders
-   (`lathe`, `sweep`, `cutaway_shell`, `interior_rings`, `nozzle_with_flange`,
+   (`lathe`, `sweep`, `cutaway_shell`, `ellipse_head` / `dish`, `nozzle_with_flange`,
    `impeller`, `liquid_volume`, `ring` / `collar` / `stack_cylinders`) live in
    `primitives.py`; `brewery.py` adds the brewery vessels' shared conventions
    (sight-window liquid, legs, pipe stubs).
@@ -128,6 +128,14 @@ shows only when the profile turns by at least 15° there.
   band of each profile (the heel's top ring outside, the floor dish's rim
   inside): a sill part-way across a floor leaves the floor's rings as open
   C-shaped arcs whose cut edges wander across the dish (mixer round 5).
+- **No decorative rings on an inner wall** (Des, 2026-10-30). The inner wall
+  is one plain vertical band between the two structural rims, where it meets
+  the floor dish and where it meets the shoulder/head; those rims and the
+  window's cut edges are the only ring lines inside a vessel, and every inner
+  meridian ends on one of them. A vertical with nothing to end on is dropped,
+  not given a ring. (The `interior_rings` ridge helper from mixer rounds 2–5
+  was removed for this; `mixer-glb.test.ts` fails on any drawn ring on the
+  inner wall between the rims.)
 - Seat a collar ON the surface (`profile_y_at_r` at its inscribed radius) and
   stack drum / lid with `stack_cylinders` (caps touching), never sunk.
 - `nozzle_with_flange(..., base_ring=True)` adds a ring on the wall so the
