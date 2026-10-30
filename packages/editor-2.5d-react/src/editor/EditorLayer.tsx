@@ -3,6 +3,7 @@ import { useThree, type ThreeEvent } from '@react-three/fiber';
 import { Mesh, Plane, Raycaster, Vector2, Vector3, type Camera } from 'three';
 import { HOLODECK_KINDS } from '@holodeck/sdk';
 import { Pipe } from '../../assets/process';
+import { PIPE_RADIUS, pipePose } from '../../assets/process/pipe-math';
 import { AREA_Y } from '../../assets/process/Area';
 import { GROUND_CONTACT_EPSILON } from '../../assets/process/style';
 import { SceneGraph } from '../iso/SceneGraph';
@@ -21,6 +22,7 @@ import { stamp, type EditorState, type LinkEndName, type ResizeHandle } from './
 import { canInsertWaypoint, connectorEndPoint, linkEndPoint, waypointInsertHandles } from './connect';
 import { isPlacementEditable, visibleObjects } from './layers';
 import { isClickSized, marqueeHits, rectFromPoints, type ScreenRect } from './marquee';
+import { freePipeEnds, snapNewPlacement } from './port-snap';
 
 /** Raycast override for meshes the pointer must see through (previews, a handle being dragged). */
 const NO_RAYCAST = () => undefined;
@@ -90,7 +92,8 @@ export function EditorLayer({
   onCursor: (x: number, y: number) => void;
   onFloorClick: (x: number, y: number) => void;
   onDragStart: (id: string, x: number, y: number) => void;
-  onDragMove: (x: number, y: number) => void;
+  /** `detach`: Alt is held (move the parts without their pipes). */
+  onDragMove: (x: number, y: number, detach?: boolean) => void;
   onDragEnd: () => void;
   /** Pointer entered (true) or left (false) every scene object; drives the grab vs default cursor. */
   onHoverObject?: (over: boolean) => void;
@@ -124,9 +127,9 @@ export function EditorLayer({
   const drawn = visibleObjects(state.scene);
   const startMarquee = useMarquee(drawn, registry, onMarquee, onMarqueeSelect);
 
-  const moveTo = (g: { x: number; y: number }) => {
+  const moveTo = (g: { x: number; y: number }, event: ThreeEvent<PointerEvent>) => {
     onCursor(g.x, g.y);
-    onDragMove(g.x, g.y);
+    onDragMove(g.x, g.y, event.nativeEvent.altKey);
   };
 
   const handleUp = (event: ThreeEvent<PointerEvent>) => {
@@ -152,14 +155,14 @@ export function EditorLayer({
           const g = groundGridFromEvent(event);
           onFloorClick(g.x, g.y);
         }}
-        onPointerMove={(event) => moveTo(groundGridFromEvent(event))}
+        onPointerMove={(event) => moveTo(groundGridFromEvent(event), event)}
         onPointerUp={handleUp}
       >
         <planeGeometry args={[2000, 2000]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
       <group
-        onPointerMove={(event) => moveTo(gridFromEvent(event))}
+        onPointerMove={(event) => moveTo(gridFromEvent(event), event)}
         onPointerUp={handleUp}
         onPointerOver={() => onHoverObject?.(true)}
         onPointerOut={() => onHoverObject?.(false)}
@@ -240,8 +243,9 @@ export function EditorLayer({
           : null}
       </group>
       {!readOnly && state.mode === 'place' && state.placing && state.cursor ? (
-        <Ghost kind={state.placing} x={state.cursor.x} y={state.cursor.y} registry={registry} />
+        <Ghost kind={state.placing} x={state.cursor.x} y={state.cursor.y} registry={registry} objects={state.scene.objects} />
       ) : null}
+      {!readOnly && state.drag && state.drag.blocked.length > 0 ? <BlockedRunsPreview blocked={state.drag.blocked} /> : null}
       {!readOnly && state.mode === 'draw-pipe' && state.pipeStart && state.cursor ? (
         <PipePreview state={state} registry={registry} />
       ) : null}
@@ -255,26 +259,36 @@ export function EditorLayer({
   );
 }
 
+/**
+ * The part about to be placed (place tool / palette drag), where a click or
+ * drop would put it: the cursor cell, pulled onto a free pipe end when one of
+ * its ports is close (port-snap.ts; placeAt applies the same snap). Free ends
+ * are computed once per scene, not per pointer move.
+ */
 function Ghost({
   kind,
   x,
   y,
   registry,
+  objects,
 }: {
   kind: NonNullable<EditorState['placing']>;
   x: number;
   y: number;
   registry: ContributionRegistry;
+  objects: readonly IsoPlacement[];
 }) {
-  const [wx, , wz] = gridToWorld(x, y);
+  const ends = useMemo(() => freePipeEnds(objects, registry), [objects, registry]);
+  const ghost = useMemo(() => snapNewPlacement(stamp(registry, kind, x, y, '__ghost'), objects, registry, ends), [registry, kind, x, y, objects, ends]);
+  const [wx, , wz] = gridToWorld(ghost.x, ghost.y);
   const { w, h } = footprint(registry, kind);
   return (
-    <group>
+    <group name="place-ghost">
       <mesh position={[wx, 0.04, wz]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[w, h]} />
         <meshBasicMaterial color="#18BAE6" transparent opacity={0.28} />
       </mesh>
-      <SceneObjectView object={stamp(registry, kind, x, y, '__ghost')} registry={registry} />
+      <SceneObjectView object={ghost} registry={registry} />
     </group>
   );
 }
@@ -325,6 +339,65 @@ function PipePreview({ state, registry }: { state: EditorState; registry: Contri
         <SelectionHalo key={i} object={{ id: `elbow-preview-${i}`, object: 'elbow', x: b.x, y: b.y }} registry={registry} />
       ))}
     </group>
+  );
+}
+
+/** Dash pattern of the unroutable-run ghost, in grid units. */
+const DASH = 0.35;
+const DASH_GAP = 0.25;
+
+/**
+ * Runs that cannot follow a drag at the current position (follow.ts): the
+ * straight L they would need, drawn as a translucent red tube over a dashed
+ * red floor line, so "this pipe cannot go here" reads at a glance. Like the
+ * draw-pipe ghost it has no pointer handlers, so it never steals the drag.
+ */
+function BlockedRunsPreview({ blocked }: { blocked: NonNullable<EditorState['drag']>['blocked'] }) {
+  return (
+    <group name="follow-blocked">
+      {blocked.flatMap((run, r) =>
+        run.points.slice(1).map((to, i) => {
+          const from = run.points[i]!;
+          const [ax, , az] = gridToWorld(from.x, from.y);
+          const [bx, , bz] = gridToWorld(to.x, to.y);
+          const len = Math.hypot(bx - ax, bz - az);
+          if (len < 1e-6) return null;
+          const dashes = Math.max(1, Math.floor((len + DASH_GAP) / (DASH + DASH_GAP)));
+          const angle = -Math.atan2(bz - az, bx - ax);
+          return (
+            <group key={`${r}-${i}`}>
+              <BlockedTube from={[ax, az]} to={[bx, bz]} />
+              {Array.from({ length: dashes }, (_, d) => {
+                const t = (d * (DASH + DASH_GAP) + DASH / 2) / len;
+                return (
+                  <mesh
+                    key={d}
+                    position={[ax + (bx - ax) * t, 0.05, az + (bz - az) * t]}
+                    rotation={[-Math.PI / 2, 0, angle]}
+                    raycast={NO_RAYCAST}
+                  >
+                    <planeGeometry args={[Math.min(DASH, len), 0.3]} />
+                    <meshBasicMaterial color={GHOST_BLOCKED} transparent opacity={0.9} depthWrite={false} toneMapped={false} />
+                  </mesh>
+                );
+              })}
+            </group>
+          );
+        }),
+      )}
+    </group>
+  );
+}
+
+/** A translucent red tube where the blocked pipe would have to run (not a real pipe: it must not read as one). */
+function BlockedTube({ from, to }: { from: [number, number]; to: [number, number] }) {
+  const pose = pipePose(from, to);
+  const r = PIPE_RADIUS * 1.2;
+  return (
+    <mesh position={pose.mid} rotation={pose.rotation} rotation-order={pose.rotationOrder} raycast={NO_RAYCAST} renderOrder={10}>
+      <cylinderGeometry args={[r, r, pose.length, 16]} />
+      <meshBasicMaterial color={GHOST_BLOCKED} transparent opacity={0.55} depthWrite={false} toneMapped={false} />
+    </mesh>
   );
 }
 
