@@ -1,5 +1,4 @@
 import {
-  MIXER_BODY_RINGS,
   MIXER_CAP_HEIGHT_RATIO,
   MIXER_CAP_LID_THICKNESS,
   MIXER_CAP_RADIUS_RATIO,
@@ -67,7 +66,6 @@ export const AGITATOR_PRESET: Partial<TankParams> = {
 export const MIXER_BODY_PRESET: Partial<TankParams> = {
   top: 'dome',
   radialSegments: MIXER_RADIAL_SEGMENTS,
-  bodyRings: MIXER_BODY_RINGS,
   innerRatio: MIXER_INNER_RATIO,
   windowDeg: MIXER_WINDOW_DEG,
   windowYawDeg: MIXER_WINDOW_YAW,

@@ -4,11 +4,11 @@
  * plus a close-up crop per vessel and zoomed close-ups
  * (brewhouse-vessel-<id>-closeup.png). Visual check: all vessels must read
  * as the same object with different radius / height / closures: cutaway
- * window, translucent liquid, and the inner back wall's horizontal rings
- * (bottom rim, hoops, top rim) visible through the window above and below
- * the liquid, like reference.jpg. Des reversed the old "no lines inside the
- * window" rule on 2026-10-29; only those horizontal rings are allowed in
- * there (no meridians, no wire cage: tank-geometry.test.ts pins both).
+ * window, translucent liquid, and the inner back wall's structural rims
+ * (where the wall meets the floor and the dome / lid) with the seams between
+ * them, visible through the window, like reference.jpg. No hoops between the
+ * rims (Des 2026-10-30, round 5) and no wire cage: tank-geometry.test.ts and
+ * line-termination.test.ts pin both.
  * The mash tun close-up shows the agitator (drum hat, shaft into the hub,
  * pitched blades); the whirlpool close-up its tangential nozzle flange.
  */
@@ -26,7 +26,7 @@ const pkgRoot = path.resolve(import.meta.dirname, '../..');
 const snapDir = artifactsDir('render');
 const snapPath = path.join(snapDir, 'brewhouse-vessels.png');
 const VIEW = { width: 1400, height: 520 };
-/** One vessel at 3x the row zoom: interior rings, agitator and nozzle flange at reviewable size. */
+/** One vessel at 3x the row zoom: interior rims, agitator and nozzle flange at reviewable size. */
 const CLOSEUP_VIEW = { width: 520, height: 640 };
 const CLOSEUPS = ['mash-tun', 'whirlpool', 'hlt'] as const;
 const CLOSEUP_ZOOM = 160;

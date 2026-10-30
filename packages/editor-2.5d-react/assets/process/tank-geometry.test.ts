@@ -12,10 +12,9 @@ import {
   heelSurfaceY,
   facetedRadiusAt,
   interiorRingArc,
-  interiorRingHeights,
+  interiorRimHeights,
   interiorRingSegments,
   mergeTankParams,
-  TANK_INTERIOR_HOOPS,
   MIXER_WINDOW_DEG,
   MIXER_WINDOW_YAW,
   segmentsInsideWindow,
@@ -153,25 +152,23 @@ describe('presets', () => {
 });
 
 /**
- * Des 2026-10-29: the interior back wall's horizontal lines (bottom inner rim,
- * body hoops, top inner rim) must show through the cutaway, like reference.jpg.
- * This reverses the earlier "no lines inside the window" rule for the INNER
- * back wall only: the outer cage above still never enters the window arc.
+ * Des 2026-10-29: the interior back wall's lines show through the cutaway,
+ * like reference.jpg (the outer cage still never enters the window arc).
+ * Des 2026-10-30 (round 5): "remove the horizontal rings on the inside of the
+ * tank" -- only the structural rims (wall meets floor / dish and dome / lid)
+ * stay, and the seams end on them.
  */
 describe('interior back-wall rings (seen through the window)', () => {
   const thetaOf = (x: number, z: number) => Math.atan2(x, z);
   const segs = 15;
   const facetStep = win.keepLen / segs;
 
-  it('ring heights are the bottom rim, the hoops and the top rim, bottom to top', () => {
-    const hs = interiorRingHeights(-1, 1, 2);
-    expect(hs).toHaveLength(4);
-    [-1, -1 / 3, 1 / 3, 1].forEach((h, i) => expect(hs[i]).toBeCloseTo(h));
-    expect(interiorRingHeights(-1, 1, 0)).toEqual([-1, 1]);
-    expect(interiorRingHeights(1, 1, 2)).toEqual([]);
-    expect(TANK_INTERIOR_HOOPS).toBeGreaterThan(0);
+  it('ring heights are only the two structural rims (no hoops between them), bottom to top', () => {
+    expect(interiorRimHeights(-1, 1)).toEqual([-1, 1]);
+    expect(interiorRimHeights(1, 1)).toEqual([]);
+    expect(interiorRimHeights(1, -1)).toEqual([]);
     expect(DEFAULT_TANK_PARAMS.showInteriorRings).toBe(true);
-    expect(DEFAULT_TANK_PARAMS.interiorHoops).toBe(TANK_INTERIOR_HOOPS);
+    expect(DEFAULT_TANK_PARAMS).not.toHaveProperty('interiorHoops');
   });
 
   it.each([
@@ -189,7 +186,7 @@ describe('interior back-wall rings (seen through the window)', () => {
 
   it('every ring segment is horizontal, on the back arc, and on the faceted liner', () => {
     const arc = interiorRingArc(TANK_WINDOW_DEG, TANK_WINDOW_YAW);
-    const heights = interiorRingHeights(-1.5, 1.5, 2);
+    const heights = interiorRimHeights(-1.5, 1.5);
     const r = 0.99;
     const pts = interiorRingSegments(r, heights, arc, win.keepStart, facetStep);
     expect(pts.length % 6).toBe(0);

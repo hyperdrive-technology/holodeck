@@ -43,7 +43,7 @@ import {
   flaskMeridianSegments,
   frustumMeridianSegments,
   interiorRingArc,
-  interiorRingHeights,
+  interiorRimHeights,
   interiorLineSegments,
   INTERIOR_RING_INSET,
   LIQUID_THETA_LENGTH,
@@ -262,7 +262,7 @@ export function tankLinePlan(p: TankParams, top: TankTop, tankH: number, tankR: 
     plan.bottom = profileMeridianSegments(dishProfile(tankR, y0, layout.bottomDepth, 3), cylinderThetasEven(segs, 0, Math.PI * 2, true, 3));
   }
   if (p.showInteriorRings && p.showLiner) {
-    const heights = interiorRingHeights(y0 + 0.004, bodyTop - 0.004, p.interiorHoops);
+    const heights = interiorRimHeights(y0 + 0.004, bodyTop - 0.004);
     if (heights.length) {
       const arc = interiorRingArc(p.windowDeg, p.windowYawDeg);
       const r = liner * INTERIOR_RING_INSET;

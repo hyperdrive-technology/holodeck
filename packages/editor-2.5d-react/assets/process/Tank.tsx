@@ -29,7 +29,7 @@ import {
   windowFillSegments,
   innerCageSpan,
   interiorRingArc,
-  interiorRingHeights,
+  interiorRimHeights,
   interiorRingSegments,
   INTERIOR_RING_INSET,
   bodyShoulder,
@@ -250,10 +250,10 @@ export function Tank({
     if (!p.showInteriorRings || !p.showLiner) return null;
     const yBottom = useShoulder ? y0 + outer.bowlH : y0 + 0.004;
     const yTop = useShoulder ? y0 + shoulder.cylH : bodyTop - 0.004;
-    const heights = interiorRingHeights(yBottom, yTop, p.interiorHoops);
+    const heights = interiorRimHeights(yBottom, yTop);
     if (heights.length === 0) return null;
     return { radius: liner * INTERIOR_RING_INSET, heights, arc: interiorRingArc(p.windowDeg, p.windowYawDeg) };
-  }, [p.showInteriorRings, p.showLiner, p.interiorHoops, p.windowDeg, p.windowYawDeg, useShoulder, y0, outer.bowlH, shoulder.cylH, bodyTop, liner]);
+  }, [p.showInteriorRings, p.showLiner, p.windowDeg, p.windowYawDeg, useShoulder, y0, outer.bowlH, shoulder.cylH, bodyTop, liner]);
   // Every line set (except the retired shoulder path's) comes from tank-lines.ts, where the
   // line-termination rule is tested.
   const linePlan = useMemo(
@@ -262,10 +262,6 @@ export function Tank({
     [JSON.stringify(p), top, tankH, tankR, level, empty],
   );
   const meshKey = `${segs}-${bodySegs}-${domeSegs}-${p.windowDeg}-${p.windowYawDeg}-${tankH}-${tankR}-${top}-${p.bottom}-${p.support}-${p.domeHeight}-${p.bowlHeight}-${level}-${p.shoulderRatio}-${p.shoulderTopRatio}-${p.outerBowlHeight}-${layout.bottomDepth}-${layout.topHeight}`;
-  const bodyRingFs = Array.from({ length: Math.max(0, Math.round(p.bodyRings)) }, (_, i) => {
-    const n = Math.max(1, Math.round(p.bodyRings));
-    return (i + 1) / (n + 1);
-  });
   const skirtTop = p.bottom === 'flat' ? y0 : y0 - layout.bottomDepth * 0.5;
   // A rounded heel (mixer bottle) curves up away from the floor point: run each leg up to the heel
   // surface at the leg's INNER edge (the lowest point of the shell over the leg). Any higher and the leg
@@ -341,18 +337,6 @@ export function Tank({
                 ) : null}
               </group>
             ) : null}
-            <group position={[0, y0 + outer.bowlH - heelOl + wallH / 2, 0]}>
-              {bodyRingFs.map((f) => (
-                <mesh
-                  key={`br-${f}`}
-                  position={[0, -wallH / 2 + heelOl + outer.cylH * f, 0]}
-                  rotation={[-Math.PI / 2, 0, 0]}
-                >
-                  <ringGeometry args={[tankR - p.bodyRingWidth, tankR, 48, 1, keepStart - Math.PI / 2, keepLen]} />
-                  <meshBasicMaterial color={p.edgeColor} />
-                </mesh>
-              ))}
-            </group>
             {p.showCage && shoulderLathes.wall.length > 2 ? (
               <LineBag
                 color={p.edgeColor}
@@ -400,13 +384,6 @@ export function Tank({
                 <meshBasicMaterial color={p.linerColor} toneMapped={false} />
               </mesh>
             ) : null}
-            {bodyRingFs.map((f) => (
-              <mesh key={`br-${f}`} position={[0, -bodyH / 2 + bodyH * f, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-                {/* Ring theta is not cylinder theta; −π/2 lines the arc up with the back wall. */}
-                <ringGeometry args={[tankR - p.bodyRingWidth, tankR, 48, 1, keepStart - Math.PI / 2, keepLen]} />
-                <meshBasicMaterial color={p.edgeColor} />
-              </mesh>
-            ))}
           </group>
         )}
         {top === 'dome' && p.showDome && !useShoulder ? (

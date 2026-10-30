@@ -179,3 +179,34 @@ describe('empty vessel (fill 0): no liquid lines', () => {
     expect(tankLinePlan(p, p.top, preset.height, preset.radius, 0.001).waterline.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * Round 5 (Des 2026-10-30): "remove the horizontal rings on the inside of the
+ * tank". The inner back wall keeps only its structural rims (wall meets the
+ * floor / dish and the dome / lid); its seams end on them.
+ */
+describe.each(presetIds)('Tank preset %s: no hoops on the inner wall', (id) => {
+  const preset = TANK_PRESETS[id];
+  const p = mergeTankParams(preset.params);
+
+  it('interior horizontals sit only at the two rims; every seam spans rim to rim', () => {
+    if (p.agitator) return; // mixer.glb
+    const { y0, bodyTop } = tankLayout(preset.height, preset.radius, p);
+    const { interior } = tankLinePlan(p, p.top, preset.height, preset.radius, 0.5);
+    expect(interior.length).toBeGreaterThan(0);
+    const rims = [y0 + 0.004, bodyTop - 0.004];
+    let seams = 0;
+    for (let i = 0; i < interior.length; i += 6) {
+      const a = interior[i + 1];
+      const b = interior[i + 4];
+      if (Math.abs(a - b) < 1e-9) {
+        expect(rims.some((r) => Math.abs(r - a) < 1e-5), `ring at y ${a}`).toBe(true);
+      } else {
+        seams++;
+        expect([Math.min(a, b), Math.max(a, b)].map((v) => Number(v.toFixed(5)))).toEqual(rims.map((v) => Number(v.toFixed(5))));
+      }
+    }
+    expect(seams).toBeGreaterThan(0);
+    expect(danglingLineEnds(interior)).toEqual([]);
+  });
+});

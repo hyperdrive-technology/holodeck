@@ -29,18 +29,19 @@ export const TANK_BOWL_Y_OFFSET = 0;
 /** 4 dome stacks drew a latitude cage vs r-holdbody's sparse cap. */
 export const TANK_DOME_HEIGHT_SEGMENTS = 3;
 
-/** 1 extra hoop dualled vs r-holdbody's quieter silo. */
-export const TANK_BODY_RINGS = 0;
-
-/**
- * Horizontal hoops on the inner back wall between the floor rim and the top
- * rim, seen through the cutaway (reference.jpg: the holding / ingredient
- * tanks show their inner rim and hoop lines through the window, above and
- * below the liquid). Des, 2026-10-29: reverses the earlier "no lines inside
- * the window" rule. 0 = rims only. Round 2: 1 (mid hoop). reference.jpg
- * shows rims + panel seams but no hoops; 2 hoops plus 4 seams read as a grid.
+/*
+ * Body hoops (`bodyRings`, TANK_BODY_RINGS / MIXER_BODY_RINGS, both 0 since round 1) were removed in
+ * round 5 (Des 2026-10-30: "remove the horizontal rings on the inside of the tank"). The only
+ * horizontal wall lines are the structural rims where the wall meets the floor / dish / dome.
  */
-export const TANK_INTERIOR_HOOPS = 1;
+
+/*
+ * Interior hoops (TANK_INTERIOR_HOOPS / `interiorHoops`) on the inner back wall: removed in round 5.
+ * History: 2026-10-29 Des reversed the "no lines inside the window" rule and the back wall got its
+ * rims plus hoops (round 2: 1 mid hoop). 2026-10-30 Des: "remove the horizontal rings on the inside
+ * of the tank". The inner back wall keeps only its structural rims (wall meets floor / dish, wall
+ * meets dome / lid / shoulder) and the facet seams that end on them (`interiorRimHeights`).
+ */
 
 /** The interior rings sit just inside the liner so they never z-fight it. */
 export const INTERIOR_RING_INSET = 0.995;
@@ -138,8 +139,6 @@ export type TankParams = {
   windowYawDeg: number;
   radialSegments: number;
   bodyHeightSegments: number;
-  bodyRings: number;
-  bodyRingWidth: number;
   cageThreshold: number;
   wallThreshold: number;
   domeHeightSegments: number;
@@ -177,10 +176,11 @@ export type TankParams = {
   /** Inner ullage cage (meridians at the inner radius above the liquid). Off for the same reason. */
   showInnerCage: boolean;
   showLiquid: boolean;
-  /** Horizontal rim + hoop lines on the inner back wall, seen through the window (reference.jpg). */
+  /**
+   * Inner back wall lines seen through the window: the structural rims (wall meets floor / dish and
+   * dome / lid) and the facet seams between them. No body hoops since round 5 (`interiorRimHeights`).
+   */
   showInteriorRings: boolean;
-  /** Body hoops between the bottom and top inner rims (`TANK_INTERIOR_HOOPS`). */
-  interiorHoops: number;
   /** Liner facet seams on the back wall: every Nth vertex, 0 = none (`TANK_INTERIOR_MERIDIAN_STEP`). */
   interiorMeridianStep: number;
   shaftRadius: number;
@@ -235,8 +235,6 @@ export const DEFAULT_TANK_PARAMS: TankParams = {
   windowYawDeg: TANK_WINDOW_YAW,
   radialSegments: 15,
   bodyHeightSegments: 1,
-  bodyRings: TANK_BODY_RINGS,
-  bodyRingWidth: 0.004,
   cageThreshold: 1,
   wallThreshold: TANK_WALL_THRESHOLD,
   domeHeightSegments: TANK_DOME_HEIGHT_SEGMENTS,
@@ -266,7 +264,6 @@ export const DEFAULT_TANK_PARAMS: TankParams = {
   showInnerCage: false,
   showLiquid: true,
   showInteriorRings: true,
-  interiorHoops: TANK_INTERIOR_HOOPS,
   interiorMeridianStep: TANK_INTERIOR_MERIDIAN_STEP,
   shaftRadius: 0.04,
   shaftLength: 0.88,
@@ -611,17 +608,15 @@ export function interiorRingArc(
 }
 
 /**
- * Heights of the interior rings: the bottom inner rim (`yBottom`), `hoops`
- * evenly spaced body hoops, and the top inner rim (`yTop`). Sorted bottom to
- * top; empty when the wall has no height.
+ * Heights of the inner back wall's horizontal lines: only the structural
+ * rims, where the wall meets the floor / dish (`yBottom`) and the dome / lid
+ * / shoulder (`yTop`). The facet seams run between them, so every seam ends
+ * on a rim. Empty when the wall has no height (no rims, so no seams either).
+ * Round 5 (Des 2026-10-30) removed the body hoops between them.
  */
-export function interiorRingHeights(yBottom: number, yTop: number, hoops: number): number[] {
+export function interiorRimHeights(yBottom: number, yTop: number): number[] {
   if (!(yTop - yBottom > 1e-4)) return [];
-  const n = Math.max(0, Math.round(hoops));
-  const ys = [yBottom];
-  for (let i = 1; i <= n; i++) ys.push(yBottom + ((yTop - yBottom) * i) / (n + 1));
-  ys.push(yTop);
-  return ys;
+  return [yBottom, yTop];
 }
 
 /**
@@ -834,9 +829,6 @@ export const MIXER_SHAFT_SIDES = 16;
 
 /** 0.18 neck read as a chimney vs r-mixer's squat 8-gon on the dome apex. */
 export const MIXER_CAP_HEIGHT_RATIO = 0.1;
-
-/** 3 extra hoops dualled vs r-mixer's quieter bottle (lathe meridians stay). */
-export const MIXER_BODY_RINGS = 0;
 
 /** 0.5 hat read wide vs r-mixer's smaller 8-gon on the dome. */
 export const MIXER_CAP_RADIUS_RATIO = 0.4;

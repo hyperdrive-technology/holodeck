@@ -77,8 +77,6 @@ const SLIDERS: TankSlider[] = [
   { group: 'Cutout', key: 'windowYawDeg', label: 'Window yaw (°)', min: 0, max: 360, step: 1 },
   { group: 'Cage', key: 'radialSegments', label: 'Meridians (every 2nd on back/bowl)', min: 4, max: 32, step: 1 },
   { group: 'Cage', key: 'bodyHeightSegments', label: 'Body height segs', min: 1, max: 16, step: 1 },
-  { group: 'Cage', key: 'bodyRings', label: 'Extra body rings', min: 0, max: 12, step: 1 },
-  { group: 'Cage', key: 'bodyRingWidth', label: 'Body ring width', min: 0.004, max: 0.06, step: 0.002 },
   { group: 'Cage', key: 'cageThreshold', label: 'Cage edge threshold', min: 1, max: 45, step: 1 },
   { group: 'Cage', key: 'wallThreshold', label: 'Window-wall edge threshold', min: 1, max: 45, step: 1 },
   { group: 'Cage', key: 'lineWidth', label: 'Line width (WebGL often 1)', min: 1, max: 6, step: 0.5 },

@@ -129,3 +129,10 @@ Parameter history moved out of `.agents/TODO.md` (2026-10-13) so the backlog sta
 - agitated vessels (Mixer part, mash tun) = mixer.glb (AgitatedVessel) scaled R / 0.45 x H / 1.45; MIXER_WINDOW 100° @ 45° (the GLB window) vs 70° @ 40°; mash tun support none
 - fidelity (system Chrome): 0.2054 vs batch-5 record 0.18745 (peak 0.212 before the dome liner + dense dome lines for the termination rule)
 - not fixed here (Blender lane): mixer.glb inner floor dish rim reads as a C (the window cuts through the dish in shell.band)
+
+## Batch 7 — Round 5: bowl radials, no interior hoops, preset tanks, empty vessels (Des 2026-10-30)
+
+- interior back wall: rims only (wall meets floor / dish, wall meets dome / lid), seams rim to rim vs batch-6 rims + TANK_INTERIOR_HOOPS 1 mid hoop. Des: "remove the horizontal rings on the inside of the tank" -- reverses batch 5's "show interior rings" for the hoops; `interiorHoops`, `bodyRings` / `bodyRingWidth`, TANK_BODY_RINGS, MIXER_BODY_RINGS removed (all hoops were 0 except the interior mid hoop)
+- liquid bowl radials: every 4th vertex of the liquid lathe (32-gon -> 8) vs every 2nd vertex of the 15-facet SHELL grid (sat between the lathe's vertices); radials whose rim end is past a jamb are dropped (`bowlWindow`: liner half chord sin(window/2) less 0.05 R) -- the two sideways ones on a 91° window; bowl / waterline rings on the lathe's segment count vs 48
+- empty vessel (fill <= 0): no liquid, waterline or bowl lines vs a 2% film (read as a small floating disc in the empty whirlpool); GLB `anim.liquid` hidden at 0 (fill animator + AgitatedVessel) vs scale 0.001
+- built-in `tank` `preset` param (plain | any TANK_PRESETS id) so the brewhouse render draws each vessel with its own preset vs every vessel a plain domed tank
