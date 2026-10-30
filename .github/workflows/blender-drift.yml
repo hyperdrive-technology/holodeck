@@ -24,15 +24,13 @@ name: Blender drift
 # HOLODECK_REQUIRE_BLENDER=1 turns "no Blender, skip" into a failing test, so
 # a broken install cannot leave this job green while checking nothing.
 
+# The "GLBs rebuild from Blender scripts" job is a required check on main (holodeck#209).
+# A required check from a path-filtered workflow never reports on PRs that miss the paths and
+# would block them forever, so the workflow runs on every PR and the `changes` job decides
+# whether the rebuild is needed. A job skipped by `if` counts as passing for required checks.
+
 on:
   pull_request:
-    paths:
-      - 'blender/**'
-      - 'packages/library-cloud/**'
-      - 'packages/editor-2.5d-react/assets/models/**'
-      - 'packages/editor-2.5d-react/scripts/build-parts.mjs'
-      - 'packages/editor-2.5d-react/src/models/**'
-      - '.github/workflows/blender-drift.yml'
   push:
     branches: [main]
     paths:
@@ -57,8 +55,43 @@ env:
   BLENDER_SHA256: 84098912789dc450e95697c4184fb8a90acbe5111c2ba4aede3fecb57806a168
 
 jobs:
+  changes:
+    name: Blender-relevant changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.scope.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+      # Push, weekly and manual runs always rebuild. On a PR, rebuild only when the diff
+      # against the base touches the same paths the push trigger lists.
+      - name: Does this change touch Blender inputs?
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          # --no-renames: a file moved out of a Blender path must still list its old path.
+          changed=$(git diff --no-renames --name-only "$BASE_SHA" HEAD)
+          echo "$changed"
+          if echo "$changed" | grep -Eq '^(blender/|packages/library-cloud/|packages/editor-2\.5d-react/assets/models/|packages/editor-2\.5d-react/scripts/build-parts\.mjs$|packages/editor-2\.5d-react/src/models/|\.github/workflows/blender-drift\.yml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "No Blender inputs changed; the rebuild job is skipped (and counts as passing)."
+          fi
+
   rebuild:
     name: GLBs rebuild from Blender scripts
+    needs: changes
+    # Fail closed: skip only when `changes` succeeded and said `false`. If `changes` itself failed
+    # its output is empty, so the rebuild runs anyway instead of a skip passing the required check.
+    if: ${{ !cancelled() && needs.changes.outputs.relevant != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
