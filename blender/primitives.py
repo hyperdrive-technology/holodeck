@@ -12,13 +12,34 @@ Profiles are [(r, y), ...] ordered TOP -> BOTTOM like brewery.lathe.
   sweep(...)              revolve a CLOSED cross-section polygon: hollow shells,
                           wedges with planar cut faces; self-checks the solid
   split_profile(...)      cut a profile at a height (interpolates a point)
+  profile_y_at_r(...)     height of a profile at a radius (seating parts on it)
   cutaway_shell(...)      thick-walled vessel with a window: three closed solids
   interior_rings(...)     ridge profile points that outline as ring lines
   ellipse_head(...)       elliptical head profile with a hole at the apex
-  round_corner(...)       quarter-round corner profile (heels, dish rims)
-  nozzle_with_flange(...) slim pipe stub + flange ring; returns the port point
+  round_corner(...)       quarter-round corner profile (heels)
+  dish(...)               elliptical dish profile (floors, liquid bottoms)
+  ring(...) / collar(...) short bands; stack_cylinders(...) drum + rims, caps touching
+  nozzle_with_flange(...) slim pipe stub + flange ring(s); returns the port point
   impeller(...)           hub + pitched blades under an anim pivot
   liquid_volume(...)      full-revolution liquid lathe under anim.liquid
+  check_terminations(...) proves every meridian line ends on a drawn ring
+
+LINE TERMINATION RULE (Des, round 4): every vertical / meridian line the
+runtime draws must end exactly on a drawn horizontal ring (or a window cut
+edge) — no line may fade out part-way across a curved band, and no cylinder
+may be sunk into another surface so its lines vanish without a ring.
+How the runtime draws lines: EdgesGeometry at EDGE_THRESHOLD_DEG (style.ts
+`edges.threshold`), i.e. an edge is drawn iff the dihedral angle between its
+two faces is >= the threshold. For a band of a revolved profile tilted `phi`
+from vertical, adjacent facets meet at
+    delta = acos(cos^2(phi) * cos(2 pi / seg) + sin^2(phi))
+so meridians are drawn on steep bands only, and the ring between two bands is
+drawn iff the profile turns by >= threshold there. `check_terminations`
+enforces (with a safety margin, because near-threshold angles would flip with
+float error): wherever meridian drawing changes between two bands, the ring
+between them is drawn. `stack_cylinders` keeps drum/collar/lid caps touching
+so each drum's lines end on its own cap ring; `nozzle_with_flange(base_ring=
+True)` seats a ring on the wall so stub lines end there.
 
 `theta0` rotates the facet boundaries so a window can be centred on the camera
 with any segment count (18 segments + theta0 = -5 deg puts boundaries at -5 deg
@@ -32,7 +53,12 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bmesh  # noqa: E402
+from mathutils import Matrix  # noqa: E402
+
 import holodeck_bpy as hd  # noqa: E402
+
+EDGE_THRESHOLD_DEG = 15.0  # mirrors assets/process/style.ts HOLODECK_STYLE.edges.threshold
+TERMINATION_MARGIN_DEG = 2.0  # creases / facet angles must sit this far from the threshold
 
 
 def _dedupe(face):
@@ -56,7 +82,69 @@ def _recalc(obj):
     obj.data.update()
 
 
-def lathe(name, profile, seg, mat, position_t=(0, 0, 0), parent=None, arc=None, arc_steps=3, theta0=0.0):
+# --------------------------------------------------------------------------
+# Line-termination analysis (see module docstring)
+# --------------------------------------------------------------------------
+
+
+def facet_dihedral_deg(tilt_deg, seg):
+    """Angle between adjacent facets of a revolved band tilted `tilt_deg` from vertical."""
+    phi = math.radians(tilt_deg)
+    c = math.cos(phi) ** 2 * math.cos(math.tau / seg) + math.sin(phi) ** 2
+    return math.degrees(math.acos(max(-1.0, min(1.0, c))))
+
+
+def _bands(profile):
+    """(tilt_deg from vertical, direction angle) per profile segment, skipping zero-length ones."""
+    out = []
+    for (r0, y0), (r1, y1) in zip(profile, profile[1:]):
+        dr, dy = r1 - r0, y1 - y0
+        if abs(dr) < 1e-9 and abs(dy) < 1e-9:
+            continue
+        out.append((math.degrees(math.atan2(abs(dr), abs(dy))), math.degrees(math.atan2(dy, dr)), r0, y0, r1, y1))
+    return out
+
+
+def check_terminations(name, profile, seg, closed=False, threshold=EDGE_THRESHOLD_DEG, margin=TERMINATION_MARGIN_DEG):
+    """Raise unless every meridian line of the revolved `profile` ends on a
+    drawn ring. `closed` treats the profile as a cyclic loop (sweep). Bands
+    whose facet angle or whose ring crease lies within `margin` of the
+    threshold are rejected too: they would be drawn or not by float luck."""
+    bands = _bands(profile)
+    if closed:
+        bands.append(bands[0])
+    problems = []
+    for i, (tilt, direction, r0, y0, r1, y1) in enumerate(bands):
+        delta = facet_dihedral_deg(tilt, seg)
+        if r0 > 1e-9 or r1 > 1e-9:  # a segment on the axis sweeps to nothing
+            if abs(delta - threshold) < margin:
+                problems.append(f"band ({r0:.3f},{y0:.3f})->({r1:.3f},{y1:.3f}) facets meet at {delta:.1f} deg, "
+                                f"within {margin} deg of the {threshold} deg edge threshold")
+        if i + 1 >= len(bands):
+            continue
+        tilt2, direction2, r2, y2, r3, y3 = bands[i + 1]
+        on_axis = r1 <= 1e-9 and r2 <= 1e-9
+        if on_axis:
+            continue  # bands meet at a pole: meridians converge there
+        crease = abs(direction2 - direction)
+        crease = min(crease, 360 - crease)
+        drawn_a = delta >= threshold and (r0 > 1e-9 or r1 > 1e-9)
+        drawn_b = facet_dihedral_deg(tilt2, seg) >= threshold and (r2 > 1e-9 or r3 > 1e-9)
+        if abs(crease - threshold) < margin:
+            problems.append(f"ring at y={y1:.3f} r={r1:.3f} turns {crease:.1f} deg, within {margin} deg of the threshold")
+        elif drawn_a != drawn_b and crease < threshold:
+            problems.append(f"meridians {'stop' if drawn_a else 'start'} at y={y1:.3f} r={r1:.3f} but the ring there "
+                            f"turns only {crease:.1f} deg (< {threshold}) and is not drawn")
+    if problems:
+        raise RuntimeError(f"{name}: line termination rule violated:\n  " + "\n  ".join(problems))
+
+
+# --------------------------------------------------------------------------
+# Revolves
+# --------------------------------------------------------------------------
+
+
+def lathe(name, profile, seg, mat, position_t=(0, 0, 0), parent=None, arc=None, arc_steps=3, theta0=0.0, check=False):
     """Solid of revolution about three-space +Y.
 
     `profile` is [(r, y), ...] ordered TOP -> BOTTOM. Rings with r == 0 are
@@ -67,7 +155,12 @@ def lathe(name, profile, seg, mat, position_t=(0, 0, 0), parent=None, arc=None, 
     Face winding is fixed afterwards with bmesh.recalc_face_normals so it
     does not depend on getting every orientation right by hand (closed
     manifold meshes only, which all of these are).
+    `check=True` runs check_terminations on the profile (plus its caps).
     """
+    if check:
+        capped = ([(0.0, profile[0][1])] if profile[0][0] > 0 else []) + list(profile) + \
+                 ([(0.0, profile[-1][1])] if profile[-1][0] > 0 else [])
+        check_terminations(name, capped, seg)
     cols = (arc_steps + 1) if arc else seg
     verts, rings = [], []
     for r, y in profile:
@@ -103,7 +196,7 @@ def lathe(name, profile, seg, mat, position_t=(0, 0, 0), parent=None, arc=None, 
     return obj
 
 
-def sweep(name, loop, seg, mat, arc=None, arc_steps=None, parent=None, theta0=0.0):
+def sweep(name, loop, seg, mat, arc=None, arc_steps=None, parent=None, theta0=0.0, check=False):
     """Revolve a CLOSED polygon `loop` [(r, y), ...] about three-space +Y.
 
     Unlike `lathe` (an open profile closed by caps on the axis), the loop is a
@@ -116,7 +209,10 @@ def sweep(name, loop, seg, mat, arc=None, arc_steps=None, parent=None, theta0=0.
     manifold with positive signed volume. Materials are single-sided, so an
     inside-out shell would silently render as its own interior (culled walls,
     no outlines on interior ridges) instead of failing.
+    `check=True` runs check_terminations on the loop.
     """
+    if check:
+        check_terminations(name, list(loop) + [loop[0]], seg, closed=True)
     cols = (arc_steps + 1) if arc else seg
     verts, rings = [], []
     for r, y in loop:
@@ -155,12 +251,19 @@ def sweep(name, loop, seg, mat, arc=None, arc_steps=None, parent=None, theta0=0.
     return obj
 
 
+# --------------------------------------------------------------------------
+# Profiles
+# --------------------------------------------------------------------------
+
+
 def split_profile(profile, y_cut):
     """Split a TOP -> BOTTOM profile (non-increasing y) at `y_cut`.
 
     Returns (above, below): `above` ends and `below` starts with the point on
     the profile at y_cut (interpolated unless a profile point is already
-    there), so both halves share that boundary ring.
+    there), so both halves share that boundary ring. Cut at an existing
+    profile ring where you can: an interpolated cut adds a ring the runtime
+    outlines (the two solids' cap edges) without a crease behind it.
     """
     for i in range(len(profile) - 1):
         (r0, y0), (r1, y1) = profile[i], profile[i + 1]
@@ -175,40 +278,48 @@ def split_profile(profile, y_cut):
     raise ValueError(f"y={y_cut} is outside the profile's y range")
 
 
-def cutaway_shell(prefix, outer, inner, window, window_y, seg, mat, theta0=0.0):
-    """Thick-walled vessel of revolution with a cutaway window, as three CLOSED solids.
+def profile_y_at_r(profile, r):
+    """Height of a (monotonic-in-r) profile at radius `r`, interpolated. Used
+    to seat a collar or ring exactly on a revolved surface."""
+    for (r0, y0), (r1, y1) in zip(profile, profile[1:]):
+        lo, hi = min(r0, r1), max(r0, r1)
+        if lo - 1e-9 <= r <= hi + 1e-9 and hi - lo > 1e-9:
+            return y0 + (y1 - y0) * (r - r0) / (r1 - r0)
+    raise ValueError(f"r={r} is outside the profile's r range")
 
-    `outer` / `inner` are the full outer and inner surface profiles TOP ->
-    BOTTOM (start at the apex hole or pole, end on the bottom pole/hole).
-    `window=(a0, a1)` is the removed arc (radians, hd.cylinder theta) and
-    `window_y=(y0, y1)` its sill and top. Result, named f"{prefix}.upper"
-    (360 deg above y1), f"{prefix}.band" (the keep-arc between y0 and y1,
-    with planar cut faces that follow the wall profile, e.g. up into a
-    shoulder) and f"{prefix}.lower" (360 deg below y0). The window edges
-    must land on facet boundaries: (a0 - theta0) and (a1 - a0) must be
-    multiples of 2*pi/seg. Materials are single-sided, so this is how a
-    cutaway stays a valid solid: cut faces, sill and the inner back wall are
-    all real front-facing geometry.
-    """
-    a0, a1 = window
-    y0, y1 = window_y
-    step = math.tau / seg
-    k0 = (a0 - theta0) / step
-    n_win = (a1 - a0) / step
-    if abs(k0 - round(k0)) > 1e-6 or abs(n_win - round(n_win)) > 1e-6:
-        raise ValueError(f"window {math.degrees(a0):.1f}..{math.degrees(a1):.1f} deg must align with the "
-                         f"{seg}-gon facets at theta0 {math.degrees(theta0):.1f} deg")
-    keep = (a1, a0 + math.tau)
-    keep_steps = seg - int(round(n_win))
-    o_up, o_rest = split_profile(outer, y1)
-    o_mid, o_low = split_profile(o_rest, y0)
-    i_up, i_rest = split_profile(inner, y1)
-    i_mid, i_low = split_profile(i_rest, y0)
-    return {
-        "upper": sweep(f"{prefix}.upper", o_up + list(reversed(i_up)), seg, mat, theta0=theta0),
-        "band": sweep(f"{prefix}.band", o_mid + list(reversed(i_mid)), seg, mat, arc=keep, arc_steps=keep_steps),
-        "lower": sweep(f"{prefix}.lower", o_low + list(reversed(i_low)), seg, mat, theta0=theta0),
-    }
+
+def _angles(steps_or_angles, end_deg):
+    """Equal steps (int) or an explicit ascending list of interior angles (deg) -> full ascending list."""
+    if isinstance(steps_or_angles, int):
+        return [end_deg * i / steps_or_angles for i in range(steps_or_angles + 1)]
+    return [0.0] + [float(a) for a in steps_or_angles] + [end_deg]
+
+
+def ellipse_head(r, y0, h, hole_r, steps):
+    """Elliptical head TOP -> BOTTOM: from the ring at r == hole_r (apex hole)
+    down to the equator (r, y0), semi-axes (r, h). `steps` is an int (equal
+    angle steps) or a list of interior ellipse angles in degrees, ascending
+    from the equator, chosen so each band's tilt is clear of the edge
+    threshold (see check_terminations)."""
+    a1 = math.degrees(math.acos(hole_r / r))
+    angles = _angles(steps, a1)
+    return [(r * math.cos(math.radians(a)), y0 + h * math.sin(math.radians(a))) for a in reversed(angles)]
+
+
+def round_corner(r_wall, rc, y0, steps):
+    """Quarter-round from (r_wall, y0 + rc) down to (r_wall - rc, y0), inclusive, TOP -> BOTTOM.
+    `steps`: int or interior angles (deg) from the wall tangent."""
+    pts = []
+    for a in _angles(steps, 90.0):
+        a = math.radians(a)
+        pts.append((r_wall - rc + rc * math.cos(a), y0 + rc - rc * math.sin(a)))
+    return pts
+
+
+def dish(r, y_rim, depth, steps):
+    """Elliptical dish TOP -> BOTTOM: rim (r, y_rim) down to the pole (0, y_rim - depth).
+    `steps`: int or interior angles (deg) from the rim."""
+    return [(r * math.cos(math.radians(a)), y_rim - depth * math.sin(math.radians(a))) for a in _angles(steps, 90.0)]
 
 
 def interior_rings(r_in, ys, depth=0.006, half_h=0.03):
@@ -225,30 +336,49 @@ def interior_rings(r_in, ys, depth=0.006, half_h=0.03):
     return pts
 
 
-def ellipse_head(r, y0, h, hole_r, steps):
-    """Elliptical head TOP -> BOTTOM: from the ring at r == hole_r (apex hole)
-    down to the equator (r, y0), semi-axes (r, h), equal angle steps."""
-    a1 = math.acos(hole_r / r)
-    return [(r * math.cos(a), y0 + h * math.sin(a)) for a in (a1 * (1 - i / steps) for i in range(steps + 1))]
+def cutaway_shell(prefix, outer, inner, window, window_y, seg, mat, theta0=0.0, check=True):
+    """Thick-walled vessel of revolution with a cutaway window, as three CLOSED solids.
+
+    `outer` / `inner` are the full outer and inner surface profiles TOP ->
+    BOTTOM (start at the apex hole or pole, end on the bottom pole/hole).
+    `window=(a0, a1)` is the removed arc (radians, hd.cylinder theta) and
+    `window_y=(y0, y1)` its sill and top. Result, named f"{prefix}.upper"
+    (360 deg above y1), f"{prefix}.band" (the keep-arc between y0 and y1,
+    with planar cut faces that follow the wall profile, e.g. up into a
+    shoulder) and f"{prefix}.lower" (360 deg below y0). The window edges
+    must land on facet boundaries: (a0 - theta0) and (a1 - a0) must be
+    multiples of 2*pi/seg. Materials are single-sided, so this is how a
+    cutaway stays a valid solid: cut faces, sill and the inner back wall are
+    all real front-facing geometry. `check` runs check_terminations on both
+    profiles (the cut rings are drawn either way).
+    """
+    a0, a1 = window
+    y0, y1 = window_y
+    step = math.tau / seg
+    k0 = (a0 - theta0) / step
+    n_win = (a1 - a0) / step
+    if abs(k0 - round(k0)) > 1e-6 or abs(n_win - round(n_win)) > 1e-6:
+        raise ValueError(f"window {math.degrees(a0):.1f}..{math.degrees(a1):.1f} deg must align with the "
+                         f"{seg}-gon facets at theta0 {math.degrees(theta0):.1f} deg")
+    if check:
+        check_terminations(f"{prefix} outer", outer, seg)
+        check_terminations(f"{prefix} inner", inner, seg)
+    keep = (a1, a0 + math.tau)
+    keep_steps = seg - int(round(n_win))
+    o_up, o_rest = split_profile(outer, y1)
+    o_mid, o_low = split_profile(o_rest, y0)
+    i_up, i_rest = split_profile(inner, y1)
+    i_mid, i_low = split_profile(i_rest, y0)
+    return {
+        "upper": sweep(f"{prefix}.upper", o_up + list(reversed(i_up)), seg, mat, theta0=theta0),
+        "band": sweep(f"{prefix}.band", o_mid + list(reversed(i_mid)), seg, mat, arc=keep, arc_steps=keep_steps),
+        "lower": sweep(f"{prefix}.lower", o_low + list(reversed(i_low)), seg, mat, theta0=theta0),
+    }
 
 
-def round_corner(r_wall, rc, y0, steps):
-    """Quarter-round from (r_wall, y0 + rc) down to (r_wall - rc, y0), inclusive, TOP -> BOTTOM."""
-    pts = []
-    for i in range(steps + 1):
-        a = math.pi / 2 * i / steps
-        pts.append((r_wall - rc + rc * math.cos(a), y0 + rc - rc * math.sin(a)))
-    return pts
-
-
-def dish(r, y_rim, depth, steps):
-    """Elliptical dish TOP -> BOTTOM: rim (r, y_rim) down to the pole (0, y_rim - depth)."""
-    return [(r * math.cos(a), y_rim - depth * math.sin(a)) for a in (math.pi / 2 * i / steps for i in range(steps + 1))]
-
-
-_AXES = {"+x": ((0, 0, math.pi / 2), (1, 0, 0)), "-x": ((0, 0, math.pi / 2), (-1, 0, 0)),
-         "+z": ((math.pi / 2, 0, 0), (0, 0, 1)), "-z": ((math.pi / 2, 0, 0), (0, 0, -1)),
-         "+y": ((0, 0, 0), (0, 1, 0)), "-y": ((0, 0, 0), (0, -1, 0))}
+# --------------------------------------------------------------------------
+# Cylindrical details
+# --------------------------------------------------------------------------
 
 
 def ring(name, radius, length, mat, position_t, rotation_t=(0, 0, 0), seg=12):
@@ -259,25 +389,66 @@ def ring(name, radius, length, mat, position_t, rotation_t=(0, 0, 0), seg=12):
 
 
 def collar(name, drum_r, y_bottom, height, mat, scale=1.08, seg=12, yaw=0.0):
-    """Base collar around a vertical drum (e.g. a motor housing on a dome):
-    a band `scale` x wider than the drum from `y_bottom` up `height`. Sink
-    `y_bottom` a little below the surface it sits on so the band's lower
-    edge disappears into it and only the top edge outlines (the reference
-    mixer cap reads as drum + top rim + wider base band)."""
+    """Base collar around a vertical drum: a band `scale` x wider than the
+    drum from `y_bottom` up `height`. Seat `y_bottom` ON the surface below
+    (profile_y_at_r at the collar's inscribed radius, see stack_cylinders) —
+    not sunk into it — so the band's bottom ring is the line where its
+    meridians end."""
     return ring(name, drum_r * scale, height, mat, (0, y_bottom + height / 2, 0), (0, yaw, 0), seg)
 
 
-def nozzle_with_flange(name, start_t, axis, length, mat, radius=0.05, flange_scale=1.32, flange_len=0.02, seg=12):
-    """Slim pipe stub from `start_t` along `axis` ('+x', '-z', ...) with a flange
-    RING at the free end, perpendicular to the stub, in the scene pipes'
-    proportions (pipe-math.ts PIPE_FLANGE_SCALE 1.32). Returns the free-end
-    face centre (the port position)."""
-    rot, d = _AXES[axis]
-    c = tuple(s + di * length / 2 for s, di in zip(start_t, d))
-    hd.cylinder(name, radius, radius, length, seg, mat, position_t=c, rotation_t=rot)
-    end = tuple(s + di * length for s, di in zip(start_t, d))
+def stack_cylinders(specs, y0, mat, seg=12, yaw=0.0):
+    """Closed cylinders stacked bottom-up from `y0`, caps touching:
+    specs = [(name, radius, height), ...]. Each drum's meridian lines end on
+    its own cap rings, which lie on the neighbour's cap face (the drum's
+    bottom ring IS the line where it meets a wider collar below). Returns
+    the top y."""
+    y = y0
+    for name, radius, height in specs:
+        ring(name, radius, height, mat, (0, y + height / 2, 0), (0, yaw, 0), seg)
+        y += height
+    return y
+
+
+_AXES = {"+x": ((0, 0, math.pi / 2), (1, 0, 0)), "-x": ((0, 0, math.pi / 2), (-1, 0, 0)),
+         "+z": ((math.pi / 2, 0, 0), (0, 0, 1)), "-z": ((math.pi / 2, 0, 0), (0, 0, -1)),
+         "+y": ((0, 0, 0), (0, 1, 0)), "-y": ((0, 0, 0), (0, -1, 0))}
+
+
+def _axis(axis):
+    """('+x' | '-z' | ... | horizontal theta in radians) -> (three Euler XYZ, unit direction)."""
+    if isinstance(axis, str):
+        return _AXES[axis]
+    d = (math.sin(axis), 0.0, math.cos(axis))
+    # +Y -> +Z (rotate pi/2 about X), then yaw about Y by theta. three's 'XYZ'
+    # Euler is Rx*Ry*Rz (intrinsic), which is Blender's 'ZYX' decomposition.
+    m = Matrix.Rotation(axis, 3, "Y") @ Matrix.Rotation(math.pi / 2, 3, "X")
+    e = m.to_euler("ZYX")
+    got = hd.three_euler_matrix((e.x, e.y, e.z)) @ hd.Vector((0.0, 1.0, 0.0))
+    assert all(abs(a - b) < 1e-6 for a, b in zip(got, d)), f"axis euler mismatch {tuple(got)} vs {d}"
+    return (e.x, e.y, e.z), d
+
+
+def nozzle_with_flange(name, start_t, axis, length, mat, radius=0.05, flange_scale=1.32, flange_len=0.02, seg=12,
+                       base_ring=False, inset=0.02):
+    """Slim pipe stub from `start_t` (ON the wall surface) along `axis` ('+x',
+    '-z', ... or a horizontal theta in radians) with a flange RING at the free
+    end, perpendicular to the stub, in the scene pipes' proportions
+    (pipe-math.ts PIPE_FLANGE_SCALE 1.32). `base_ring=True` adds the same
+    ring at the wall end, seated on the wall face, so the stub's meridian
+    lines end on a drawn ring instead of vanishing into the wall; the stub
+    itself starts `inset` inside the wall to hide the seam. Returns the
+    free-end face centre (the port position)."""
+    rot, d = _axis(axis)
+    s = tuple(si - di * inset for si, di in zip(start_t, d))
+    c = tuple(si + di * (length + inset) / 2 for si, di in zip(s, d))
+    hd.cylinder(name, radius, radius, length + inset, seg, mat, position_t=c, rotation_t=rot)
+    end = tuple(si + di * length for si, di in zip(start_t, d))
     fc = tuple(e - di * flange_len / 2 for e, di in zip(end, d))
     ring(f"{name}.flange", radius * flange_scale, flange_len, mat, fc, rot, seg)
+    if base_ring:
+        bc = tuple(si + di * flange_len / 2 for si, di in zip(start_t, d))
+        ring(f"{name}.base", radius * flange_scale, flange_len, mat, bc, rot, seg)
     return end
 
 
@@ -290,7 +461,8 @@ def impeller(prefix, parent, y_local, mat, blades=3, hub_r=0.05, hub_h=0.08, bla
     """Hub + `blades` flat blades at `y_local` under `parent` (an anim pivot on
     the axis). Each blade is a thin box along +X from the hub, pitched about
     its own radial axis, then yawed about Y. Yaw-after-pitch is not an R3F
-    'XYZ' Euler, so the vertices are rotated here instead of via rotation_t."""
+    'XYZ' Euler, so the vertices are rotated here instead of via rotation_t.
+    Returns the hub's top y (local) so a shaft can end exactly there."""
     hd.cylinder(f"{prefix}.hub", hub_r, hub_r, hub_h, seg, mat, position_t=(0, y_local, 0), parent=parent)
     hx, hy, hz = blade_len / 2, blade_h / 2, blade_t / 2
     cx = hub_r + blade_len / 2 - 0.01  # overlaps into the hub
@@ -305,14 +477,15 @@ def impeller(prefix, parent, y_local, mat, blades=3, hub_r=0.05, hub_h=0.08, bla
             x, z = cy * x + sy * z, -sy * x + cy * z  # yaw about Y (three.js convention)
             verts.append((x, y, z))
         hd._mesh_object(f"{prefix}.blade.{i}", verts, _BOX_FACES, mat, (0, y_local, 0), (0, 0, 0), parent)
+    return y_local + hub_h / 2
 
 
-def liquid_volume(profile_local, seg, mat, y_pivot, theta0=0.0, name="liquid"):
+def liquid_volume(profile_local, seg, mat, y_pivot, theta0=0.0, name="liquid", check=True):
     """`anim.liquid` pivot at (0, y_pivot, 0) with child `liquid`: a FULL
     revolution of the inner profile (TOP -> BOTTOM, axis to axis, in pivot-
     local y with the bottom at 0) for the translucent `hd.liquid` finish.
     Same scale.y = fill convention as brewery.liquid_window; unlike it the
     volume stays inside the wall and keeps its edges (the finish draws them)."""
     pivot = hd.add_anim("liquid", (0, y_pivot, 0))
-    lathe(name, profile_local, seg, mat, parent=pivot, theta0=theta0)
+    lathe(name, profile_local, seg, mat, parent=pivot, theta0=theta0, check=check)
     return pivot
