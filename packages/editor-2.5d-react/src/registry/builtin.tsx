@@ -20,6 +20,7 @@ import {
   tankWallSpan,
   tunedVesselHeight,
   vesselFootprint,
+  vesselPorts,
   MIXER_WINDOW_DEG,
   MIXER_WINDOW_YAW,
   type TankParams,
@@ -292,6 +293,9 @@ export const BUILTIN_ISO_PARTS: readonly IsoPartDefinition[] = [
     radiusOf: (placement) => tankPlacementShape(placement).radius,
     // Same radius for the halo / occupancy box (a plain tank stays 2x2; a whirlpool preset, R 1.1, is 3x3).
     footprintOf: (placement) => vesselFootprint(tankPlacementShape(placement).radius),
+    // Ports on that footprint's edge (vesselPorts, as core's brewery vessels): a radius-2 tank at +-2, not +-1
+    // inside its own blocked box (second review of #228). Radius 1 gives the static VESSEL_SIDE_PORTS.
+    portsOf: (placement) => vesselPorts(tankPlacementShape(placement).radius),
     params: {
       // 0..1 fraction. The host maps REAL percent (0..100) to this range.
       level: LEVEL,

@@ -154,6 +154,12 @@ export interface IsoPartDefinition extends Contribution {
    */
   ports?: Record<string, IsoPartPort>;
   /**
+   * Per-placement ports for parts whose size is a param (the built-in `tank`'s
+   * radius / preset): read through `placementPorts()` everywhere, so the
+   * ports sit on the same silhouette as `footprintOf`. Absent = `ports`.
+   */
+  portsOf?: (placement: IsoPlacement) => Record<string, IsoPartPort>;
+  /**
    * Along-pipe body length (grid cells) when the part sits inline on a pipe,
    * measured along its local x axis. Reroute keeps carried parts this far
    * apart (plus a margin) and clear of bends and retained endpoint parts

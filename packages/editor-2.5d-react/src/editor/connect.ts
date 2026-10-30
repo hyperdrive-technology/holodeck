@@ -12,6 +12,7 @@ import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { resolveConnectorPath, resolveLinkEnd, DEFAULT_CONNECTOR_LENGTH } from '../objects/connector';
 import { MAX_LINK_VIA, type IsoLinkEnd } from '../objects/validate';
 import type { IsoPartDefinition } from '../registry/types';
+import { placementPorts } from '../registry/params';
 import { isRunPlacement } from '../registry/geometry';
 import { rotateOffset, type GridPoint } from '../routing/grid';
 import { footprintContains, isFloorPart, rotatedFootprint } from '../routing/occupancy';
@@ -65,7 +66,7 @@ export function anchorAt(
   const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, target.object);
   let port: string | undefined;
   let bestDist = Infinity;
-  for (const [name, p] of Object.entries(def?.ports ?? {})) {
+  for (const [name, p] of Object.entries(placementPorts(def, target))) {
     const off = rotateOffset(p.x, p.y, target.rotation);
     const d = Math.hypot(target.x + off.x - cell.x, target.y + off.y - cell.y);
     if (d <= PORT_SNAP && d < bestDist) {
