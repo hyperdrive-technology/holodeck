@@ -50,6 +50,11 @@ material outside `hd.*`. Note that GLTFLoader removes `.` from node names
 (`port.in` arrives as `portin`). The original name is kept in `userData.name`;
 `findPorts` and `findAnimNodes` read it.
 
+Vessels ship with a full liquid (the runtime scales `anim.liquid`). To judge a
+part-filled look on the parts page, `parts/mixer.py` honours
+`HD_MIXER_PREVIEW_FILL=0.52 pnpm run parts:build mixer`; rebuild without it
+before committing (the GLB tests check the pivot is unscaled).
+
 ## Adding a part
 
 1. Create `parts/<part>.py`. Copy the header of `parts/valve.py`, which adds the
@@ -58,7 +63,11 @@ material outside `hd.*`. Note that GLTFLoader removes `.` from node names
 2. Build it with `hd.cylinder` / `hd.uv_sphere` / `hd.torus` / `hd.empty`. Every
    position and rotation is in **three.js space** (Y-up, R3F Euler `XYZ`), and the
    segment parametrisation matches three's geometries. You can port R3F code
-   one-to-one, and facets line up with hand-coded parts.
+   one-to-one, and facets line up with hand-coded parts. Vessel-level builders
+   (`lathe`, `sweep`, `cutaway_shell`, `ellipse_head` / `dish`, `nozzle_with_flange`,
+   `impeller`, `liquid_volume`, `ring` / `collar` / `stack_cylinders`) live in
+   `primitives.py`; `brewery.py` adds the brewery vessels' shared conventions
+   (sight-window liquid, legs, pipe stubs).
 3. Run `pnpm run parts:build <part>`. Add `src/models/<part>-glb.test.ts`,
    modelled on `valve-glb.test.ts`.
 
@@ -68,8 +77,10 @@ material outside `hd.*`. Note that GLTFLoader removes `.` from node names
   The origin is the placement anchor (for an inline valve, the centre of the
   pipe axis through the body).
 - Materials are matched **by name only**: `hd.white`, `hd.shaded`, `hd.vessel`,
-  `hd.flask`, `hd.accent`. Only `hd.accent`'s base colour is read (it is the
-  default accent, e.g. handwheel `#c0392b`). `hd.material()` rejects any other name.
+  `hd.flask`, `hd.accent`, `hd.liquid`. Only `hd.accent`'s base colour is read (it is the
+  default accent, e.g. handwheel `#c0392b`). `hd.liquid` is the translucent liquid
+  finish (colour and opacity come from the style; `hd.material(..., alpha=)` only tints
+  the Workbench preview). `hd.material()` rejects any other name.
 - Optional node extras come from object custom properties, set with
   `hd.set_props(obj, ...)`: `hd_edge_threshold` (float, degrees) and
   `hd_edges` (`False` disables outlines).
@@ -90,6 +101,50 @@ material outside `hd.*`. Note that GLTFLoader removes `.` from node names
 - Geometry is low-poly and flat-shaded, with explicit segment counts. Don't use
   subdivision, textures or UVs. Cameras and lights are rejected on export.
   Modifiers are applied on export.
+
+## Line termination rule
+
+Every vertical / meridian line the runtime draws must end on a drawn horizontal
+ring or on a window cut edge; no line may fade out part-way across a curved
+band, and no cylinder may be sunk into another surface so its lines vanish
+without a ring. The runtime draws an edge iff the dihedral angle between its two
+faces is at least `HOLODECK_STYLE.edges.threshold` (15°), so for a revolved band
+tilted `phi` from vertical with `seg` facets the meridians show only when
+`acos(cos²(phi)·cos(2π/seg) + sin²(phi)) >= 15°`, and the ring between two bands
+shows only when the profile turns by at least 15° there.
+
+- `primitives.check_terminations(name, profile, seg)` proves the rule for a
+  profile at build time (with a 2° safety margin, so a near-threshold angle is
+  rejected instead of flipping on float error). `cutaway_shell`, `lathe(...,
+  check=True)`, `sweep(..., check=True)` and `liquid_volume` run it.
+- Sample curved bands (`ellipse_head`, `round_corner`, `dish`) by explicit
+  interior angles rather than equal steps, so each band's facet angle and each
+  ring's crease stay clear of the threshold.
+- Cut a window on existing rings of **both** profiles (`cutaway_shell` rejects a
+  cut that would interpolate mid-band, which adds an un-creased seam ring).
+  Where the outer and inner rings sit at different heights, pass a pair:
+  `window_y=((y_outer, y_inner), (y_outer, y_inner))` makes the sill / top a
+  conical face between them. The sill must be at the bottom of a vertical wall
+  band of each profile (the heel's top ring outside, the floor dish's rim
+  inside): a sill part-way across a floor leaves the floor's rings as open
+  C-shaped arcs whose cut edges wander across the dish (mixer round 5).
+- **No decorative rings on an inner wall** (Des, 2026-10-30). The inner wall
+  is one plain vertical band between the two structural rims, where it meets
+  the floor dish and where it meets the shoulder/head; those rims and the
+  window's cut edges are the only ring lines inside a vessel, and every inner
+  meridian ends on one of them. A vertical with nothing to end on is dropped,
+  not given a ring. (The `interior_rings` ridge helper from mixer rounds 2–5
+  was removed for this; `mixer-glb.test.ts` fails on any drawn ring on the
+  inner wall between the rims.)
+- Seat a collar ON the surface (`profile_y_at_r` at its inscribed radius) and
+  stack drum / lid with `stack_cylinders` (caps touching), never sunk.
+- `nozzle_with_flange(..., base_ring=True)` adds a ring on the wall so the
+  stub's lines end there; end a shaft exactly on the hub it drives.
+- `src/models/mixer-glb.test.ts` audits the exported GLB with the runtime's own
+  `EdgesGeometry` extraction and fails on any meridian end that is not on a
+  drawn non-meridian edge, and on any drawn ring of the shell solids that
+  neither closes nor ends on a cut edge running straight down a wall (an open
+  "C" ring); copy both audits for new vessels.
 
 ## Exporter notes (Blender 5.2.2, verified by introspecting `export_scene.gltf`)
 
