@@ -4,11 +4,13 @@ Agitated mixing vessel, Arcentry-style cutaway -> assets/models/mixer.glb
 Reference: the central mixer in packages/editor-2.5d-react/tests/snapshots/
 reference.jpg: a slim tall bottle with vertical facet panel lines on body and
 dome, latitude rings on the rounded shoulder/dome, a squat cylindrical motor
-housing (collar band + drum + lid rim) on the apex, a needle shaft with a flat
-cross paddle high up and a 3-blade propeller low in the liquid, a wide cutaway
-(about 100 deg) whose arched top runs up into the shoulder, the inner back wall
-with facet lines and horizontal rings, and a translucent light-blue liquid with
-a dished bottom whose radial facet lines show through.
+housing (collar band + drum + lid rim) on the apex, a needle shaft with a
+3-blade propeller low in the liquid, a wide cutaway (about 100 deg) whose
+arched top runs up into the shoulder, the inner back wall with facet lines
+and horizontal rings, and a translucent light-blue liquid with a dished
+bottom whose radial facet lines show through. (The reference also shows a
+flat bar across the top of the window; round 5 dropped it, Des: it read as a
+stray diagonal above the liquid. Only the impeller shows in the liquid.)
 
 Three.js space, Y up, origin = floor centre under the axis. R 0.45, ~2.02 tall.
 Flat base (reference has no legs; `SUPPORT = "pads"` adds the two small side
@@ -28,19 +30,28 @@ stack_cylinders, nozzle_with_flange, impeller, liquid_volume).
 Line termination rule (primitives.check_terminations, run at build time):
 every meridian line ends on a drawn ring. Head, heel and dish bands are
 sampled by explicit tilt angles so facet angles and ring creases stay >= 2 deg
-clear of the 15 deg edge threshold; the window top sits on the head's first
-ring and the sill on the heel's top ring (no extra seam rings); collar, drum
-and lid are stacked with touching caps (never sunk); nozzles carry a base
-ring on the wall; the shaft ends exactly on the hub.
+clear of the 15 deg edge threshold; collar, drum and lid are stacked with
+touching caps (never sunk); nozzles carry a base ring on the wall; the shaft
+ends exactly on the hub. The window is cut ON RINGS OF BOTH PROFILES so no
+seam ring appears and no ring is left as an open arc (round 5, Des: the
+inner floor rim read as a stray C when the sill sliced through the dish):
+  sill  outer = the heel's top ring (0.45, 0.10), inner = the dish rim
+        (0.39, 0.22): the sill is a conical bevel between them, the whole
+        dish (rim ring + radial rim band) lives in shell.lower as a full
+        360 deg surface, and the inner wall's vertical cut edge ends on it;
+  top   outer = the head's first ring (0.369, 1.622), inner = the inner
+        head's first ring (0.320, 1.588): the arch cap is the cone between.
 
 Empties
   port.in        (-0.052, 1.20, -0.598)  theta 185 deg, r 0.60: upper side nozzle (back-right in iso)
   port.out       (-0.598, 0.25, -0.052)  theta 265 deg, r 0.60: low side nozzle (back-left in iso);
                                          the base is flat so a downward nozzle has no room
   anim.agitator  (0, 1.75, 0)      spins about Y. Children: shaft (inside the
-                                   housing down onto the hub), paddle (flat cross
-                                   bar at y 1.30), impeller.hub + impeller.blade.0..2
-                                   (pitched 3-blade propeller at y 0.40, tip-to-tip 0.44)
+                                   housing down onto the hub), impeller.hub +
+                                   impeller.blade.0..2 (pitched 3-blade propeller
+                                   at y 0.40, tip-to-tip 0.44). Nothing but the
+                                   slim shaft rises above the impeller (no
+                                   cross paddle since round 5).
   anim.liquid    (0, 0.06, 0)      liquid origin = dish pole (inner floor bottom)
 Liquid convention (brewery.py): child mesh `liquid` spans local y 0..1.39 when
 full; runtime sets anim.liquid.scale.y = fill 0..1. Material `hd.liquid`: the
@@ -93,8 +104,6 @@ LIQ_H = Y_WALL1 - Y_FLOOR  # 1.39, full = up to the head equator
 # --- agitator ---------------------------------------------------------------------
 SHAFT_R = 0.025
 Y_IMP = 0.40  # impeller hub centre, above the dish rim so the blades clear the floor
-Y_PADDLE = 1.30  # flat cross bar near the top (reference shows one across the window)
-PADDLE_SIZE = (0.72, 0.025, 0.04)  # along X: nearly the inner diameter; thin like the reference bar
 # --- ports ------------------------------------------------------------------------
 NOZZLE_R, PORT_RADIUS = 0.05, 0.60  # stubs run from the wall face (0.443) to the port at 0.60 from the axis
 NOZZLE_LEN = PORT_RADIUS - WALL_FACE
@@ -121,9 +130,14 @@ def build() -> None:
     inner = (pr.ellipse_head(R_IN, Y_WALL1, DOME_H - T, HOLE_R, HEAD_ANGLES)
              + pr.interior_rings(R_IN, RING_YS)
              + pr.dish(R_IN, DISH_RIM_Y, DISH_DEPTH, DISH_ANGLES))
-    # Window top = the head's first ring, sill = the heel's top ring: cuts on existing rings add no seam.
+    # Every cut lands on a ring of ITS profile (no seam rings, no open arcs). Sill: outer on the
+    # heel's top ring, inner on the dish rim, joined by a conical bevel, so the dish stays whole
+    # behind the window. Top: the outer and inner heads' first rings (the arch cap is the cone
+    # between them). cutaway_shell rejects a sill that is not at the bottom of a wall band.
     y_w1 = head[-2][1]
-    pr.cutaway_shell("shell", outer, inner, WINDOW, (HEEL, y_w1), SEG, flask, theta0=THETA0)
+    y_w1_inner = inner[len(head) - 2][1]  # ellipse_head(R_IN, ...) has the same point count as `head`
+    pr.cutaway_shell("shell", outer, inner, WINDOW, ((HEEL, DISH_RIM_Y), (y_w1, y_w1_inner)), SEG, flask,
+                     theta0=THETA0)
 
     # Motor housing: collar seated on the head at its inscribed radius (the 12-gon's
     # flats touch the head; its vertices sit a hair above), then drum and lid rim,
@@ -148,7 +162,6 @@ def build() -> None:
     hub_top = pr.impeller("impeller", ag, Y_IMP - y_ag, white, blade_len=0.18, blade_h=0.10, blade_t=0.015) + y_ag
     hd.cylinder("shaft", SHAFT_R, SHAFT_R, housing_mid - hub_top, 8, white,
                 position_t=(0, (housing_mid + hub_top) / 2 - y_ag, 0), parent=ag)
-    b.box("paddle", PADDLE_SIZE, white, position_t=(0, Y_PADDLE - y_ag, 0), parent=ag)
 
     if SUPPORT == "pads":
         # Screen-left / screen-right of the base in iso (theta 315 / 135 deg).

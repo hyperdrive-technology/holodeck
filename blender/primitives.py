@@ -13,7 +13,9 @@ Profiles are [(r, y), ...] ordered TOP -> BOTTOM like brewery.lathe.
                           wedges with planar cut faces; self-checks the solid
   split_profile(...)      cut a profile at a height (interpolates a point)
   profile_y_at_r(...)     height of a profile at a radius (seating parts on it)
-  cutaway_shell(...)      thick-walled vessel with a window: three closed solids
+  cutaway_shell(...)      thick-walled vessel with a window: three closed solids;
+                          cuts land on rings of BOTH profiles (conical caps
+                          join rings at different heights), sill on a wall
   interior_rings(...)     ridge profile points that outline as ring lines
   ellipse_head(...)       elliptical head profile with a hole at the apex
   round_corner(...)       quarter-round corner profile (heels)
@@ -336,43 +338,102 @@ def interior_rings(r_in, ys, depth=0.006, half_h=0.03):
     return pts
 
 
+def _cut_heights(v):
+    """`window_y` entry -> (outer_y, inner_y): one height for both profiles, or a pair."""
+    if isinstance(v, (int, float)):
+        return float(v), float(v)
+    yo, yi = v
+    return float(yo), float(yi)
+
+
+def _ring_index(profile, y, what):
+    """Index of the profile point at height `y`; raises when the cut would
+    interpolate mid-band (which adds a seam ring the runtime outlines without
+    a crease behind it, see split_profile)."""
+    for i, (_, py) in enumerate(profile):
+        if abs(py - y) < 1e-9:
+            return i
+    rings = ", ".join(f"{py:.4f}" for _, py in profile)
+    raise ValueError(f"{what}: cut at y={y:.4f} is not on a profile ring (rings at {rings}); "
+                     "cut on an existing ring of each profile (window_y entries may be (outer_y, inner_y) pairs)")
+
+
+def _check_sill_on_wall(profile, y, what):
+    """The sill must sit on a wall: the profile band ending at the sill ring
+    (the one just above it) is vertical. A sill part-way across a floor dish
+    or heel would leave the floor's rings as open arcs ('C' rings) whose cut
+    edges wander across the curved band to the sill."""
+    i = _ring_index(profile, y, what)
+    if i == 0:
+        raise ValueError(f"{what}: sill at y={y:.4f} is the profile's top point")
+    (r_above, _), (r_sill, _) = profile[i - 1], profile[i]
+    if abs(r_above - r_sill) > 1e-9:
+        raise ValueError(f"{what}: sill at y={y:.4f} r={r_sill:.4f} is not at the bottom of a vertical wall band "
+                         f"(the band above it runs from r={r_above:.4f}); the window would slice through a "
+                         "curved band and leave its rings as open C-shaped arcs. Cut on the wall's bottom ring "
+                         "and let the floor stay whole in the lower solid")
+
+
 def cutaway_shell(prefix, outer, inner, window, window_y, seg, mat, theta0=0.0, check=True):
     """Thick-walled vessel of revolution with a cutaway window, as three CLOSED solids.
 
     `outer` / `inner` are the full outer and inner surface profiles TOP ->
     BOTTOM (start at the apex hole or pole, end on the bottom pole/hole).
     `window=(a0, a1)` is the removed arc (radians, hd.cylinder theta) and
-    `window_y=(y0, y1)` its sill and top. Result, named f"{prefix}.upper"
-    (360 deg above y1), f"{prefix}.band" (the keep-arc between y0 and y1,
-    with planar cut faces that follow the wall profile, e.g. up into a
-    shoulder) and f"{prefix}.lower" (360 deg below y0). The window edges
-    must land on facet boundaries: (a0 - theta0) and (a1 - a0) must be
-    multiples of 2*pi/seg. Materials are single-sided, so this is how a
-    cutaway stays a valid solid: cut faces, sill and the inner back wall are
-    all real front-facing geometry. `check` runs check_terminations on both
-    profiles (the cut rings are drawn either way).
+    `window_y=(sill, top)` its sill and top heights. Each of the two may be a
+    single height or an `(outer_y, inner_y)` pair; every cut must land ON AN
+    EXISTING RING of its profile (no mid-band interpolation, which would add
+    a seam ring). Where the outer and inner rings sit at different heights
+    (the outer heel ring vs the inner floor's dish rim; the two head
+    profiles' first rings) the cap between them is a conical face, so the
+    window's sill is a bevel from the outer ring up to the inner one and the
+    floor dish stays a full 360 deg surface in the lower solid. The sill
+    rings must be at the BOTTOM OF A VERTICAL WALL BAND of each profile: a
+    sill part-way across a floor dish leaves the dish's rings as open
+    C-shaped arcs with cut edges wandering across the dish (mixer round 5).
+    Result, named f"{prefix}.upper" (360 deg above the top), f"{prefix}.band"
+    (the keep-arc between sill and top, with planar cut faces that follow
+    the wall profile, e.g. up into a shoulder) and f"{prefix}.lower" (360
+    deg below the sill). The window edges must land on facet boundaries:
+    (a0 - theta0) and (a1 - a0) must be multiples of 2*pi/seg. Materials
+    are single-sided, so this is how a cutaway stays a valid solid: cut
+    faces, sill and the inner back wall are all real front-facing geometry.
+    `check` runs check_terminations on both full profiles and on each
+    solid's closed cross-section (which includes the conical caps).
     """
     a0, a1 = window
-    y0, y1 = window_y
+    (y0o, y0i), (y1o, y1i) = (_cut_heights(v) for v in window_y)
     step = math.tau / seg
     k0 = (a0 - theta0) / step
     n_win = (a1 - a0) / step
     if abs(k0 - round(k0)) > 1e-6 or abs(n_win - round(n_win)) > 1e-6:
         raise ValueError(f"window {math.degrees(a0):.1f}..{math.degrees(a1):.1f} deg must align with the "
                          f"{seg}-gon facets at theta0 {math.degrees(theta0):.1f} deg")
+    for prof, y, what in ((outer, y1o, f"{prefix} outer top"), (inner, y1i, f"{prefix} inner top")):
+        _ring_index(prof, y, what)
+    _check_sill_on_wall(outer, y0o, f"{prefix} outer sill")
+    _check_sill_on_wall(inner, y0i, f"{prefix} inner sill")
     if check:
         check_terminations(f"{prefix} outer", outer, seg)
         check_terminations(f"{prefix} inner", inner, seg)
     keep = (a1, a0 + math.tau)
     keep_steps = seg - int(round(n_win))
-    o_up, o_rest = split_profile(outer, y1)
-    o_mid, o_low = split_profile(o_rest, y0)
-    i_up, i_rest = split_profile(inner, y1)
-    i_mid, i_low = split_profile(i_rest, y0)
+    o_up, o_rest = split_profile(outer, y1o)
+    o_mid, o_low = split_profile(o_rest, y0o)
+    i_up, i_rest = split_profile(inner, y1i)
+    i_mid, i_low = split_profile(i_rest, y0i)
+    loops = {
+        "upper": o_up + list(reversed(i_up)),
+        "band": o_mid + list(reversed(i_mid)),
+        "lower": o_low + list(reversed(i_low)),
+    }
+    if check:
+        for part, loop in loops.items():
+            check_terminations(f"{prefix}.{part}", list(loop) + [loop[0]], seg, closed=True)
     return {
-        "upper": sweep(f"{prefix}.upper", o_up + list(reversed(i_up)), seg, mat, theta0=theta0),
-        "band": sweep(f"{prefix}.band", o_mid + list(reversed(i_mid)), seg, mat, arc=keep, arc_steps=keep_steps),
-        "lower": sweep(f"{prefix}.lower", o_low + list(reversed(i_low)), seg, mat, theta0=theta0),
+        "upper": sweep(f"{prefix}.upper", loops["upper"], seg, mat, theta0=theta0),
+        "band": sweep(f"{prefix}.band", loops["band"], seg, mat, arc=keep, arc_steps=keep_steps),
+        "lower": sweep(f"{prefix}.lower", loops["lower"], seg, mat, theta0=theta0),
     }
 
 

@@ -120,15 +120,23 @@ shows only when the profile turns by at least 15° there.
 - Sample curved bands (`ellipse_head`, `round_corner`, `dish`) by explicit
   interior angles rather than equal steps, so each band's facet angle and each
   ring's crease stay clear of the threshold.
-- Cut a window on existing rings (`split_profile` at a profile point) so the cut
-  adds no un-creased seam ring.
+- Cut a window on existing rings of **both** profiles (`cutaway_shell` rejects a
+  cut that would interpolate mid-band, which adds an un-creased seam ring).
+  Where the outer and inner rings sit at different heights, pass a pair:
+  `window_y=((y_outer, y_inner), (y_outer, y_inner))` makes the sill / top a
+  conical face between them. The sill must be at the bottom of a vertical wall
+  band of each profile (the heel's top ring outside, the floor dish's rim
+  inside): a sill part-way across a floor leaves the floor's rings as open
+  C-shaped arcs whose cut edges wander across the dish (mixer round 5).
 - Seat a collar ON the surface (`profile_y_at_r` at its inscribed radius) and
   stack drum / lid with `stack_cylinders` (caps touching), never sunk.
 - `nozzle_with_flange(..., base_ring=True)` adds a ring on the wall so the
   stub's lines end there; end a shaft exactly on the hub it drives.
 - `src/models/mixer-glb.test.ts` audits the exported GLB with the runtime's own
   `EdgesGeometry` extraction and fails on any meridian end that is not on a
-  drawn non-meridian edge; copy that audit for new vessels.
+  drawn non-meridian edge, and on any drawn ring of the shell solids that
+  neither closes nor ends on a cut edge running straight down a wall (an open
+  "C" ring); copy both audits for new vessels.
 
 ## Exporter notes (Blender 5.2.2, verified by introspecting `export_scene.gltf`)
 
