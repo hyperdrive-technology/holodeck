@@ -75,7 +75,8 @@ jobs:
             exit 0
           fi
           git fetch --no-tags --depth=1 origin "$BASE_SHA"
-          changed=$(git diff --name-only "$BASE_SHA" HEAD)
+          # --no-renames: a file moved out of a Blender path must still list its old path.
+          changed=$(git diff --no-renames --name-only "$BASE_SHA" HEAD)
           echo "$changed"
           if echo "$changed" | grep -Eq '^(blender/|packages/library-cloud/|packages/editor-2\.5d-react/assets/models/|packages/editor-2\.5d-react/scripts/build-parts\.mjs$|packages/editor-2\.5d-react/src/models/|\.github/workflows/blender-drift\.yml$)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
@@ -87,7 +88,9 @@ jobs:
   rebuild:
     name: GLBs rebuild from Blender scripts
     needs: changes
-    if: needs.changes.outputs.relevant == 'true'
+    # Fail closed: skip only when `changes` succeeded and said `false`. If `changes` itself failed
+    # its output is empty, so the rebuild runs anyway instead of a skip passing the required check.
+    if: ${{ !cancelled() && needs.changes.outputs.relevant != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
