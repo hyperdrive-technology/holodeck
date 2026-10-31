@@ -4,7 +4,7 @@
  * (`validateTransform`), so the editor accepts exactly what documents accept.
  */
 
-import { validateTransform, type ProviderConnection, type SignalBinding, type SignalValue, type ValueTransform } from '@holodeck/sdk';
+import { validateTransform, type ProviderConnection, type SignalBinding, type SignalNode, type SignalValue, type ValueTransform } from '@holodeck/sdk';
 import type { IsoPlacement, IsoSceneFile } from '@holodeck/editor-2.5d-react';
 import { credentialInText } from './credentials';
 
@@ -39,6 +39,30 @@ export const EMPTY_TRANSFORM_FORM: TransformForm = {
   template: '{value}',
   digits: '',
 };
+
+/** A numeric parameter's declared range (inspector spec `min` / `max`). */
+export interface ParamRange {
+  min: number;
+  max: number;
+}
+
+/**
+ * The transform to suggest when a numeric signal is picked from a provider's
+ * browse list for a parameter with a declared range, or null to leave the
+ * form alone. Browse leaves of the built-in providers are percentages
+ * (`holodeck.sim`: "Sine, 10 s, 0–100"), while e.g. a vessel's `level` is a
+ * 0..1 fraction: bound raw, the tank would sit full almost all the time. So
+ * the suggestion scales 0–100 onto the parameter's range (clamped). It only
+ * fills an untouched form (kind `none`), never replaces a transform the
+ * user chose, and the dialog says what it did so it can be changed.
+ */
+export function suggestedTransformForm(node: Pick<SignalNode, 'type'>, range: ParamRange | undefined, current: TransformForm): TransformForm | null {
+  if (current.kind !== 'none' || node.type !== 'number' || !range) return null;
+  const { min, max } = range;
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) return null;
+  if (min === 0 && max === 100) return null;
+  return { ...EMPTY_TRANSFORM_FORM, kind: 'scale', inMin: '0', inMax: '100', outMin: String(min), outMax: String(max), clamp: true };
+}
 
 /** "42" -> 42, "true" -> true, "null" -> null, '"x"' -> "x", anything else -> the text itself. */
 export function parseSignalValue(text: string): SignalValue {

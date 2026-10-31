@@ -43,7 +43,33 @@ export default defineConfig({
     // excluded (holodeck#28, packages/editor-2.5d-react/tsup.config.ts). Its
     // bare imports are then not scanned, hence the explicit include list.
     exclude: [EDITOR],
-    include: ['@react-three/fiber', '@react-three/drei', 'three'],
+    // `editor > dep`: R3F and drei are the editor's dependencies, not the
+    // studio's, so with pnpm they only resolve from the editor package. A bare
+    // '@react-three/fiber' failed to resolve, which aborted pre-bundling and
+    // `vite dev` then served CJS shims raw ("use-sync-external-store ... does
+    // not provide an export named 'default'"): found while adding
+    // `pnpm playground` (the e2e suite runs the production build, so it never
+    // saw this).
+    //
+    // Every three entry the editor imports is listed so ONE optimizer run
+    // bundles them over a shared three.core chunk. Discovered later at runtime
+    // (`three/webgpu`, `three/tsl`, addons), Vite optimised them in a second
+    // run with their own copy of the core: "Multiple instances of Three.js",
+    // lights "not found", and floor raycasts that never hit, so click / drag
+    // placement silently did nothing in `vite dev` (found in a real browser;
+    // the production build was fine). Keep in step with the editor's imports:
+    //   grep -ohE "from ['\"]three[^'\"]*" packages/editor-2.5d-react/dist/*.mjs | sort -u
+    include: [
+      `${EDITOR} > @react-three/fiber`,
+      `${EDITOR} > @react-three/drei`,
+      'three',
+      'three/webgpu',
+      'three/tsl',
+      'three/addons/utils/BufferGeometryUtils.js',
+      'three/addons/loaders/GLTFLoader.js',
+      'three/addons/lines/webgpu/LineSegments2.js',
+      'three/addons/lines/LineSegmentsGeometry.js',
+    ],
   },
   build: {
     // three.js + R3F + the editor are ~2 MB minified; one chunk is fine for a

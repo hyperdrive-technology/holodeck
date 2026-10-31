@@ -8,6 +8,7 @@ import { formatForDisplay } from '@tanstack/react-hotkeys';
 import { groupLibrary, libraryItems } from '../host/library';
 import { useStudio } from '../studio-context';
 import { activeDocumentStore } from './active-document';
+import { useLibraryDrag } from './library-drag';
 
 export const LIBRARY_SEARCH_ID = 'library-search';
 
@@ -27,6 +28,8 @@ export function LibraryPanel() {
   // `version` invalidates the memo when packages change.
   const items = useMemo(() => libraryItems(host), [host, version]);
   const groups = useMemo(() => groupLibrary(items, query), [items, query]);
+  // Drag an item onto the canvas (pointer events; see library-drag.ts).
+  const drag = useLibraryDrag(active ? { onStart: active.startDragItem, onDrop: active.dropItem } : null);
   return (
     <section aria-labelledby="library-heading" className="flex min-h-0 flex-1 flex-col">
       <header className="px-3 pb-2 pt-3">
@@ -67,15 +70,19 @@ export function LibraryPanel() {
                 <ul>
                   {list.map((item) => (
                     <li key={`${item.kind}:${item.id}`} className="group/item relative">
-                      {/* Click arms the canvas place tool (then click the floor); "+" adds it next to the scene. */}
+                      {/* Click arms the canvas place tool (then click the floor), drag drops it on the canvas; "+" adds it next to the scene. */}
                       <button
                         type="button"
                         disabled={!active}
                         aria-pressed={active?.placing === item.id}
-                        onClick={() => active?.armItem(item.kind, item.id)}
+                        onPointerDown={(e) => drag.onPointerDown(e, item.kind, item.id)}
+                        onClick={() => {
+                          if (drag.wasDrag()) return;
+                          active?.armItem(item.kind, item.id);
+                        }}
                         data-library-item={item.id}
-                        title={item.hint ? `${item.hint} (click, then click the canvas)` : `Place ${item.label}: click, then click the canvas`}
-                        className="flex w-full flex-col items-start rounded-md px-2 py-1.5 pr-9 text-left text-sm hover:bg-sidebar-accent aria-pressed:bg-sidebar-accent aria-pressed:ring-1 aria-pressed:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                        title={item.hint ? `${item.hint} (drag onto the canvas, or click then click the canvas)` : `Place ${item.label}: drag onto the canvas, or click then click the canvas`}
+                        className="flex w-full cursor-grab select-none flex-col items-start rounded-md px-2 py-1.5 pr-9 text-left text-sm hover:bg-sidebar-accent active:cursor-grabbing aria-pressed:bg-sidebar-accent aria-pressed:ring-1 aria-pressed:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <span>{item.label}</span>
                         {item.hint ? <span className="line-clamp-1 text-xs text-muted-foreground">{item.hint}</span> : null}
