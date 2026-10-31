@@ -78,43 +78,100 @@ export function PlaygroundRoute({ tab, onTabChange }: PlaygroundRouteProps) {
   const [generation, setGeneration] = useState(0);
   if (!opened && loaded.data && loaded.isFetchedAfterMount && camera.isFetchedAfterMount) setOpened(loaded.data);
 
-  // Deleted elsewhere (e.g. from the studio's document list, holodeck#242).
-  // The workspace decides: with nothing unsaved it asks for a fresh starter
-  // right away (there is no "no document" state on this page); with unsaved
-  // or failed edits it enters the "deleted elsewhere" conflict first, so the
-  // user can save their version as a copy or discard it, exactly as on
-  // /d/$docId. Recreating without asking lost those edits silently.
-  const [deleted, setDeleted] = useState(false);
+  // Deleted elsewhere (e.g. from the studio's document list, holodeck#242 /
+  // #247). Every deletion notice bumps a sequence number; a workspace knows
+  // the number it was opened at (`bornSeq`), so a deletion that lands while
+  // the starter is being rebuilt still reaches the NEXT workspace instead of
+  // being reset away. The workspace decides what a deletion means for its
+  // edits (see the effect in PlaygroundWorkspace).
+  const deletions = useRef(0);
+  const [deletedSeq, setDeletedSeq] = useState(0);
+  const [bornSeq, setBornSeq] = useState(0);
   useEffect(
     () =>
       channel.subscribe((change) => {
-        if (change.type === 'deleted' && change.id === PLAYGROUND_DOCUMENT_ID) setDeleted(true);
+        if (change.type !== 'deleted' || change.id !== PLAYGROUND_DOCUMENT_ID) return;
+        deletions.current += 1;
+        setDeletedSeq(deletions.current);
       }),
     [channel],
   );
 
-  /** Start again from the starter (the stored playground is gone): a fresh workspace on a fresh document. */
+  /**
+   * Start again from the starter (the stored playground is gone): a fresh
+   * workspace on a fresh document. Resolves true when the workspace was
+   * replaced. `mayReplace` is asked AFTER the (asynchronous) rebuild, right
+   * before the swap, in the same task as the swap: if it says no (the user
+   * changed something while IndexedDB worked, holodeck#247), nothing is
+   * swapped and the caller keeps its workspace (and its conflict dialog).
+   * A user choice (discard, save a copy) passes no guard.
+   */
   const recreate = useCallback(
-    (reason: RecreateReason) => {
+    async (reason: RecreateReason, mayReplace?: () => boolean): Promise<boolean> => {
+      // Deletions up to now belong to the document being replaced; later ones
+      // may be of the rebuilt one, so the new workspace must still see them.
+      const startSeq = deletions.current;
       // The deleted document's secrets never carry over to the new one (holodeck#166).
       secrets.clear(PLAYGROUND_DOCUMENT_ID);
-      void ensurePlaygroundDocument(store, host).then(
-        (fresh) => {
-          setOpened(fresh);
-          setDeleted(false);
-          setGeneration((n) => n + 1);
-          notify({ tone: 'info', ...RECREATE_NOTICE[reason] });
-        },
-        (error: unknown) => notify({ tone: 'error', title: 'Could not recreate the playground', details: [String(error)] }),
-      );
+      let fresh: VersionedDocument;
+      try {
+        fresh = await ensurePlaygroundDocument(store, host);
+      } catch (error) {
+        notify({ tone: 'error', title: 'Could not recreate the playground', details: [error instanceof Error ? error.message : String(error)] });
+        return false;
+      }
+      if (mayReplace && !mayReplace()) return false;
+      setOpened(fresh);
+      setBornSeq(startSeq);
+      setGeneration((n) => n + 1);
+      notify({ tone: 'info', ...RECREATE_NOTICE[reason] });
+      return true;
     },
     [host, secrets, store],
   );
 
+  const foreign = opened !== null && opened.document.engine !== ISO_ENGINE_ID;
+  // A stored playground from another engine has no workspace (and so no
+  // edits): a deletion simply rebuilds the starter (holodeck#245).
+  const rebuildingForeign = useRef(-1);
+  useEffect(() => {
+    if (!foreign || deletedSeq <= bornSeq || rebuildingForeign.current === deletedSeq) return;
+    rebuildingForeign.current = deletedSeq;
+    void recreate('deleted');
+  }, [foreign, deletedSeq, bornSeq, recreate]);
+
+  /** Reset from the "other engine" state: the starter replaces the stored document (holodeck#245). */
+  const resetStored = useCallback(async () => {
+    if (!opened) return;
+    let next: VersionedDocument | undefined;
+    try {
+      next = await store.save(playgroundStarter(host), opened.revision);
+    } catch {
+      // Changed or deleted meanwhile: show whatever is stored now (or a fresh starter).
+      next = await ensurePlaygroundDocument(store, host).catch(() => undefined);
+    }
+    if (!next) {
+      notify({ tone: 'error', title: 'Could not reset the playground' });
+      return;
+    }
+    secrets.clear(PLAYGROUND_DOCUMENT_ID);
+    setOpened(next);
+    setBornSeq(deletions.current);
+    setGeneration((n) => n + 1);
+  }, [host, opened, secrets, store]);
+
   let content: React.ReactNode;
   if (loaded.error && !opened) content = <CenteredMessage tone="error">Could not open the playground: {loaded.error.message}</CenteredMessage>;
   else if (!opened) content = <CenteredMessage>Loading the playground…</CenteredMessage>;
-  else if (opened.document.engine !== ISO_ENGINE_ID) content = <CenteredMessage tone="error">The stored playground uses engine “{opened.document.engine}”: press Reset.</CenteredMessage>;
+  else if (foreign)
+    content = (
+      <div role="alert" className="flex h-full flex-1 flex-col items-center justify-center gap-3 p-8 text-sm text-muted-foreground" data-testid="playground-foreign">
+        <p>The stored playground uses engine “{opened.document.engine}”, which this page cannot edit.</p>
+        <Button variant="outline" size="sm" onClick={() => void resetStored()}>
+          <RotateCcwIcon /> Reset to the starter
+        </Button>
+      </div>
+    );
   else
     content = (
       <PlaygroundWorkspace
@@ -123,7 +180,7 @@ export function PlaygroundRoute({ tab, onTabChange }: PlaygroundRouteProps) {
         initialCamera={camera.isError ? undefined : (camera.data ?? undefined)}
         tab={tab}
         onTabChange={onTabChange}
-        deletedElsewhere={deleted}
+        deletedElsewhere={deletedSeq > bornSeq}
         onRecreate={recreate}
       />
     );
@@ -154,8 +211,8 @@ function PlaygroundWorkspace({
   initialCamera: StudioCamera | undefined;
   /** The stored playground was deleted in another tab. */
   deletedElsewhere: boolean;
-  /** Replace this workspace with a fresh starter document. */
-  onRecreate: (reason: RecreateReason) => void;
+  /** Replace this workspace with a fresh starter document (see `recreate` in the route). */
+  onRecreate: (reason: RecreateReason, mayReplace?: () => boolean) => Promise<boolean>;
 } & PlaygroundRouteProps) {
   const { host, secrets } = useStudio();
   const canvasHostRef = useRef<HTMLElement>(null);
@@ -172,17 +229,34 @@ function PlaygroundWorkspace({
   const connections = doc.connections ?? [];
   const problems = connectionProblems(connections, live.statuses);
 
-  // Deleted in another tab (holodeck#242): nothing unsaved -> start again
-  // from the starter now; unsaved, pending or failed edits -> the writer
-  // enters the "deleted elsewhere" conflict and the dialog below lets the
-  // user save a copy or discard (as DocumentWorkspace does). Once only.
+  // Deleted in another tab (holodeck#242, #247). First the writer is frozen
+  // (`markDeleted`: nothing this workspace does can write again, so a late
+  // save can never land on the rebuilt document under a reused revision).
+  //  - Unsaved, pending or failed edits: the conflict dialog below lets the
+  //    user save a copy or discard (as DocumentWorkspace does).
+  //  - Nothing unsaved: rebuild the starter. The rebuild is asynchronous
+  //    (IndexedDB), so a blocking "starting again" dialog covers the page and
+  //    the canvas keyboard is off; and, sturdier, the route re-checks right
+  //    before the swap that the working copy is still the very object it was
+  //    at deletion with nothing unsaved. Any change in between (an edit,
+  //    undo, binding, connection, rename) fails that check: the workspace
+  //    stays, and the conflict dialog decides. Before #247 the swap was
+  //    unconditional and such an edit was dropped silently.
   const handledDeletion = useRef(false);
+  const [rebuilding, setRebuilding] = useState(false);
   useEffect(() => {
     if (!deletedElsewhere || handledDeletion.current) return;
     handledDeletion.current = true;
-    if (session.leaving.current || session.writer.isClean()) onRecreate('deleted');
-    else session.writer.markDeleted();
-  }, [deletedElsewhere, onRecreate, session.leaving, session.writer]);
+    const { writer, docRef, leaving } = session;
+    const clean = leaving.current || writer.isClean();
+    writer.markDeleted();
+    if (!clean) return;
+    const atDeletion = docRef.current;
+    setRebuilding(true);
+    void onRecreate('deleted', () => docRef.current === atDeletion && !writer.getState().dirty && !writer.busy).then((replaced) => {
+      if (!replaced) setRebuilding(false);
+    });
+  }, [deletedElsewhere, onRecreate, session]);
 
   // The studio shortcuts that make sense here (the canvas binds its own:
   // Mod+Z, Delete, arrows...). Mod+K is advertised in the library search box.
@@ -283,7 +357,15 @@ function PlaygroundWorkspace({
         >
           <CanvasErrorBoundary resetKey={doc.id}>
             {/* Same element in both tabs (only `mode` changes): edits, selection and undo history survive a tab switch. */}
-            <ProcessEditor key={session.editorKey} {...session.editorProps} mode={viewing ? 'run' : 'edit'} chrome="canvas" metrics={metrics} />
+            <ProcessEditor
+              key={session.editorKey}
+              {...session.editorProps}
+              mode={viewing ? 'run' : 'edit'}
+              chrome="canvas"
+              metrics={metrics}
+              // No canvas shortcuts (Mod+Z, Delete...) behind a modal: they would change the working copy under it.
+              keyboard={!rebuilding && !conflict && !resetOpen}
+            />
           </CanvasErrorBoundary>
           {viewing && problems.length ? (
             <div role="alert" data-testid="viewer-problems" className="absolute inset-x-3 top-3 z-10 rounded-md border border-destructive/40 bg-background/95 px-3 py-2 text-xs shadow-sm">
@@ -352,7 +434,20 @@ function PlaygroundWorkspace({
           </div>
         </DialogContent>
       </Dialog>
-      {conflict ? (
+      <Dialog open={rebuilding}>
+        <DialogContent
+          data-testid="playground-rebuilding"
+          onEscapeKeyDown={(e) => e.preventDefault()}
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>The playground was deleted in another tab</DialogTitle>
+            <DialogDescription>Starting again from the starter scene…</DialogDescription>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
+      {conflict && !rebuilding ? (
         <ConflictDialog
           name={doc.name}
           latest={conflict.latest}
@@ -371,14 +466,14 @@ function PlaygroundWorkspace({
             }
             // Deleted elsewhere: the copy keeps the edits; the playground starts again.
             session.leaving.current = true;
-            onRecreate('copied');
+            void onRecreate('copied');
           }}
           onDiscard={() => {
             // Only offered when the document was deleted elsewhere. The writer is
             // in conflict and writes nothing more, so the route recreates the
             // starter as a new document instead (a `replace` here saved nothing).
             session.leaving.current = true;
-            onRecreate('discarded');
+            void onRecreate('discarded');
           }}
         />
       ) : null}

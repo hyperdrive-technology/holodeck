@@ -61,6 +61,8 @@ vi.mock('@holodeck/editor-2.5d-react', async (importOriginal) => {
 
 let host: HolodeckHost;
 let store: DocumentStore;
+/** This tab's secrets, on jsdom's sessionStorage (cleared per test). */
+let secrets: SessionSecretStore;
 let listeners: Array<(c: DocumentChange) => void>;
 const channel = {
   post: () => undefined,
@@ -81,6 +83,8 @@ beforeEach(() => {
   store = new DocumentStore(openStudioDb('playground-test'), { validate: (doc) => hostDocumentProblems(host, doc) });
   listeners = [];
   Object.assign(editor, { mounts: 0, props: null, actions: [], state: { selectedId: null, mode: 'select', placing: null, cursor: null } });
+  window.sessionStorage.clear();
+  secrets = new SessionSecretStore(window.sessionStorage);
 });
 
 afterEach(() => {
@@ -95,7 +99,7 @@ async function openPlayground(path = '/playground') {
   const router = createStudioRouter(createMemoryHistory({ initialEntries: [path] }));
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
   const view = render(
-    <StudioProvider services={{ host, store, channel, secrets: new SessionSecretStore(null) }}>
+    <StudioProvider services={{ host, store, channel, secrets }}>
       <QueryClientProvider client={client}>
         <RouterProvider router={router} />
       </QueryClientProvider>
@@ -111,6 +115,22 @@ const withTank = (scene: IsoSceneFile, id = 'tank-1'): IsoSceneFile => ({ ...sce
 async function deleteElsewhere() {
   await store.remove(PLAYGROUND_DOCUMENT_ID);
   act(() => listeners.forEach((l) => l({ type: 'deleted', id: PLAYGROUND_DOCUMENT_ID })));
+}
+/** Hold back the next `store.create` (the starter rebuild) until `release()`; `created` resolves once it is stored. */
+function holdNextCreate(opts: { afterStored?: () => Promise<void> } = {}) {
+  const realCreate = store.create.bind(store);
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  let createdResolve!: () => void;
+  const created = new Promise<void>((r) => (createdResolve = r));
+  vi.spyOn(store, 'create').mockImplementationOnce(async (doc) => {
+    await gate;
+    const v = await realCreate(doc);
+    createdResolve();
+    await opts.afterStored?.();
+    return v;
+  });
+  return { release, created };
 }
 const readValue = (label: string) => Number(screen.getByLabelText(label).textContent);
 
@@ -398,5 +418,185 @@ describe('/playground', () => {
     expect(copy.connections).toEqual(createPlaygroundDocument().connections);
     expect((await stored())?.body.objects).toEqual(createPlaygroundDocument().body.objects);
     expect(screen.getByText('Your version was saved as a copy')).toBeInTheDocument();
+  });
+
+  // holodeck#247: the rebuild after a clean deletion is asynchronous; nothing done meanwhile may be dropped.
+  describe('the starter rebuild after a deletion', () => {
+    it('an edit while the starter is rebuilt keeps the workspace, its edit, and asks (no silent swap)', async () => {
+      await openPlayground();
+      await waitFor(() => expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved'));
+      const hold = holdNextCreate();
+      await deleteElsewhere();
+      // Blocking "starting again" dialog; canvas shortcuts (Mod+Z...) off.
+      expect(await screen.findByTestId('playground-rebuilding')).toBeInTheDocument();
+      expect(editor.props?.keyboard).toBe(false);
+      // An edit lands anyway (the stub bypasses the modal, as a stray event could).
+      act(() => editor.props!.onChange(withTank(editor.props!.scene)));
+      hold.release();
+      await hold.created;
+      const dialog = await screen.findByTestId('conflict-dialog');
+      expect(dialog).toHaveTextContent('deleted in another tab');
+      expect(screen.queryByTestId('playground-rebuilding')).toBeNull();
+      expect(editor.mounts).toBe(1);
+      expect(editor.props?.scene.objects.some((o) => o.id === 'tank-1')).toBe(true);
+      // The frozen writer never wrote the edit over the rebuilt starter.
+      const rebuilt = await store.get(PLAYGROUND_DOCUMENT_ID);
+      expect(rebuilt?.revision).toBe(1);
+      expect((rebuilt?.document as IsoDoc).body.objects).toEqual(createPlaygroundDocument().body.objects);
+      // The user decides: save mine as a copy keeps it.
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save mine as a copy' }));
+      await waitFor(() => expect(editor.mounts).toBe(2));
+      const copy = (await store.list()).find((d) => d.id !== PLAYGROUND_DOCUMENT_ID)!;
+      expect(((await store.get(copy.id))!.document as IsoDoc).body.objects.some((o) => o.id === 'tank-1')).toBe(true);
+    });
+
+    it('a rename while the starter is rebuilt also keeps the workspace and asks', async () => {
+      await openPlayground();
+      await waitFor(() => expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved'));
+      const hold = holdNextCreate();
+      await deleteElsewhere();
+      await screen.findByTestId('playground-rebuilding');
+      // The inspector is behind the modal (aria-hidden): reach it as a stray event would.
+      const name = screen.getByRole('textbox', { name: 'Document name', hidden: true });
+      fireEvent.change(name, { target: { value: 'Mine' } });
+      fireEvent.blur(name);
+      hold.release();
+      await hold.created;
+      expect(await screen.findByTestId('conflict-dialog')).toHaveTextContent('deleted in another tab');
+      expect(editor.mounts).toBe(1);
+    });
+
+    it('with nothing done meanwhile: the blocking dialog shows, then the starter replaces the workspace', async () => {
+      await openPlayground();
+      act(() => editor.props!.onChange(withTank(editor.props!.scene)));
+      await waitFor(async () => expect((await stored())?.body.objects).toHaveLength(starterCount + 1));
+      await waitFor(() => expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved'));
+      const hold = holdNextCreate();
+      await deleteElsewhere();
+      expect(await screen.findByTestId('playground-rebuilding')).toBeInTheDocument();
+      expect(screen.queryByTestId('conflict-dialog')).toBeNull();
+      hold.release();
+      await waitFor(() => expect(editor.mounts).toBe(2));
+      expect(screen.queryByTestId('playground-rebuilding')).toBeNull();
+      expect(screen.queryByTestId('conflict-dialog')).toBeNull();
+      expect(editor.props?.scene.objects).toHaveLength(starterCount);
+      expect(editor.props?.keyboard).toBe(true);
+    });
+
+    it('a second deletion (of the rebuilt document) during the rebuild still reaches the new workspace', async () => {
+      await openPlayground();
+      await waitFor(() => expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved'));
+      const hold = holdNextCreate({
+        // The rebuilt starter is stored, then deleted in the other tab before this tab swaps it in.
+        afterStored: () => deleteElsewhere(),
+      });
+      await deleteElsewhere();
+      hold.release();
+      // Swapped in, saw the second deletion, rebuilt again: the playground exists and saves.
+      await waitFor(() => expect(editor.mounts).toBe(3));
+      await waitFor(async () => expect(await stored()).toBeDefined());
+      expect(screen.queryByTestId('conflict-dialog')).toBeNull();
+      act(() => editor.props!.onChange(withTank(editor.props!.scene, 'tank-7')));
+      await waitFor(async () => expect((await stored())?.body.objects.some((o) => o.id === 'tank-7')).toBe(true));
+    });
+
+    it('a deletion while the "changed in another tab" dialog is open switches it to the deleted choices; nothing is swapped', async () => {
+      await openPlayground();
+      await waitFor(() => expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved'));
+      // Another tab saves first (its notice is not delivered here), then this tab edits: conflict.
+      const current = (await store.get(PLAYGROUND_DOCUMENT_ID))!;
+      await store.save({ ...current.document, name: 'Other tab' }, current.revision);
+      act(() => editor.props!.onChange(withTank(editor.props!.scene)));
+      const dialog = await screen.findByTestId('conflict-dialog');
+      expect(within(dialog).getByRole('button', { name: /Load latest/ })).toBeInTheDocument();
+      expect(editor.props?.keyboard).toBe(false);
+      await deleteElsewhere();
+      await waitFor(() => expect(within(screen.getByTestId('conflict-dialog')).getByRole('button', { name: /discard mine/ })).toBeInTheDocument());
+      expect(editor.mounts).toBe(1);
+      expect(editor.props?.scene.objects.some((o) => o.id === 'tank-1')).toBe(true);
+      expect(screen.queryByTestId('playground-rebuilding')).toBeNull();
+    });
+
+    it('Reset whose save is still in flight, then a deletion: asks instead of rebuilding over it', async () => {
+      await openPlayground();
+      await waitFor(() => expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved'));
+      vi.spyOn(store, 'save').mockImplementation(() => new Promise(() => undefined));
+      fireEvent.click(screen.getByRole('button', { name: /Reset/ }));
+      fireEvent.click(within(await screen.findByTestId('reset-dialog')).getByRole('button', { name: 'Reset' }));
+      await deleteElsewhere();
+      expect(await screen.findByTestId('conflict-dialog')).toHaveTextContent('deleted in another tab');
+      expect(screen.queryByTestId('playground-rebuilding')).toBeNull();
+    });
+  });
+
+  // holodeck#246: secrets of the deleted playground do not survive in this tab, and a saved copy gets none.
+  it('rebuilding clears the deleted playground’s secrets from this tab; the saved copy gets none', async () => {
+    await openPlayground();
+    secrets.set(PLAYGROUND_DOCUMENT_ID, 'api', 'token', 'TOKEN-1', 'fp');
+    expect(secrets.get(PLAYGROUND_DOCUMENT_ID, 'api', 'token', 'fp')).toBe('TOKEN-1');
+    vi.spyOn(store, 'save').mockImplementationOnce(() => new Promise(() => undefined));
+    act(() => editor.props!.onChange(withTank(editor.props!.scene)));
+    await deleteElsewhere();
+    fireEvent.click(within(await screen.findByTestId('conflict-dialog')).getByRole('button', { name: 'Save mine as a copy' }));
+    await waitFor(() => expect(editor.mounts).toBe(2));
+    expect(secrets.get(PLAYGROUND_DOCUMENT_ID, 'api', 'token', 'fp')).toBeUndefined();
+    const copy = (await store.list()).find((d) => d.id !== PLAYGROUND_DOCUMENT_ID)!;
+    expect(secrets.get(copy.id, 'api', 'token', 'fp')).toBeUndefined();
+    expect(JSON.stringify({ ...window.sessionStorage })).not.toContain('TOKEN-1');
+  });
+
+  it('a clean deletion also clears the secrets', async () => {
+    await openPlayground();
+    await waitFor(() => expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved'));
+    secrets.set(PLAYGROUND_DOCUMENT_ID, 'api', 'token', 'TOKEN-2', 'fp');
+    await deleteElsewhere();
+    await waitFor(() => expect(editor.mounts).toBe(2));
+    expect(JSON.stringify({ ...window.sessionStorage })).not.toContain('TOKEN-2');
+  });
+
+  // holodeck#245: a stored playground from another engine can be reset, and a deletion there rebuilds it.
+  describe('a stored playground from another engine', () => {
+    async function seedForeign() {
+      // Written without host validation (as another studio build with that engine would have).
+      const raw = new DocumentStore(openStudioDb('playground-test'));
+      await raw.create({ format: 'holodeck.document.v1', id: PLAYGROUND_DOCUMENT_ID, name: 'Playground', engine: 'acme.flow', body: { nodes: [] } } as HolodeckDocument);
+    }
+
+    it('says so and offers Reset, which stores the starter and opens it', async () => {
+      await seedForeign();
+      const router = createStudioRouter(createMemoryHistory({ initialEntries: ['/playground'] }));
+      const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+      render(
+        <StudioProvider services={{ host, store, channel, secrets }}>
+          <QueryClientProvider client={client}>
+            <RouterProvider router={router} />
+          </QueryClientProvider>
+        </StudioProvider>,
+      );
+      const foreign = await screen.findByTestId('playground-foreign');
+      expect(foreign).toHaveTextContent('acme.flow');
+      fireEvent.click(within(foreign).getByRole('button', { name: /Reset/ }));
+      await screen.findByTestId('process-editor');
+      expect(editor.props?.scene.objects).toHaveLength(starterCount);
+      expect((await store.get(PLAYGROUND_DOCUMENT_ID))?.document.engine).toBe('holodeck.iso');
+    });
+
+    it('a deletion in that state rebuilds the starter', async () => {
+      await seedForeign();
+      const router = createStudioRouter(createMemoryHistory({ initialEntries: ['/playground'] }));
+      const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+      render(
+        <StudioProvider services={{ host, store, channel, secrets }}>
+          <QueryClientProvider client={client}>
+            <RouterProvider router={router} />
+          </QueryClientProvider>
+        </StudioProvider>,
+      );
+      await screen.findByTestId('playground-foreign');
+      await deleteElsewhere();
+      await screen.findByTestId('process-editor');
+      expect(editor.props?.scene.objects).toHaveLength(starterCount);
+      expect((await store.get(PLAYGROUND_DOCUMENT_ID))?.document.engine).toBe('holodeck.iso');
+    });
   });
 });
