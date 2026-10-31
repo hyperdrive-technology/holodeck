@@ -195,8 +195,12 @@ function SourceBrowser({ hub, connectionId, onPick }: { hub: ProviderHub | undef
 
   // Only the newest request may apply its result (holodeck#173): a slow
   // response that lands after the user navigated elsewhere is dropped.
+  // Unmount drops anything in flight by moving the counter ON (holodeck#248):
+  // resetting it to -1 let StrictMode's remount reuse request numbers, so a
+  // late first top-level listing could replace a folder's contents. The
+  // counter only ever grows, so no two requests share a number.
   const latest = useRef(0);
-  useEffect(() => () => void (latest.current = -1), []); // unmount: drop anything in flight
+  useEffect(() => () => void (latest.current += 1), []);
 
   const load = async (stack: string[]) => {
     const request = ++latest.current;

@@ -1,5 +1,6 @@
 import type { ConnectionState, HolodeckHost, HolodeckProvider, ProviderHub, SignalBinding } from '@holodeck/sdk';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { connectionFingerprint } from '../../connections/fingerprint';
 import { SessionSecretStore } from '../../connections/secrets';
@@ -314,6 +315,33 @@ describe('<BindingDialog />', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Bind' }));
       expect(onSave).toHaveBeenCalledWith({ connection: 'sim', source: 'sine:10', transform: { kind: 'scale', inMin: 0, inMax: 100, outMin: 0, outMax: 1 } });
     });
+  });
+
+  // holodeck#248: StrictMode runs the auto-browse twice; request numbers must never repeat.
+  it('under StrictMode a late first top-level listing never replaces a folder the user opened', async () => {
+    type Node = { path: string; label: string; source?: string; hasChildren?: boolean; type?: 'number' };
+    const calls: Array<{ path: string | undefined; resolve: (nodes: Node[]) => void }> = [];
+    const browse = vi.fn((path?: string) => new Promise<Node[]>((resolve) => calls.push({ path, resolve })));
+    const hub = { session: () => ({ browse }) } as unknown as ProviderHub;
+    render(
+      <StrictMode>
+        <BindingDialog paramLabel="Level" connections={connections} current={undefined} hub={hub} providerOf={providerOf} onSave={() => undefined} onClose={() => undefined} />
+      </StrictMode>,
+    );
+    await waitFor(() => expect(calls.length).toBeGreaterThanOrEqual(2));
+    const roots = calls.filter((c) => c.path === undefined);
+    expect(roots.length).toBeGreaterThanOrEqual(2);
+    const root: Node[] = [{ path: '/pumps', label: 'pumps', hasChildren: true }];
+    // The newest top-level request answers; the user opens a folder.
+    await act(async () => roots.at(-1)!.resolve(root));
+    fireEvent.click(await screen.findByText('pumps'));
+    const folder = calls.find((c) => c.path === '/pumps')!;
+    await act(async () => folder.resolve([{ path: '/pumps/0/rpm', label: 'rpm', source: '/pumps/0/rpm', type: 'number' }]));
+    expect(await screen.findByText('rpm')).toBeInTheDocument();
+    // Now the first (StrictMode) top-level request answers, late.
+    await act(async () => roots[0]!.resolve([{ path: '/stale', label: 'stale-root' }]));
+    expect(screen.queryByText('stale-root')).toBeNull();
+    expect(screen.getByText('rpm')).toBeInTheDocument();
   });
 
   it('a connection that is not open yet lists nothing on open and says so on Browse', async () => {
