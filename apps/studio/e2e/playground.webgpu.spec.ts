@@ -9,6 +9,15 @@
 import { expect, test, type Page } from '@playwright/test';
 
 const STARTER_OBJECTS = 12;
+
+// SwiftShader on the hosted Linux runner is slow and its first frame time
+// varies a lot: this test passed in 1.8 min on one CI run and timed out
+// waiting 120 s for the FIRST `ready` on the next (same code). Generous
+// budgets plus a smaller canvas (less software fill work), as the sample
+// baseline does (holodeck#175). Waits stay on render signals, not sleeps.
+const FIRST_RENDER_MS = 300_000;
+test.setTimeout(600_000);
+test.use({ viewport: { width: 1180, height: 680 } });
 const pageErrors: Error[] = [];
 
 test.beforeEach(async ({ page }) => {
@@ -27,7 +36,7 @@ async function rendered(page: Page) {
       return el?.getAttribute('data-render-state') === 'ready' && el.getAttribute('data-holodeck-rendered') === el.getAttribute('data-holodeck-revision');
     },
     null,
-    { timeout: 120_000 },
+    { timeout: FIRST_RENDER_MS },
   );
 }
 
@@ -36,7 +45,7 @@ const rect = async (page: Page, testId: string) => (await page.getByTestId(testI
 test('drag a tank from the library onto the canvas, move it, bind it, and watch the Viewer re-render it from live data', async ({ page }) => {
   await page.goto('/playground');
   const editor = page.getByTestId('process-editor');
-  await expect(editor).toHaveAttribute('data-render-state', /ready|unsupported/, { timeout: 120_000 });
+  await expect(editor).toHaveAttribute('data-render-state', /ready|unsupported/, { timeout: FIRST_RENDER_MS });
   if ((await editor.getAttribute('data-render-state')) === 'unsupported') {
     // CI has software WebGPU (SwiftShader flags in playwright.config.ts): there a missing adapter is a failure, not a skip.
     expect(process.env.CI, 'the webgpu project must have WebGPU on CI').toBeFalsy();
@@ -86,7 +95,7 @@ test('drag a tank from the library onto the canvas, move it, bind it, and watch 
   const output = page.getByTestId('live-values').getByLabel('tank-1.level', { exact: true });
   const before = { value: await output.textContent(), presented: Number(await editor.getAttribute('data-holodeck-rendered')) };
   await expect(output).not.toHaveText(before.value!);
-  await expect.poll(async () => Number(await editor.getAttribute('data-holodeck-rendered')), { timeout: 60_000 }).toBeGreaterThan(before.presented);
+  await expect.poll(async () => Number(await editor.getAttribute('data-holodeck-rendered')), { timeout: FIRST_RENDER_MS }).toBeGreaterThan(before.presented);
 
   // Reload: still there, still bound.
   await expect(page.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved');
