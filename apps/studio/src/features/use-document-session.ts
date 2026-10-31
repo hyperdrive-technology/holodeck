@@ -117,10 +117,16 @@ export function useDocumentSession({ initial, initialCamera, canvasHostRef }: Do
 
   const writer = useMemo(
     () =>
-      new DocumentWriter(store, initial.document.id, initial.revision, (saved) => {
-        client.setQueryData(documentKeys.detail(saved.document.id), saved);
-        void client.invalidateQueries({ queryKey: documentKeys.list() });
-      }),
+      new DocumentWriter(
+        store,
+        initial.document.id,
+        initial.revision,
+        (saved) => {
+          client.setQueryData(documentKeys.detail(saved.document.id), saved);
+          void client.invalidateQueries({ queryKey: documentKeys.list() });
+        },
+        initial.generation,
+      ),
     // One writer per mounted document (the routes key their workspace by id).
     [],
   );
@@ -166,9 +172,11 @@ export function useDocumentSession({ initial, initialCamera, canvasHostRef }: Do
     shouldBlockFn: ({ current, next }) =>
       current.pathname !== next.pathname &&
       !leaving.current &&
-      !writer.isClean() &&
+      writer.hasUnsavedEdits() &&
       !window.confirm('This document has changes that are not saved. Leave anyway?'),
-    enableBeforeUnload: () => !leaving.current && !writer.isClean(),
+    // `hasUnsavedEdits`, not `!isClean()`: a document deleted elsewhere with
+    // nothing unsaved here has nothing to lose (holodeck#250).
+    enableBeforeUnload: () => !leaving.current && writer.hasUnsavedEdits(),
   });
 
   const saveWorkingCopy = useCallback(() => {
