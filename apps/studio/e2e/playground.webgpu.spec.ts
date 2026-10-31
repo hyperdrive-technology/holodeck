@@ -16,11 +16,11 @@ const STARTER_OBJECTS = 12;
 // live clock the picture never caught up and `data-render-state` stayed
 // `pending` for 5 min (CI, two runs), although it passed on a real GPU. The
 // Viewer step then moves the clock on once, so the change is deterministic.
-// Smaller canvas than the project default: less software fill work.
+// Smaller canvas than the project default (as the sample baseline): less software fill work.
 const T0 = new Date('2026-01-01T00:00:02Z').getTime();
 const FIRST_RENDER_MS = 300_000;
 test.setTimeout(600_000);
-test.use({ viewport: { width: 1180, height: 680 } });
+test.use({ viewport: { width: 1080, height: 560 } });
 const pageErrors: Error[] = [];
 
 test.beforeEach(async ({ page }) => {
@@ -105,9 +105,6 @@ test('drag a tank from the library onto the canvas, move it, bind it, and watch 
   await expect.poll(async () => Number(await editor.getAttribute('data-holodeck-rendered')), { timeout: FIRST_RENDER_MS }).toBeGreaterThan(before.presented);
   await rendered(page);
 
-  // Reload: still there, still bound.
-  await expect(page.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved');
-  await page.reload();
-  await expect(editor).toHaveAttribute('data-object-count', String(STARTER_OBJECTS + 1));
-  await expect(page.getByTestId('live-values').getByLabel('tank-1.level', { exact: true })).toHaveText(/^0(\.\d+)?$|^1$/);
+  // Reload persistence is covered by playground.spec.ts: a second first-render
+  // under SwiftShader costs a minute of shared runner time (sample.webgpu runs next).
 });
