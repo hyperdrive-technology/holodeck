@@ -9,6 +9,7 @@ import {
   EMPTY_TRANSFORM_FORM,
   formToTransform,
   parseSignalValue,
+  suggestedTransformForm,
   transformToForm,
   withBinding,
 } from './bindings';
@@ -130,5 +131,29 @@ describe('bindings', () => {
       const ok = { ...scene, objects: [scene.objects[0]!] };
       expect(reconcileConnections(ok, [plant], new Map())).toEqual({ connections: [plant], restored: [], dangling: [] });
     });
+  });
+});
+
+describe('suggestedTransformForm (a browse leaf picked for a ranged param)', () => {
+  const level = { min: 0, max: 1 };
+  it('scales 0-100 onto the param range for a numeric leaf and an untouched form', () => {
+    const form = suggestedTransformForm({ type: 'number' }, level, EMPTY_TRANSFORM_FORM);
+    expect(form).toMatchObject({ kind: 'scale', inMin: '0', inMax: '100', outMin: '0', outMax: '1', clamp: true });
+    expect(formToTransform(form!)).toEqual({ transform: { kind: 'scale', inMin: 0, inMax: 100, outMin: 0, outMax: 1 }, problems: [] });
+    expect(suggestedTransformForm({ type: 'number' }, { min: 0, max: 300 }, EMPTY_TRANSFORM_FORM)).toMatchObject({ outMin: '0', outMax: '300' });
+  });
+
+  it('never replaces a transform the user chose', () => {
+    expect(suggestedTransformForm({ type: 'number' }, level, { ...EMPTY_TRANSFORM_FORM, kind: 'format' })).toBeNull();
+    expect(suggestedTransformForm({ type: 'number' }, level, { ...EMPTY_TRANSFORM_FORM, kind: 'scale' })).toBeNull();
+  });
+
+  it('suggests nothing for non-numeric leaves, unranged params, 0-100 params or a bad range', () => {
+    expect(suggestedTransformForm({ type: 'boolean' }, level, EMPTY_TRANSFORM_FORM)).toBeNull();
+    expect(suggestedTransformForm({}, level, EMPTY_TRANSFORM_FORM)).toBeNull();
+    expect(suggestedTransformForm({ type: 'number' }, undefined, EMPTY_TRANSFORM_FORM)).toBeNull();
+    expect(suggestedTransformForm({ type: 'number' }, { min: 0, max: 100 }, EMPTY_TRANSFORM_FORM)).toBeNull();
+    expect(suggestedTransformForm({ type: 'number' }, { min: 1, max: 1 }, EMPTY_TRANSFORM_FORM)).toBeNull();
+    expect(suggestedTransformForm({ type: 'number' }, { min: 0, max: Number.NaN }, EMPTY_TRANSFORM_FORM)).toBeNull();
   });
 });
