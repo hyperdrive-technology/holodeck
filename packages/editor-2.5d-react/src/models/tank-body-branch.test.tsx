@@ -63,3 +63,24 @@ describe('Tank body: mixer.glb vs the vessel own body', () => {
     expect(hasProceduralAgitator(html)).toBe(true);
   });
 });
+
+// holodeck#237: overrides mixer.glb cannot show (any non-shape param, not only closures / window) on
+// <Mixer> applied on main; the GLB silently dropped them.
+describe('Mixer overrides mixer.glb cannot show fall back to the procedural body', () => {
+  it.each<[string, Partial<TankParams>]>([
+    ['showWall: false', { showWall: false }],
+    ['shaftLength 0.3', { shaftLength: 0.3 }],
+    ['impellerSpan 0.2', { impellerSpan: 0.2 }],
+    ['innerRatio 0.7', { innerRatio: 0.7 }],
+  ])('%s', (_name, params) => {
+    const html = renderToStaticMarkup(<Mixer position={[0, 0, 0]} params={params} />);
+    expect(isGlb(html)).toBe(false);
+    expect(hasProceduralAgitator(html)).toBe(true);
+  });
+
+  it('what the GLB path honours keeps the GLB: colours, liquid, agitator, size', () => {
+    for (const params of [{ fillColor: '#ff0000' }, { liquidOpacity: 0.3 }, { showLiquid: false }, { agitator: false }, { radius: 2, height: 3 }, { edgeColor: '#111111' }]) {
+      expect(isGlb(renderToStaticMarkup(<Mixer position={[0, 0, 0]} params={params} />)), JSON.stringify(params)).toBe(true);
+    }
+  });
+});

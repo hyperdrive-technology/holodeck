@@ -10,6 +10,9 @@
  * window 100° centred on theta 45° (the default iso camera); `anim.liquid`
  * at the dish pole, liquid mesh 0..1.39 at full scale; `anim.agitator` spins about Y.
  */
+import { mergeTankParams, type TankParams } from './tank-params';
+import { MASH_TUN_PRESET } from './tank-presets';
+
 export const MIXER_GLB = {
   model: 'mixer',
   radius: 0.45,
@@ -50,31 +53,56 @@ export const MIXER_GLB_SHAPE = {
 } as const;
 
 /**
- * Does a Tank with these params draw as mixer.glb (`AgitatedVessel`)? Only
- * when `mixerModel` is set AND the shape params still match the GLB
- * (`MIXER_GLB_SHAPE`). Core passes `top` / `bottom` / `support` / window
- * overrides over the mash tun preset; mixer.glb cannot show them, and on main
- * they applied, so an overridden mash tun keeps the procedural agitated body
- * (which draws them, and which routing's cutout / wall span already follow).
- * Second review of #228.
+ * Params the mixer.glb path honours (size, liquid, colours, agitator on/off)
+ * or that change nothing (deprecated `bodyRings`). Every OTHER param must
+ * equal the mixer body's own value for the GLB to be drawn.
  */
-export function usesMixerModel(p: {
-  mixerModel?: boolean;
-  top?: string;
-  bottom?: string;
-  support?: string;
-  windowDeg?: number;
-  windowYawDeg?: number;
-}): boolean {
+export const MIXER_GLB_HONOURED = new Set<keyof TankParams>([
+  'height',
+  'radius',
+  'fill',
+  'fillColor',
+  'liquidOpacity',
+  'showLiquid',
+  'edgeColor',
+  'shadeMin',
+  'shadeMax',
+  'hubWhite',
+  'agitator',
+  'mixerModel',
+  'bodyRings',
+  'bodyRingWidth',
+]);
+
+let reference: Record<string, unknown> | null = null;
+/** The mixer body's params (the mash tun preset over the defaults): what mixer.glb looks like. */
+function mixerReference(): Record<string, unknown> {
+  reference ??= mergeTankParams(MASH_TUN_PRESET.params) as unknown as Record<string, unknown>;
+  return reference;
+}
+
+const sameValue = (a: unknown, b: unknown) =>
+  typeof a === 'number' && typeof b === 'number' ? Math.abs(a - b) < 1e-6 : a === b;
+
+/**
+ * Does a Tank with these params draw as mixer.glb (`AgitatedVessel`)? Only
+ * when `mixerModel` is set AND every param the GLB cannot show still has the
+ * mixer body's value (`MIXER_GLB_HONOURED` lists the ones it can). Otherwise
+ * the procedural agitated body draws the overrides, as on main: core passes
+ * top / bottom / support / window over the mash tun preset (second review of
+ * #228), and `<Mixer params={{ showWall: false, shaftLength: 0.3 }}>` was
+ * honoured on main (holodeck#237). Routing's cutout / wall span follow the
+ * same params, so they agree with what is drawn.
+ */
+export function usesMixerModel(p: Partial<TankParams>): boolean {
   if (p.mixerModel !== true) return false;
-  const same = (a: number | undefined, b: number) => a === undefined || Math.abs(a - b) < 1e-6;
-  return (
-    (p.top ?? MIXER_GLB_SHAPE.top) === MIXER_GLB_SHAPE.top &&
-    (p.bottom ?? MIXER_GLB_SHAPE.bottom) === MIXER_GLB_SHAPE.bottom &&
-    (p.support ?? MIXER_GLB_SHAPE.support) === MIXER_GLB_SHAPE.support &&
-    same(p.windowDeg, MIXER_GLB_SHAPE.windowDeg) &&
-    same(p.windowYawDeg, MIXER_GLB_SHAPE.windowYawDeg)
-  );
+  const merged = mergeTankParams(p) as unknown as Record<string, unknown>;
+  const ref = mixerReference();
+  for (const key of Object.keys(ref)) {
+    if (MIXER_GLB_HONOURED.has(key as keyof TankParams)) continue;
+    if (!sameValue(merged[key], ref[key])) return false;
+  }
+  return true;
 }
 
 /** The fill mixer.glb shows: none for an empty vessel or one whose liquid is switched off (`showLiquid`). */
