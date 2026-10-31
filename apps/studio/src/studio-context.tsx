@@ -1,5 +1,5 @@
 import type { HolodeckHost } from '@holodeck/sdk';
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, type ReactNode } from 'react';
 import type { DocumentChannel } from './documents/changes';
 import type { SessionSecretStore } from './connections/secrets';
 import type { DocumentStore } from './documents/store';
@@ -18,6 +18,21 @@ export interface StudioServices {
 const StudioContext = createContext<StudioServices | null>(null);
 
 export function StudioProvider({ services, children }: { services: StudioServices; children: ReactNode }) {
+  const { channel, secrets } = services;
+  // A document deleted in another tab takes this tab's secrets for it along,
+  // on every route (holodeck#166, #241 review): a document imported later
+  // under the same id must never inherit them. This used to live in the
+  // studio shell (AppShell), so a tab on /playground or /embed kept them.
+  // The open playground's own deletion is cleared here too, at once, even
+  // while its "deleted elsewhere" dialog waits for the user; the copy that
+  // dialog can save is a new document with no secrets.
+  useEffect(
+    () =>
+      channel.subscribe((change) => {
+        if (change.type === 'deleted') secrets.clear(change.id);
+      }),
+    [channel, secrets],
+  );
   return <StudioContext.Provider value={services}>{children}</StudioContext.Provider>;
 }
 

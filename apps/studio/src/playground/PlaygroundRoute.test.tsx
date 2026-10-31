@@ -16,7 +16,7 @@ import { useImperativeHandle } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionSecretStore } from '../connections/secrets';
 import { openStudioDb } from '../documents/db';
-import type { DocumentChange } from '../documents/store';
+import type { DocumentChange, VersionedDocument } from '../documents/store';
 import { DocumentStore } from '../documents/store';
 import { activeDocumentStore } from '../features/active-document';
 import { withRequires } from '../features/use-document-session';
@@ -131,6 +131,16 @@ function holdNextCreate(opts: { afterStored?: () => Promise<void> } = {}) {
     return v;
   });
   return { release, created };
+}
+/** A promise whose settling the test controls. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 const readValue = (label: string) => Number(screen.getByLabelText(label).textContent);
 
@@ -598,5 +608,115 @@ describe('/playground', () => {
       expect(editor.props?.scene.objects).toHaveLength(starterCount);
       expect((await store.get(PLAYGROUND_DOCUMENT_ID))?.document.engine).toBe('holodeck.iso');
     });
+  });
+
+  // Review of #241 round 3: the save that was running when the deletion arrived settles later.
+  describe('a save still running when the deletion arrives', () => {
+    for (const outcome of ['resolves', 'rejects'] as const) {
+      it(`${outcome}: the deleted dialog stays, nothing is swapped, and nothing more is written`, async () => {
+        await openPlayground();
+        await waitFor(() => expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved'));
+        const running = deferred<VersionedDocument>();
+        const save = vi.spyOn(store, 'save').mockImplementationOnce(() => running.promise);
+        act(() => editor.props!.onChange(withTank(editor.props!.scene)));
+        await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+        await deleteElsewhere();
+        expect(await screen.findByTestId('conflict-dialog')).toHaveTextContent('deleted in another tab');
+        await act(async () => {
+          if (outcome === 'resolves') running.resolve({ document: editor.props!.scene as never, revision: 99 });
+          else running.reject(new Error('disk full'));
+        });
+        expect(screen.getByTestId('conflict-dialog')).toHaveTextContent('deleted in another tab');
+        expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'conflict');
+        // Another edit (a stray key) is not written anywhere.
+        act(() => editor.props!.onChange(withTank(editor.props!.scene, 'tank-2')));
+        await act(async () => undefined);
+        expect(save).toHaveBeenCalledTimes(1);
+        expect(editor.mounts).toBe(1);
+        expect(await store.get(PLAYGROUND_DOCUMENT_ID)).toBeUndefined();
+      });
+    }
+  });
+
+  // Review of #241 round 3: deleted documents' secrets go on every route, at once.
+  describe('secrets of deleted documents', () => {
+    it('a document deleted in another tab loses this tab’s secrets while this tab is on /playground', async () => {
+      await openPlayground();
+      secrets.set('other-doc', 'api', 'token', 'OTHER-TOKEN', 'fp');
+      act(() => listeners.forEach((l) => l({ type: 'deleted', id: 'other-doc' })));
+      expect(secrets.get('other-doc', 'api', 'token', 'fp')).toBeUndefined();
+      expect(JSON.stringify({ ...window.sessionStorage })).not.toContain('OTHER-TOKEN');
+    });
+
+    it('a dirty playground deletion clears its secrets at once, while the dialog still waits', async () => {
+      await openPlayground();
+      secrets.set(PLAYGROUND_DOCUMENT_ID, 'api', 'token', 'PG-TOKEN', 'fp');
+      vi.spyOn(store, 'save').mockImplementationOnce(() => new Promise(() => undefined));
+      act(() => editor.props!.onChange(withTank(editor.props!.scene)));
+      await deleteElsewhere();
+      await screen.findByTestId('conflict-dialog');
+      expect(secrets.get(PLAYGROUND_DOCUMENT_ID, 'api', 'token', 'fp')).toBeUndefined();
+    });
+  });
+
+  // holodeck#249: work not yet in the working copy counts as unsaved.
+  describe('uncommitted work when the deletion arrives', () => {
+    it('a canvas gesture in progress: asks instead of rebuilding', async () => {
+      await openPlayground();
+      await waitFor(() => expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved'));
+      Object.assign(editor.state, { drag: { id: 'feed-tank' } });
+      await deleteElsewhere();
+      expect(await screen.findByTestId('conflict-dialog')).toHaveTextContent('deleted in another tab');
+      expect(screen.queryByTestId('playground-rebuilding')).toBeNull();
+      expect(editor.mounts).toBe(1);
+    });
+
+    it('a gesture that starts during the rebuild: not swapped, asks', async () => {
+      await openPlayground();
+      await waitFor(() => expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved'));
+      const hold = holdNextCreate();
+      await deleteElsewhere();
+      await screen.findByTestId('playground-rebuilding');
+      Object.assign(editor.state, { pipeStart: { x: 1, y: 1 } });
+      hold.release();
+      await hold.created;
+      expect(await screen.findByTestId('conflict-dialog')).toHaveTextContent('deleted in another tab');
+      expect(editor.mounts).toBe(1);
+    });
+
+    it('inspector text refused by validation: asks instead of rebuilding', async () => {
+      await openPlayground();
+      await waitFor(() => expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved'));
+      const name = screen.getByRole('textbox', { name: 'Document name' });
+      fireEvent.change(name, { target: { value: '   ' } });
+      fireEvent.blur(name);
+      expect(name).toHaveAttribute('aria-invalid', 'true');
+      await deleteElsewhere();
+      expect(await screen.findByTestId('conflict-dialog')).toHaveTextContent('deleted in another tab');
+      expect(editor.mounts).toBe(1);
+    });
+  });
+
+  // holodeck#250: nothing unsaved, nothing to warn about; no dead close button.
+  it('while rebuilding with nothing unsaved: leaving does not warn, and the dialog has no close button', async () => {
+    const { router } = await openPlayground();
+    await waitFor(() => expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved'));
+    const hold = holdNextCreate();
+    await deleteElsewhere();
+    const dialog = await screen.findByTestId('playground-rebuilding');
+    expect(within(dialog).queryByRole('button', { name: 'Close' })).toBeNull();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    act(() => void router.navigate({ to: '/' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/'));
+    expect(confirm).not.toHaveBeenCalled();
+    hold.release();
+  });
+
+  it('the deleted-elsewhere dialog has no close button either (it cannot be dismissed)', async () => {
+    await openPlayground();
+    vi.spyOn(store, 'save').mockImplementationOnce(() => new Promise(() => undefined));
+    act(() => editor.props!.onChange(withTank(editor.props!.scene)));
+    await deleteElsewhere();
+    expect(within(await screen.findByTestId('conflict-dialog')).queryByRole('button', { name: 'Close' })).toBeNull();
   });
 });

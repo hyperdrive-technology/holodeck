@@ -37,6 +37,7 @@ import { LibraryPanel } from '../features/LibraryPanel';
 import { LiveValues } from '../features/LiveValues';
 import { Notices } from '../features/Notices';
 import { describeSaveStatus } from '../features/save-status';
+import { hasUncommittedDraft } from '../features/fields';
 import { focusLibrarySearch } from '../features/StudioHotkeys';
 import { useDocumentSession } from '../features/use-document-session';
 import { ensurePlaygroundDocument, PLAYGROUND_TABS, playgroundStarter, type PlaygroundTab } from './playground-state';
@@ -247,13 +248,23 @@ function PlaygroundWorkspace({
   useEffect(() => {
     if (!deletedElsewhere || handledDeletion.current) return;
     handledDeletion.current = true;
-    const { writer, docRef, leaving } = session;
-    const clean = leaving.current || writer.isClean();
+    const { writer, docRef, leaving, editorRef } = session;
+    /**
+     * Work that is not in the working copy yet (holodeck#249): a canvas
+     * gesture in progress (move / resize / pipe or connector drawing, whose
+     * preview commits on release) or inspector text not committed (typed, or
+     * refused by validation). Swapping the workspace would drop it unasked.
+     */
+    const uncommitted = () => {
+      const editor = editorRef.current?.getState();
+      return Boolean(editor && (editor.drag || editor.resize || editor.linkDrag || editor.pipeStart || editor.linkStart)) || hasUncommittedDraft();
+    };
+    const clean = leaving.current || (writer.isClean() && !uncommitted());
     writer.markDeleted();
     if (!clean) return;
     const atDeletion = docRef.current;
     setRebuilding(true);
-    void onRecreate('deleted', () => docRef.current === atDeletion && !writer.getState().dirty && !writer.busy).then((replaced) => {
+    void onRecreate('deleted', () => docRef.current === atDeletion && !writer.hasUnsavedEdits() && !uncommitted()).then((replaced) => {
       if (!replaced) setRebuilding(false);
     });
   }, [deletedElsewhere, onRecreate, session]);
@@ -437,6 +448,7 @@ function PlaygroundWorkspace({
       <Dialog open={rebuilding}>
         <DialogContent
           data-testid="playground-rebuilding"
+          showCloseButton={false}
           onEscapeKeyDown={(e) => e.preventDefault()}
           onPointerDownOutside={(e) => e.preventDefault()}
           onInteractOutside={(e) => e.preventDefault()}

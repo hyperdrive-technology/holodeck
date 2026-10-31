@@ -58,6 +58,7 @@ export function ConflictDialog({
     <Dialog open>
       <DialogContent
         data-testid="conflict-dialog"
+        showCloseButton={false}
         onEscapeKeyDown={(e) => e.preventDefault()}
         onPointerDownOutside={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
