@@ -45,6 +45,17 @@ import { connectionProblems, ViewerPanel } from './ViewerPanel';
 
 export const playgroundKeys = { document: ['playground', 'document'] as const };
 
+/** Why the playground starts again from the starter after its document was deleted in another tab. */
+export type RecreateReason = 'deleted' | 'discarded' | 'copied';
+const RECREATE_NOTICE: Record<RecreateReason, { title: string; details: string[] }> = {
+  deleted: { title: 'The playground was deleted in another tab', details: ['It starts again from the starter scene.'] },
+  discarded: { title: 'Your playground changes were discarded', details: ['The playground starts again from the starter scene.'] },
+  copied: {
+    title: 'Your version was saved as a copy',
+    details: ['Open “Playground (my version)” from the studio’s document list. The playground starts again from the starter scene.'],
+  },
+};
+
 export interface PlaygroundRouteProps {
   tab: PlaygroundTab;
   onTabChange: (tab: PlaygroundTab) => void;
@@ -52,7 +63,7 @@ export interface PlaygroundRouteProps {
 
 /** Loads (or creates) the playground document and its camera, then opens the workspace. */
 export function PlaygroundRoute({ tab, onTabChange }: PlaygroundRouteProps) {
-  const { store, host, channel } = useStudio();
+  const { store, host, channel, secrets } = useStudio();
   const loaded = useQuery({
     queryKey: playgroundKeys.document,
     queryFn: () => ensurePlaygroundDocument(store, host),
@@ -67,22 +78,37 @@ export function PlaygroundRoute({ tab, onTabChange }: PlaygroundRouteProps) {
   const [generation, setGeneration] = useState(0);
   if (!opened && loaded.data && loaded.isFetchedAfterMount && camera.isFetchedAfterMount) setOpened(loaded.data);
 
-  // Deleted elsewhere (e.g. from the studio's document list): there is no
-  // "no document" state on this page, so start again from the starter.
+  // Deleted elsewhere (e.g. from the studio's document list, holodeck#242).
+  // The workspace decides: with nothing unsaved it asks for a fresh starter
+  // right away (there is no "no document" state on this page); with unsaved
+  // or failed edits it enters the "deleted elsewhere" conflict first, so the
+  // user can save their version as a copy or discard it, exactly as on
+  // /d/$docId. Recreating without asking lost those edits silently.
+  const [deleted, setDeleted] = useState(false);
   useEffect(
     () =>
       channel.subscribe((change) => {
-        if (change.type !== 'deleted' || change.id !== PLAYGROUND_DOCUMENT_ID) return;
-        void ensurePlaygroundDocument(store, host).then(
-          (fresh) => {
-            setOpened(fresh);
-            setGeneration((n) => n + 1);
-            notify({ tone: 'info', title: 'The playground was deleted in another tab', details: ['It starts again from the starter scene.'] });
-          },
-          (error: unknown) => notify({ tone: 'error', title: 'Could not recreate the playground', details: [String(error)] }),
-        );
+        if (change.type === 'deleted' && change.id === PLAYGROUND_DOCUMENT_ID) setDeleted(true);
       }),
-    [channel, host, store],
+    [channel],
+  );
+
+  /** Start again from the starter (the stored playground is gone): a fresh workspace on a fresh document. */
+  const recreate = useCallback(
+    (reason: RecreateReason) => {
+      // The deleted document's secrets never carry over to the new one (holodeck#166).
+      secrets.clear(PLAYGROUND_DOCUMENT_ID);
+      void ensurePlaygroundDocument(store, host).then(
+        (fresh) => {
+          setOpened(fresh);
+          setDeleted(false);
+          setGeneration((n) => n + 1);
+          notify({ tone: 'info', ...RECREATE_NOTICE[reason] });
+        },
+        (error: unknown) => notify({ tone: 'error', title: 'Could not recreate the playground', details: [String(error)] }),
+      );
+    },
+    [host, secrets, store],
   );
 
   let content: React.ReactNode;
@@ -97,6 +123,8 @@ export function PlaygroundRoute({ tab, onTabChange }: PlaygroundRouteProps) {
         initialCamera={camera.isError ? undefined : (camera.data ?? undefined)}
         tab={tab}
         onTabChange={onTabChange}
+        deletedElsewhere={deleted}
+        onRecreate={recreate}
       />
     );
   return (
@@ -119,9 +147,15 @@ function PlaygroundWorkspace({
   initialCamera,
   tab,
   onTabChange,
+  deletedElsewhere,
+  onRecreate,
 }: {
   initial: VersionedDocument;
   initialCamera: StudioCamera | undefined;
+  /** The stored playground was deleted in another tab. */
+  deletedElsewhere: boolean;
+  /** Replace this workspace with a fresh starter document. */
+  onRecreate: (reason: RecreateReason) => void;
 } & PlaygroundRouteProps) {
   const { host, secrets } = useStudio();
   const canvasHostRef = useRef<HTMLElement>(null);
@@ -137,6 +171,18 @@ function PlaygroundWorkspace({
   const metrics = viewing && frozen ? frozen : live.metrics;
   const connections = doc.connections ?? [];
   const problems = connectionProblems(connections, live.statuses);
+
+  // Deleted in another tab (holodeck#242): nothing unsaved -> start again
+  // from the starter now; unsaved, pending or failed edits -> the writer
+  // enters the "deleted elsewhere" conflict and the dialog below lets the
+  // user save a copy or discard (as DocumentWorkspace does). Once only.
+  const handledDeletion = useRef(false);
+  useEffect(() => {
+    if (!deletedElsewhere || handledDeletion.current) return;
+    handledDeletion.current = true;
+    if (session.leaving.current || session.writer.isClean()) onRecreate('deleted');
+    else session.writer.markDeleted();
+  }, [deletedElsewhere, onRecreate, session.leaving, session.writer]);
 
   // The studio shortcuts that make sense here (the canvas binds its own:
   // Mod+Z, Delete, arrows...). Mod+K is advertised in the library search box.
@@ -316,15 +362,23 @@ function PlaygroundWorkspace({
             session.setSelectedId(null);
           }}
           onSavedCopy={() => {
-            // The copy is a normal studio document (listed on `/`); the
-            // playground carries on with the other tab's version.
-            if (conflict.latest) session.adopt(conflict.latest);
-            notify({ tone: 'info', title: 'Your version was saved as a copy', details: ['Open it from the studio’s document list.'] });
+            // The copy is a normal studio document (listed on `/`).
+            if (conflict.latest) {
+              // Another tab saved first: carry on with its version.
+              session.adopt(conflict.latest);
+              notify({ tone: 'info', title: 'Your version was saved as a copy', details: ['Open it from the studio’s document list.'] });
+              return;
+            }
+            // Deleted elsewhere: the copy keeps the edits; the playground starts again.
+            session.leaving.current = true;
+            onRecreate('copied');
           }}
           onDiscard={() => {
-            // Deleted elsewhere while edits were pending: the route recreates the starter.
+            // Only offered when the document was deleted elsewhere. The writer is
+            // in conflict and writes nothing more, so the route recreates the
+            // starter as a new document instead (a `replace` here saved nothing).
             session.leaving.current = true;
-            session.replace(playgroundStarter(host));
+            onRecreate('discarded');
           }}
         />
       ) : null}

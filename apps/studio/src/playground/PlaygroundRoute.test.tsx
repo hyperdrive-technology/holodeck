@@ -107,6 +107,11 @@ async function openPlayground(path = '/playground') {
 
 const stored = async () => (await store.get(PLAYGROUND_DOCUMENT_ID))?.document as IsoDoc | undefined;
 const withTank = (scene: IsoSceneFile, id = 'tank-1'): IsoSceneFile => ({ ...scene, objects: [...scene.objects, { id, object: 'tank', x: 0, y: 8 }] });
+/** Another tab deletes the stored playground (store + the cross-tab notice). */
+async function deleteElsewhere() {
+  await store.remove(PLAYGROUND_DOCUMENT_ID);
+  act(() => listeners.forEach((l) => l({ type: 'deleted', id: PLAYGROUND_DOCUMENT_ID })));
+}
 const readValue = (label: string) => Number(screen.getByLabelText(label).textContent);
 
 describe('/playground', () => {
@@ -322,15 +327,76 @@ describe('/playground', () => {
     expect(await screen.findByText('All changes are saved in this browser')).toBeInTheDocument();
   });
 
-  it('deleted in another tab: starts again from the starter', async () => {
+  it('deleted in another tab with nothing unsaved: starts again from the starter, no dialog', async () => {
     await openPlayground();
     act(() => editor.props!.onChange(withTank(editor.props!.scene)));
+    await waitFor(() => expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved'));
     await waitFor(async () => expect((await stored())?.body.objects).toHaveLength(starterCount + 1));
-    await store.remove(PLAYGROUND_DOCUMENT_ID);
-    act(() => listeners.forEach((l) => l({ type: 'deleted', id: PLAYGROUND_DOCUMENT_ID })));
+    await deleteElsewhere();
     await waitFor(() => expect(editor.mounts).toBe(2));
     expect(editor.props?.scene.objects).toHaveLength(starterCount);
     expect((await stored())?.body.objects).toHaveLength(starterCount);
     expect(screen.getByText('The playground was deleted in another tab')).toBeInTheDocument();
+    expect(screen.queryByTestId('conflict-dialog')).toBeNull();
+  });
+
+  // holodeck#242: deleting the playground elsewhere must never drop unsaved edits silently.
+  it('deleted in another tab while a save is pending: keeps the edits and asks (copy or discard)', async () => {
+    await openPlayground();
+    vi.spyOn(store, 'save').mockImplementation(() => new Promise(() => undefined));
+    act(() => editor.props!.onChange(withTank(editor.props!.scene)));
+    expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saving');
+    await deleteElsewhere();
+    const dialog = await screen.findByTestId('conflict-dialog');
+    expect(dialog).toHaveTextContent('deleted in another tab');
+    expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'conflict');
+    // Not recreated behind the dialog: same editor, the edit still on screen, nothing stored.
+    expect(editor.mounts).toBe(1);
+    expect(editor.props?.scene.objects.some((o) => o.id === 'tank-1')).toBe(true);
+    expect(await store.get(PLAYGROUND_DOCUMENT_ID)).toBeUndefined();
+  });
+
+  it('deleted in another tab after a save failed: keeps the edits and asks', async () => {
+    await openPlayground();
+    vi.spyOn(store, 'save').mockRejectedValueOnce(new Error('disk full'));
+    act(() => editor.props!.onChange(withTank(editor.props!.scene)));
+    await waitFor(() => expect(screen.getByTestId('canvas')).toHaveAttribute('data-save-status', 'error'));
+    await deleteElsewhere();
+    expect(await screen.findByTestId('conflict-dialog')).toHaveTextContent('deleted in another tab');
+    expect(editor.mounts).toBe(1);
+    expect(editor.props?.scene.objects.some((o) => o.id === 'tank-1')).toBe(true);
+  });
+
+  it('deleted with unsaved edits, "Close (discard mine)": the playground starts again from the starter (and is stored)', async () => {
+    await openPlayground();
+    vi.spyOn(store, 'save').mockImplementationOnce(() => new Promise(() => undefined));
+    act(() => editor.props!.onChange(withTank(editor.props!.scene)));
+    await deleteElsewhere();
+    fireEvent.click(within(await screen.findByTestId('conflict-dialog')).getByRole('button', { name: /discard mine/ }));
+    await waitFor(() => expect(editor.mounts).toBe(2));
+    expect(screen.queryByTestId('conflict-dialog')).toBeNull();
+    expect(editor.props?.scene.objects).toEqual(createPlaygroundDocument().body.objects);
+    expect((await stored())?.body.objects).toEqual(createPlaygroundDocument().body.objects);
+    expect(screen.getByText('Your playground changes were discarded')).toBeInTheDocument();
+    // The new workspace saves again.
+    act(() => editor.props!.onChange(withTank(editor.props!.scene, 'tank-9')));
+    await waitFor(async () => expect((await stored())?.body.objects.some((o) => o.id === 'tank-9')).toBe(true));
+  });
+
+  it('deleted with unsaved edits, "Save mine as a copy": the edits land in a new studio document; the playground starts again', async () => {
+    await openPlayground();
+    vi.spyOn(store, 'save').mockImplementationOnce(() => new Promise(() => undefined));
+    act(() => editor.props!.onChange(withTank(editor.props!.scene)));
+    await deleteElsewhere();
+    fireEvent.click(within(await screen.findByTestId('conflict-dialog')).getByRole('button', { name: 'Save mine as a copy' }));
+    await waitFor(() => expect(editor.mounts).toBe(2));
+    expect(screen.queryByTestId('conflict-dialog')).toBeNull();
+    const copies = (await store.list()).filter((d) => d.id !== PLAYGROUND_DOCUMENT_ID);
+    expect(copies.map((d) => d.name)).toEqual(['Playground (my version)']);
+    const copy = (await store.get(copies[0]!.id))!.document as IsoDoc;
+    expect(copy.body.objects.some((o) => o.id === 'tank-1')).toBe(true);
+    expect(copy.connections).toEqual(createPlaygroundDocument().connections);
+    expect((await stored())?.body.objects).toEqual(createPlaygroundDocument().body.objects);
+    expect(screen.getByText('Your version was saved as a copy')).toBeInTheDocument();
   });
 });
