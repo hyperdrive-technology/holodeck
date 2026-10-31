@@ -312,6 +312,16 @@ describe('/playground', () => {
     expect(editor.actions).toEqual([{ type: 'undo' }, { type: 'redo' }]);
   });
 
+  it('Mod+K focuses the library search; Mod+S saves and reports the outcome', async () => {
+    await openPlayground();
+    // TanStack Hotkeys: Mod is Meta on macOS, Control elsewhere (jsdom's platform decides).
+    const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? { metaKey: true } : { ctrlKey: true };
+    fireEvent.keyDown(document.body, { key: 'k', code: 'KeyK', ...mod });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: 'Search the library' })));
+    fireEvent.keyDown(document.body, { key: 's', code: 'KeyS', ...mod });
+    expect(await screen.findByText('All changes are saved in this browser')).toBeInTheDocument();
+  });
+
   it('deleted in another tab: starts again from the starter', async () => {
     await openPlayground();
     act(() => editor.props!.onChange(withTank(editor.props!.scene)));

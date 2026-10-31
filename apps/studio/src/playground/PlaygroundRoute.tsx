@@ -12,6 +12,7 @@
  */
 
 import { ISO_ENGINE_ID, ProcessEditor, type IsoMetrics } from '@holodeck/editor-2.5d-react';
+import { useHotkeys } from '@tanstack/react-hotkeys';
 import { useQuery } from '@tanstack/react-query';
 import { EyeIcon, PencilRulerIcon, Redo2Icon, RotateCcwIcon, Undo2Icon } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
@@ -35,6 +36,8 @@ import { Inspector } from '../features/Inspector';
 import { LibraryPanel } from '../features/LibraryPanel';
 import { LiveValues } from '../features/LiveValues';
 import { Notices } from '../features/Notices';
+import { describeSaveStatus } from '../features/save-status';
+import { focusLibrarySearch } from '../features/StudioHotkeys';
 import { useDocumentSession } from '../features/use-document-session';
 import { ensurePlaygroundDocument, PLAYGROUND_TABS, playgroundStarter, type PlaygroundTab } from './playground-state';
 import { PLAYGROUND_DOCUMENT_ID } from './starter';
@@ -134,6 +137,16 @@ function PlaygroundWorkspace({
   const metrics = viewing && frozen ? frozen : live.metrics;
   const connections = doc.connections ?? [];
   const problems = connectionProblems(connections, live.statuses);
+
+  // The studio shortcuts that make sense here (the canvas binds its own:
+  // Mod+Z, Delete, arrows...). Mod+K is advertised in the library search box.
+  useHotkeys(
+    [
+      { hotkey: 'Mod+K', callback: () => (viewing ? undefined : focusLibrarySearch()) },
+      { hotkey: 'Mod+S', callback: () => void session.writer.persist(session.docRef.current).then((status) => notify(describeSaveStatus(status))) },
+    ],
+    { ignoreInputs: false },
+  );
 
   // Leaving the Viewer resumes the feed: a paused Edit canvas would look broken.
   useEffect(() => {
