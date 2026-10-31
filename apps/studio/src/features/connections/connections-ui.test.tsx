@@ -264,6 +264,58 @@ describe('<BindingDialog />', () => {
     expect(onSave).toHaveBeenCalledWith({ connection: 'sim', source: '/tank/level' });
   });
 
+  // holodeck#243: a suggestion made for one leaf must not stick to the next source.
+  describe('the suggested scale follows the picked source', () => {
+    const leaves = [
+      { path: 'sine:10', label: 'Sine, 10 s, 0–100', source: 'sine:10', type: 'number' as const },
+      { path: '/tank/level', label: 'level', source: '/tank/level', type: 'number' as const },
+    ];
+    const hub = () => ({ session: () => ({ browse: vi.fn(async () => leaves) }) }) as unknown as ProviderHub;
+
+    it('picking a non-percent leaf after a percent one drops the suggestion', async () => {
+      const onSave = open(undefined, hub(), { min: 0, max: 1 });
+      fireEvent.click(await screen.findByText('Sine, 10 s, 0–100'));
+      expect(screen.getByLabelText('Transform kind')).toHaveValue('scale');
+      fireEvent.click(screen.getByText('level'));
+      expect(screen.queryByTestId('binding-suggested-scale')).toBeNull();
+      expect(screen.getByLabelText('Transform kind')).toHaveValue('none');
+      fireEvent.click(screen.getByRole('button', { name: 'Bind' }));
+      expect(onSave).toHaveBeenCalledWith({ connection: 'sim', source: '/tank/level' });
+    });
+
+    it('typing a source or switching connection drops the suggestion', async () => {
+      const onSave = open(undefined, hub(), { min: 0, max: 1 });
+      fireEvent.click(await screen.findByText('Sine, 10 s, 0–100'));
+      fireEvent.change(screen.getByLabelText('Source'), { target: { value: 'const:0.5' } });
+      expect(screen.getByLabelText('Transform kind')).toHaveValue('none');
+      fireEvent.click(await screen.findByText('Sine, 10 s, 0–100'));
+      expect(screen.getByLabelText('Transform kind')).toHaveValue('scale');
+      pick('Connection', 'api');
+      expect(screen.getByLabelText('Transform kind')).toHaveValue('none');
+      fireEvent.change(screen.getByLabelText('Source'), { target: { value: '/tank/level' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Bind' }));
+      expect(onSave).toHaveBeenCalledWith({ connection: 'api', source: '/tank/level' });
+    });
+
+    it('a transform the user edited is kept when another leaf is picked', async () => {
+      const onSave = open(undefined, hub(), { min: 0, max: 1 });
+      fireEvent.click(await screen.findByText('Sine, 10 s, 0–100'));
+      fireEvent.change(screen.getByLabelText('Transform in max'), { target: { value: '200' } });
+      fireEvent.click(screen.getByText('level'));
+      fireEvent.click(screen.getByRole('button', { name: 'Bind' }));
+      expect(onSave).toHaveBeenCalledWith({ connection: 'sim', source: '/tank/level', transform: { kind: 'scale', inMin: 0, inMax: 200, outMin: 0, outMax: 1 } });
+    });
+
+    it('picking another percent leaf keeps a (recomputed) suggestion', async () => {
+      const onSave = open(undefined, hub(), { min: 0, max: 1 });
+      fireEvent.click(await screen.findByText('Sine, 10 s, 0–100'));
+      fireEvent.click(screen.getByText('level'));
+      fireEvent.click(screen.getByText('Sine, 10 s, 0–100'));
+      fireEvent.click(screen.getByRole('button', { name: 'Bind' }));
+      expect(onSave).toHaveBeenCalledWith({ connection: 'sim', source: 'sine:10', transform: { kind: 'scale', inMin: 0, inMax: 100, outMin: 0, outMax: 1 } });
+    });
+  });
+
   it('a connection that is not open yet lists nothing on open and says so on Browse', async () => {
     open(undefined, { session: () => undefined } as unknown as ProviderHub, { min: 0, max: 1 });
     expect(screen.queryByText(/Sine/)).toBeNull();

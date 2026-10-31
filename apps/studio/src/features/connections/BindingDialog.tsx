@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { bindingProblems, formToTransform, suggestedTransformForm, TRANSFORM_KINDS, transformToForm, type ParamRange, type TransformForm } from '../../connections/bindings';
+import { bindingProblems, EMPTY_TRANSFORM_FORM, formToTransform, suggestedTransformForm, TRANSFORM_KINDS, transformToForm, type ParamRange, type TransformForm } from '../../connections/bindings';
 
 const selectClass = 'h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm';
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -44,14 +44,29 @@ export function BindingDialog({
   const conn = connections.find((c) => c.id === connection);
   const provider = providerOf(conn);
 
+  /**
+   * The suggested transform belongs to the leaf it was suggested for
+   * (holodeck#243): picking another leaf recomputes it, and typing a source or
+   * switching connection drops it, so an already-0..1 signal is never shown
+   * at 1/100. A transform the user edited is theirs and is never touched.
+   */
   const pick = (node: SignalNode) => {
     if (!node.source) return;
     setSource(node.source);
-    const next = suggestedTransformForm(node, paramRange, transform);
+    const base = suggested ? EMPTY_TRANSFORM_FORM : transform;
+    const next = suggestedTransformForm(node, paramRange, base);
     if (next) {
       setTransform(next);
       setSuggested(true);
+    } else if (suggested) {
+      setTransform(EMPTY_TRANSFORM_FORM);
+      setSuggested(false);
     }
+  };
+  const dropSuggestion = () => {
+    if (!suggested) return;
+    setTransform(EMPTY_TRANSFORM_FORM);
+    setSuggested(false);
   };
 
   const save = () => {
@@ -96,7 +111,11 @@ export function BindingDialog({
           >
             <div className="grid grid-cols-[7rem_1fr] items-center gap-2">
               <Label htmlFor="binding-connection">Connection</Label>
-              <select id="binding-connection" className={selectClass} value={connection} onChange={(e) => setConnection(e.target.value)}>
+              <select id="binding-connection" className={selectClass} value={connection} onChange={(e) => {
+                  setConnection(e.target.value);
+                  dropSuggestion();
+                }}
+              >
                 {connections.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.label ?? c.id} ({c.provider})
@@ -104,7 +123,14 @@ export function BindingDialog({
                 ))}
               </select>
               <Label htmlFor="binding-source">Source</Label>
-              <Input id="binding-source" value={source} onChange={(e) => setSource(e.target.value)} placeholder={provider?.sourceSyntax ?? 'signal address'} />
+              <Input
+                id="binding-source"
+                value={source}
+                onChange={(e) => {
+                  setSource(e.target.value);
+                  dropSuggestion();
+                }}
+                placeholder={provider?.sourceSyntax ?? 'signal address'} />
             </div>
             {provider?.sourceSyntax ? (
               <p className="text-[11px] text-muted-foreground">
@@ -118,7 +144,14 @@ export function BindingDialog({
                 the signal uses another range.
               </p>
             ) : null}
-            <TransformEditor value={transform} onChange={setTransform} />
+            <TransformEditor
+              value={transform}
+              onChange={(next) => {
+                // Edited by the user: no longer a suggestion.
+                setTransform(next);
+                setSuggested(false);
+              }}
+            />
             {problems.length ? (
               <ul role="alert" data-testid="binding-problems" className="list-disc pl-5 text-xs text-destructive">
                 {problems.map((p) => (
