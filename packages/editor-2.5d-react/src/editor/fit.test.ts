@@ -91,3 +91,19 @@ describe('fitView', () => {
     expect(Number.isFinite(fitView(box, top, 1000, 800).zoom)).toBe(true);
   });
 });
+
+/** holodeck#238: fit-to-scene must frame a tank at the size its radius draws it (footprintOf). */
+describe('sceneWorldBox follows footprintOf', () => {
+  it('a radius-3 tank (6x6) widens the box beyond the static 2x2 footprint', async () => {
+    const { createIsoRegistryWithBuiltins } = await import('../registry/default');
+    const reg = createIsoRegistryWithBuiltins();
+    const getPart = (id: string) => reg.get<import('../registry/types').IsoPartDefinition>('holodeck.iso.part', id);
+    const box = (params: Record<string, unknown>) =>
+      sceneWorldBox({ objects: [{ id: 't', object: 'tank', x: 0, y: 0, params }] }, getPart);
+    const small = box({});
+    const big = box({ radius: 3 });
+    expect(big.max[0] - big.min[0]).toBeCloseTo(6);
+    expect(big.max[2] - big.min[2]).toBeCloseTo(6);
+    expect(small.max[0] - small.min[0]).toBeCloseTo(2);
+  });
+});
