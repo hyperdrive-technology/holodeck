@@ -6,7 +6,8 @@
 import { describe, expect, it } from 'vitest';
 import { BUILTIN_ISO_PARTS, TANK_SHAPES, TANK_SHAPE_PLAIN, tankPlacementShape } from './builtin';
 import { TANK_PRESETS } from '../../assets/process/tank-presets';
-import { DEFAULT_TANK_PARAMS, MIXER_WINDOW_DEG, TANK_WINDOW_DEG, mergeTankParams } from '../../assets/process/tank-params';
+import { DEFAULT_TANK_PARAMS, MIXER_WINDOW_DEG, TANK_WINDOW_DEG, changedTankParams, mergeTankParams, type TankParams } from '../../assets/process/tank-params';
+import { usesMixerModel } from '../../assets/process/agitated-vessel';
 import { vesselCutout, vesselRadius, vesselWallSpan } from '../routing/vessel-ports';
 import { placementFootprint, resolveParams } from './params';
 import { createIsoRegistryWithBuiltins } from './default';
@@ -113,5 +114,22 @@ describe('the tuner cannot switch mixerModel off', () => {
   });
   it('and a plain tank does not gain it', () => {
     expect(tankPlacementShape({ params: {} }, { ...DEFAULT_TANK_PARAMS, mixerModel: true }).params.mixerModel).toBeUndefined();
+  });
+});
+
+/** holodeck#235: an open tuner (default state) must leave the mash tun on mixer.glb. */
+describe('the TankTuner hands parts only what was changed', () => {
+  const mash = tank({ preset: 'mash-tun' });
+  const drawsGlb = (tankParams: Partial<TankParams>) => usesMixerModel(tankPlacementShape(mash, tankParams).params);
+
+  it('default tuner state: the mash tun stays mixer.glb', () => {
+    expect(drawsGlb(changedTankParams(DEFAULT_TANK_PARAMS))).toBe(true);
+  });
+  it('a moved window slider takes it to the procedural body', () => {
+    expect(drawsGlb(changedTankParams({ ...DEFAULT_TANK_PARAMS, windowDeg: 70 }))).toBe(false);
+  });
+  it('changedTankParams keeps only the keys that differ from the defaults', () => {
+    expect(changedTankParams(DEFAULT_TANK_PARAMS)).toEqual({});
+    expect(changedTankParams({ ...DEFAULT_TANK_PARAMS, radius: 2, showWall: false })).toEqual({ radius: 2, showWall: false });
   });
 });

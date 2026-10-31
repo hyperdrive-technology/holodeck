@@ -490,6 +490,24 @@ export function segmentsInsideWindow(positions: Float32Array, windowStart: numbe
   return n;
 }
 
+/**
+ * The keys of a full `params` object that differ from `base` (default: the
+ * Tank defaults). The TankTuner hands parts only these: its state is a FULL
+ * TankParams, and passing all of it overrode every preset with the defaults --
+ * an open tuner pulled the Mixer / mash tun out of mixer.glb (window 91 vs the
+ * GLB's 100, holodeck#235) and replaced every preset's closures.
+ */
+export function changedTankParams(params: Partial<TankParams>, base: TankParams = DEFAULT_TANK_PARAMS): Partial<TankParams> {
+  const out: Record<string, unknown> = {};
+  const b = base as unknown as Record<string, unknown>;
+  for (const [k, v] of Object.entries(params)) {
+    const d = b[k];
+    const same = typeof v === 'number' && typeof d === 'number' ? Math.abs(v - d) < 1e-9 : v === d;
+    if (!same && v !== undefined) out[k] = v;
+  }
+  return out as Partial<TankParams>;
+}
+
 export function mergeTankParams(partial?: Partial<TankParams>): ResolvedTankParams {
   // `undefined` in `partial` (an optional field left unset) must not erase a default.
   const out = { ...DEFAULT_TANK_PARAMS } as ResolvedTankParams;

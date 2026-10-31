@@ -7,6 +7,7 @@ import {
 } from '../../assets/process/fitting-params';
 import {
   DEFAULT_TANK_PARAMS,
+  changedTankParams,
   mergeTankParams,
   type TankParams,
 } from '../../assets/process/tank-params';
@@ -232,6 +233,7 @@ export function TankTuner() {
   const [fittings, setFittings] = useState<FittingParams>(initial.fittings);
   const [extras, setExtras] = useState<TunerExtras>(initial.extras);
   const [copied, setCopied] = useState(false);
+  const tunedParams = useMemo(() => changedTankParams(params), [params]);
 
   useEffect(() => {
     localStorage.setItem(STORE, JSON.stringify({ params, fittings, extras }));
@@ -556,7 +558,8 @@ export function TankTuner() {
             <SceneGraph
               objects={objects}
               metrics={PROCESS_SNAPSHOT_METRICS}
-              tankParams={params}
+              // Only what was changed (holodeck#235): the full state would override every preset.
+              tankParams={tunedParams}
               fittings={fittings}
               instanced={false}
             />
