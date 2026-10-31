@@ -233,11 +233,43 @@ describe('<BindingDialog />', () => {
   ];
   const providerOf = (c: { provider: string } | undefined) => (c ? host.registry.get('holodeck.provider', c.provider) : undefined) as never;
 
-  function open(current?: SignalBinding, hub?: ProviderHub) {
+  function open(current?: SignalBinding, hub?: ProviderHub, paramRange?: { min: number; max: number }) {
     const onSave = vi.fn();
-    render(<BindingDialog paramLabel="Level" connections={connections} current={current} hub={hub} providerOf={providerOf} onSave={onSave} onClose={() => undefined} />);
+    render(
+      <BindingDialog paramLabel="Level" paramRange={paramRange} connections={connections} current={current} hub={hub} providerOf={providerOf} onSave={onSave} onClose={() => undefined} />,
+    );
     return onSave;
   }
+
+  it('lists the top level of an open connection as soon as it opens, and scales a percent leaf onto the param range', async () => {
+    const browse = vi.fn(async () => [
+      { path: 'sine:10', label: 'Sine, 10 s, 0–100', source: 'sine:10', type: 'number' as const },
+      { path: '/tank/level', label: 'level', source: '/tank/level', type: 'number' as const },
+    ]);
+    const hub = { session: () => ({ browse }) } as unknown as ProviderHub;
+    const onSave = open(undefined, hub, { min: 0, max: 1 });
+    fireEvent.click(await screen.findByText('Sine, 10 s, 0–100'));
+    expect(browse).toHaveBeenCalledWith(undefined);
+    expect(screen.getByTestId('binding-suggested-scale')).toHaveTextContent('Scaled 0–100 to Level’s range 0–1');
+    fireEvent.click(screen.getByRole('button', { name: 'Bind' }));
+    expect(onSave).toHaveBeenCalledWith({ connection: 'sim', source: 'sine:10', transform: { kind: 'scale', inMin: 0, inMax: 100, outMin: 0, outMax: 1 } });
+  });
+
+  it('binds a numeric leaf that declares no percent range as is (an HTTP level already 0..1)', async () => {
+    const browse = vi.fn(async () => [{ path: '/tank/level', label: 'level', source: '/tank/level', type: 'number' as const }]);
+    const onSave = open(undefined, { session: () => ({ browse }) } as unknown as ProviderHub, { min: 0, max: 1 });
+    fireEvent.click(await screen.findByText('level'));
+    expect(screen.queryByTestId('binding-suggested-scale')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Bind' }));
+    expect(onSave).toHaveBeenCalledWith({ connection: 'sim', source: '/tank/level' });
+  });
+
+  it('a connection that is not open yet lists nothing on open and says so on Browse', async () => {
+    open(undefined, { session: () => undefined } as unknown as ProviderHub, { min: 0, max: 1 });
+    expect(screen.queryByText(/Sine/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Browse/ }));
+    expect(await screen.findByText(/not open yet/)).toBeInTheDocument();
+  });
 
   it('binds with a scale transform validated by the SDK', () => {
     const onSave = open();

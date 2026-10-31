@@ -47,17 +47,28 @@ export interface ParamRange {
 }
 
 /**
+ * Does a browse leaf say it is a percentage? `unit: '%'`, or a "0–100" range
+ * in its label (the built-in `holodeck.sim` leaves: "Sine, 10 s, 0–100").
+ * `SignalNode` has no numeric range field yet (holodeck-sdk follow-up), so
+ * this reads what providers already publish rather than guessing.
+ */
+export function isPercentLeaf(node: Pick<SignalNode, 'unit' | 'label'>): boolean {
+  return node.unit === '%' || /(^|[^\d.])0\s*[–-]\s*100(?![\d.])/.test(node.label ?? '');
+}
+
+/**
  * The transform to suggest when a numeric signal is picked from a provider's
  * browse list for a parameter with a declared range, or null to leave the
- * form alone. Browse leaves of the built-in providers are percentages
- * (`holodeck.sim`: "Sine, 10 s, 0–100"), while e.g. a vessel's `level` is a
- * 0..1 fraction: bound raw, the tank would sit full almost all the time. So
- * the suggestion scales 0–100 onto the parameter's range (clamped). It only
- * fills an untouched form (kind `none`), never replaces a transform the
- * user chose, and the dialog says what it did so it can be changed.
+ * form alone. A percent leaf (see `isPercentLeaf`) bound raw to e.g. a
+ * vessel's 0..1 `level` would sit full almost all the time, so the
+ * suggestion scales 0–100 onto the parameter's range (clamped). Leaves that
+ * do not declare a percent range are left alone: an HTTP `/tank/level` is
+ * often already 0..1 (the e2e fixture's is). It only fills an untouched form
+ * (kind `none`), never replaces a transform the user chose, and the dialog
+ * says what it did so it can be changed.
  */
-export function suggestedTransformForm(node: Pick<SignalNode, 'type'>, range: ParamRange | undefined, current: TransformForm): TransformForm | null {
-  if (current.kind !== 'none' || node.type !== 'number' || !range) return null;
+export function suggestedTransformForm(node: Pick<SignalNode, 'type' | 'unit' | 'label'>, range: ParamRange | undefined, current: TransformForm): TransformForm | null {
+  if (current.kind !== 'none' || node.type !== 'number' || !range || !isPercentLeaf(node)) return null;
   const { min, max } = range;
   if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) return null;
   if (min === 0 && max === 100) return null;

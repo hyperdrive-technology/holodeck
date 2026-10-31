@@ -8,6 +8,7 @@ import {
   connectionUsages,
   EMPTY_TRANSFORM_FORM,
   formToTransform,
+  isPercentLeaf,
   parseSignalValue,
   suggestedTransformForm,
   transformToForm,
@@ -134,26 +135,44 @@ describe('bindings', () => {
   });
 });
 
+describe('isPercentLeaf', () => {
+  it('reads a % unit or a 0–100 range in the label', () => {
+    expect(isPercentLeaf({ label: 'Sine, 10 s, 0–100' })).toBe(true);
+    expect(isPercentLeaf({ label: 'Noise, seed 1, 0-100' })).toBe(true);
+    expect(isPercentLeaf({ label: 'level', unit: '%' })).toBe(true);
+    expect(isPercentLeaf({ label: 'level' })).toBe(false);
+    expect(isPercentLeaf({ label: 'Range 0–1000' })).toBe(false);
+    expect(isPercentLeaf({ label: 'Range 10–100' })).toBe(false);
+    expect(isPercentLeaf({ label: 'Range 0.5–100' })).toBe(false);
+  });
+});
+
 describe('suggestedTransformForm (a browse leaf picked for a ranged param)', () => {
   const level = { min: 0, max: 1 };
-  it('scales 0-100 onto the param range for a numeric leaf and an untouched form', () => {
-    const form = suggestedTransformForm({ type: 'number' }, level, EMPTY_TRANSFORM_FORM);
+  const pct = { type: 'number' as const, label: 'Sine, 10 s, 0–100' };
+  it('scales 0-100 onto the param range for a percent leaf and an untouched form', () => {
+    const form = suggestedTransformForm(pct, level, EMPTY_TRANSFORM_FORM);
     expect(form).toMatchObject({ kind: 'scale', inMin: '0', inMax: '100', outMin: '0', outMax: '1', clamp: true });
     expect(formToTransform(form!)).toEqual({ transform: { kind: 'scale', inMin: 0, inMax: 100, outMin: 0, outMax: 1 }, problems: [] });
-    expect(suggestedTransformForm({ type: 'number' }, { min: 0, max: 300 }, EMPTY_TRANSFORM_FORM)).toMatchObject({ outMin: '0', outMax: '300' });
+    expect(suggestedTransformForm(pct, { min: 0, max: 300 }, EMPTY_TRANSFORM_FORM)).toMatchObject({ outMin: '0', outMax: '300' });
+    expect(suggestedTransformForm({ type: 'number', label: 'fill', unit: '%' }, level, EMPTY_TRANSFORM_FORM)).toMatchObject({ kind: 'scale' });
+  });
+
+  it('leaves a numeric leaf without a declared percent range alone (an HTTP /tank/level is often 0..1 already)', () => {
+    expect(suggestedTransformForm({ type: 'number', label: 'level' }, level, EMPTY_TRANSFORM_FORM)).toBeNull();
   });
 
   it('never replaces a transform the user chose', () => {
-    expect(suggestedTransformForm({ type: 'number' }, level, { ...EMPTY_TRANSFORM_FORM, kind: 'format' })).toBeNull();
-    expect(suggestedTransformForm({ type: 'number' }, level, { ...EMPTY_TRANSFORM_FORM, kind: 'scale' })).toBeNull();
+    expect(suggestedTransformForm(pct, level, { ...EMPTY_TRANSFORM_FORM, kind: 'format' })).toBeNull();
+    expect(suggestedTransformForm(pct, level, { ...EMPTY_TRANSFORM_FORM, kind: 'scale' })).toBeNull();
   });
 
   it('suggests nothing for non-numeric leaves, unranged params, 0-100 params or a bad range', () => {
-    expect(suggestedTransformForm({ type: 'boolean' }, level, EMPTY_TRANSFORM_FORM)).toBeNull();
-    expect(suggestedTransformForm({}, level, EMPTY_TRANSFORM_FORM)).toBeNull();
-    expect(suggestedTransformForm({ type: 'number' }, undefined, EMPTY_TRANSFORM_FORM)).toBeNull();
-    expect(suggestedTransformForm({ type: 'number' }, { min: 0, max: 100 }, EMPTY_TRANSFORM_FORM)).toBeNull();
-    expect(suggestedTransformForm({ type: 'number' }, { min: 1, max: 1 }, EMPTY_TRANSFORM_FORM)).toBeNull();
-    expect(suggestedTransformForm({ type: 'number' }, { min: 0, max: Number.NaN }, EMPTY_TRANSFORM_FORM)).toBeNull();
+    expect(suggestedTransformForm({ ...pct, type: 'boolean' }, level, EMPTY_TRANSFORM_FORM)).toBeNull();
+    expect(suggestedTransformForm({ label: pct.label }, level, EMPTY_TRANSFORM_FORM)).toBeNull();
+    expect(suggestedTransformForm(pct, undefined, EMPTY_TRANSFORM_FORM)).toBeNull();
+    expect(suggestedTransformForm(pct, { min: 0, max: 100 }, EMPTY_TRANSFORM_FORM)).toBeNull();
+    expect(suggestedTransformForm(pct, { min: 1, max: 1 }, EMPTY_TRANSFORM_FORM)).toBeNull();
+    expect(suggestedTransformForm(pct, { min: 0, max: Number.NaN }, EMPTY_TRANSFORM_FORM)).toBeNull();
   });
 });
