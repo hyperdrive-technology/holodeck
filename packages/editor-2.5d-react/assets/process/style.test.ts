@@ -4,7 +4,7 @@ import { DEFAULT_FITTING_PARAMS } from './fitting-params';
 import { createFinishMaterial, type IsoUniforms } from './materials';
 import { PIPE_WIRE_WIDTH, WEST_RING_EDGE_THRESHOLD } from './pipe-math';
 import { BODY, EDGE, FILL } from './Shell';
-import { FINISH_NAMES, HOLODECK_STYLE, LIQUID_FINISH, finishToken, liquidFinish } from './style';
+import { FINISH_NAMES, HOLODECK_STYLE, LIQUID_FINISH, MATERIAL_FINISH_NAMES, finishToken, liquidFinish } from './style';
 import {
   DEFAULT_TANK_PARAMS,
   MIXER_HUB_WHITE,
@@ -70,7 +70,9 @@ describe('HOLODECK_STYLE tokens', () => {
       // hd.liquid contract (2026-10-29): the Blender mixer lane exports a material named hd.liquid.
       liquid: { kind: 'liquid', opacity: 0.78, renderOrder: 2, depthWrite: false, offset: false },
     });
-    expect([...FINISH_NAMES].sort()).toEqual(Object.keys(HOLODECK_STYLE.finishes).sort());
+    expect([...MATERIAL_FINISH_NAMES].sort()).toEqual(Object.keys(HOLODECK_STYLE.finishes).sort());
+    // The shell names are main's five; liquid is the separate token.
+    expect([...FINISH_NAMES]).toEqual(['white', 'shaded', 'vessel', 'flask', 'accent']);
   });
 
   it('liquid finish: translucent, no depth writes, drawn after shells; old themes fall back to it', () => {

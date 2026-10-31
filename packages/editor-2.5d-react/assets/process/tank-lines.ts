@@ -30,6 +30,7 @@
  */
 import {
   type TankParams,
+  type ResolvedTankParams,
   type TankTop,
   bowlLatitudeRings,
   bowlProfile,
@@ -192,7 +193,7 @@ export function flatLidHatch(tankR: number, p: Pick<TankParams, 'height' | 'capH
 }
 
 /** All of a (non-agitated, non-shouldered) Tank's line sets for `p`, `top`, size and fill level. */
-export function tankLinePlan(p: TankParams, top: TankTop, tankH: number, tankR: number, level: number): TankLinePlan {
+export function tankLinePlan(p: ResolvedTankParams, top: TankTop, tankH: number, tankR: number, level: number): TankLinePlan {
   const layout = tankLayout(tankH, tankR, p);
   const { y0, bodyTop } = layout;
   const segs = Math.max(3, Math.round(p.radialSegments));

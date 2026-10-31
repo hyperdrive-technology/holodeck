@@ -37,8 +37,8 @@ export {
 export type { TankPreset, TankPresetId } from './tank-presets';
 export type { FittingParams } from './fitting-params';
 export { DEFAULT_FITTING_PARAMS, mergeFittingParams } from './fitting-params';
-export { FINISH_NAMES, HOLODECK_STYLE } from './style';
-export type { Finish, FinishName, HolodeckStyle, IsoFinish, UnlitFinish } from './style';
+export { FINISH_NAMES, HOLODECK_STYLE, LIQUID_FINISH, MATERIAL_FINISH_NAMES, liquidFinish } from './style';
+export type { Finish, FinishName, HolodeckStyle, IsoFinish, LiquidFinish, MaterialFinishName, UnlitFinish } from './style';
 export { createFinishMaterial, createIsoShadeMaterial, createUnlitMaterial, setIsoShade } from './materials';
 export type { FinishMaterialOptions, IsoShadeParams } from './materials';
 export { createEdgeLines, createEdgeMaterial, setEdgeLinesAppearance, setEdgeLinesSource } from './edge-lines';

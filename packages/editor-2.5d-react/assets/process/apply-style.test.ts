@@ -17,6 +17,7 @@ import {
   findAnimNodes,
   findPorts,
   finishForMaterialName,
+  materialFinishForName,
   resetHolodeckStyleWarnings,
 } from './apply-style';
 import type { IsoUniforms } from './materials';
@@ -57,8 +58,11 @@ afterEach(() => {
 
 describe('hd.liquid (translucent liquid contract shared with the Blender lane)', () => {
   it('parses hd.liquid and its Blender duplicate suffix', () => {
-    expect(finishForMaterialName('hd.liquid')).toBe('liquid');
-    expect(finishForMaterialName('hd.liquid.002')).toBe('liquid');
+    expect(materialFinishForName('hd.liquid')).toBe('liquid');
+    expect(materialFinishForName('hd.liquid.002')).toBe('liquid');
+    expect(materialFinishForName('hd.vessel.001')).toBe('vessel');
+    // The original shell-finish lookup keeps its type and result for hd.liquid (not a shell finish).
+    expect(finishForMaterialName('hd.liquid')).toBeNull();
   });
 
   it('renders as the translucent liquid: style colour, finish opacity, depthWrite off, render order, edges', () => {

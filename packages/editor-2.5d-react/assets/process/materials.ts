@@ -1,7 +1,7 @@
 import { Color, type ColorRepresentation, type Side } from 'three';
 import { clamp, float, length, max, min, mix, normalView, positionLocal, uniform, vec3 } from 'three/tsl';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { HOLODECK_STYLE, finishToken, type Finish, type FinishName, type HolodeckStyle, type IsoFinish } from './style';
+import { HOLODECK_STYLE, finishToken, type Finish, type HolodeckStyle, type IsoFinish, type LiquidFinish, type MaterialFinishName } from './style';
 
 /**
  * Plain (non-React) material factories for the Holodeck iso look.
@@ -158,7 +158,7 @@ export type FinishMaterialOptions = {
  * `applyHolodeckStyle` can tell styled materials apart.
  */
 export function createFinishMaterial(
-  finish: FinishName | Finish,
+  finish: MaterialFinishName | Finish | LiquidFinish,
   opts: FinishMaterialOptions = {},
 ): MeshBasicNodeMaterial {
   const style = opts.style ?? HOLODECK_STYLE;

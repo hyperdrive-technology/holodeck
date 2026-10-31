@@ -141,12 +141,13 @@ export type TankParams = {
   bodyHeightSegments: number;
   /**
    * @deprecated Ignored since #228 (Des 2026-10-30: "remove the horizontal
-   * rings on the inside of the tank"): body hoops are no longer drawn. Kept
-   * optional so params objects written against earlier releases still compile.
+   * rings on the inside of the tank"): body hoops are no longer drawn. Kept,
+   * with its old default (0), so code written against earlier releases still
+   * compiles both ways (building a TankParams and reading one).
    */
-  bodyRings?: number;
-  /** @deprecated Ignored since #228, with `bodyRings`. */
-  bodyRingWidth?: number;
+  bodyRings: number;
+  /** @deprecated Ignored since #228, with `bodyRings` (default 0.004). */
+  bodyRingWidth: number;
   cageThreshold: number;
   wallThreshold: number;
   domeHeightSegments: number;
@@ -188,9 +189,9 @@ export type TankParams = {
    * Inner back wall lines seen through the window: the structural rims (wall meets floor / dish and
    * dome / lid) and the facet seams between them. No body hoops since round 5 (`interiorRimHeights`).
    */
-  showInteriorRings: boolean;
+  showInteriorRings?: boolean;
   /** Liner facet seams on the back wall: every Nth vertex, 0 = none (`TANK_INTERIOR_MERIDIAN_STEP`). */
-  interiorMeridianStep: number;
+  interiorMeridianStep?: number;
   shaftRadius: number;
   shaftLength: number;
   impellerSpan: number;
@@ -221,7 +222,7 @@ export type TankParams = {
    * on every brewery vessel, and a fermenter with an agitator must keep its
    * cone, legs and window (review of #228).
    */
-  mixerModel: boolean;
+  mixerModel?: boolean;
   /** Side nozzle on the kept arc. */
   nozzle: TankNozzle;
   /** Cone lid height (world units) for `top: 'cone'`. */
@@ -242,7 +243,19 @@ export type TankParams = {
   legCount: number;
 };
 
-export const DEFAULT_TANK_PARAMS: TankParams = {
+/**
+ * `TankParams` with the fields added after the first release filled in.
+ * Those fields are OPTIONAL on `TankParams` (a complete params object written
+ * against an earlier release must still compile: second / third review of
+ * #228); `mergeTankParams` / `DEFAULT_TANK_PARAMS` always supply them.
+ */
+export type ResolvedTankParams = TankParams & {
+  showInteriorRings: boolean;
+  interiorMeridianStep: number;
+  mixerModel: boolean;
+};
+
+export const DEFAULT_TANK_PARAMS: ResolvedTankParams = {
   height: 3.05,
   radius: 1,
   fill: 0.21,
@@ -255,6 +268,8 @@ export const DEFAULT_TANK_PARAMS: TankParams = {
   windowYawDeg: TANK_WINDOW_YAW,
   radialSegments: 15,
   bodyHeightSegments: 1,
+  bodyRings: 0,
+  bodyRingWidth: 0.004,
   cageThreshold: 1,
   wallThreshold: TANK_WALL_THRESHOLD,
   domeHeightSegments: TANK_DOME_HEIGHT_SEGMENTS,
@@ -475,8 +490,13 @@ export function segmentsInsideWindow(positions: Float32Array, windowStart: numbe
   return n;
 }
 
-export function mergeTankParams(partial?: Partial<TankParams>): TankParams {
-  return { ...DEFAULT_TANK_PARAMS, ...partial };
+export function mergeTankParams(partial?: Partial<TankParams>): ResolvedTankParams {
+  // `undefined` in `partial` (an optional field left unset) must not erase a default.
+  const out = { ...DEFAULT_TANK_PARAMS } as ResolvedTankParams;
+  if (partial) {
+    for (const [k, v] of Object.entries(partial)) if (v !== undefined) (out as Record<string, unknown>)[k] = v;
+  }
+  return out;
 }
 
 /**

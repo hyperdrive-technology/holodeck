@@ -11,7 +11,7 @@ import type { LineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
 import type { Line2NodeMaterial } from 'three/webgpu';
 import { createEdgeLines, createEdgeMaterial } from './edge-lines';
 import { createFinishMaterial } from './materials';
-import { FINISH_NAMES, HOLODECK_STYLE, liquidFinish, type FinishName, type HolodeckStyle } from './style';
+import { FINISH_NAMES, HOLODECK_STYLE, MATERIAL_FINISH_NAMES, liquidFinish, type FinishName, type HolodeckStyle, type MaterialFinishName } from './style';
 
 /**
  * Apply the Holodeck iso look to any three scene graph (typically a
@@ -63,12 +63,25 @@ export type ApplyStyleOverrides = {
   threshold?: number;
 };
 
-const FINISH_RE = new RegExp(`^hd\\.(${FINISH_NAMES.join('|')})(?:\\.\\d+)?$`);
+const FINISH_RE = new RegExp(`^hd\\.(${MATERIAL_FINISH_NAMES.join('|')})(?:\\.\\d+)?$`);
 
-/** `hd.vessel` / `hd.vessel.001` → `'vessel'`; anything else → `null`. */
-export function finishForMaterialName(name: string | undefined | null): FinishName | null {
+/**
+ * `hd.vessel` / `hd.liquid.001` → `'vessel'` / `'liquid'`; anything else →
+ * `null`. Every material `applyHolodeckStyle` understands.
+ */
+export function materialFinishForName(name: string | undefined | null): MaterialFinishName | null {
   const match = name ? FINISH_RE.exec(name) : null;
-  return match ? (match[1] as FinishName) : null;
+  return match ? (match[1] as MaterialFinishName) : null;
+}
+
+/**
+ * `hd.vessel` / `hd.vessel.001` → `'vessel'`; anything else (including
+ * `hd.liquid`, a separate liquid token) → `null`. The original shell-finish
+ * lookup, kept with its signature; see `materialFinishForName` for all.
+ */
+export function finishForMaterialName(name: string | undefined | null): FinishName | null {
+  const finish = materialFinishForName(name);
+  return finish === 'liquid' ? null : finish;
 }
 
 const warned = new Set<string>();
@@ -212,12 +225,12 @@ export function applyHolodeckStyle(
     if (source.userData?.hdFinish !== undefined) {
       return source;
     }
-    let finish = finishForMaterialName(source.name);
+    let finish = materialFinishForName(source.name);
     if (!finish) {
       const label = source.name || '(unnamed)';
       warnOnce(
         `material:${label}`,
-        `applyHolodeckStyle: material "${label}" is not one of ${FINISH_NAMES.map((n) => MATERIAL_PREFIX + n).join(', ')}; using hd.white`,
+        `applyHolodeckStyle: material "${label}" is not one of ${MATERIAL_FINISH_NAMES.map((n) => MATERIAL_PREFIX + n).join(', ')}; using hd.white`,
       );
       finish = 'white';
     }

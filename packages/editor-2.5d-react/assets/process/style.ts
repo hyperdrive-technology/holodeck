@@ -66,10 +66,20 @@ export type LiquidFinish = {
   offset: boolean;
 };
 
-export type Finish = UnlitFinish | IsoFinish | LiquidFinish;
+/**
+ * A shell finish token. Unchanged since the first release: the liquid is a
+ * separate token (`LiquidFinish`, `style.finishes.liquid`), so code that
+ * switches over `Finish` / indexes `style.finishes[FinishName]` still gets a
+ * shell `Finish` (third review of #228: widening these unions was a public
+ * type break).
+ */
+export type Finish = UnlitFinish | IsoFinish;
 
-/** Finish names. A GLB material named `hd.<name>` picks the matching finish. */
-export type FinishName = 'white' | 'shaded' | 'vessel' | 'flask' | 'accent' | 'liquid';
+/** Shell finish names. A GLB material named `hd.<name>` picks the matching finish. */
+export type FinishName = 'white' | 'shaded' | 'vessel' | 'flask' | 'accent';
+
+/** Every GLB material finish: the shell finishes plus `hd.liquid` (`MATERIAL_FINISH_NAMES`). */
+export type MaterialFinishName = FinishName | 'liquid';
 
 /**
  * Tokens for the Arcentry-parity annotation objects (connectors, area
@@ -164,7 +174,7 @@ export type HolodeckStyle = {
     /** Pipe / fitting / vessel wire width in CSS px. */
     wireWidth: number;
   };
-  finishes: {
+  finishes: Record<FinishName, Finish> & {
     white: UnlitFinish;
     shaded: IsoFinish;
     vessel: IsoFinish;
@@ -312,7 +322,10 @@ export const HOLODECK_STYLE: HolodeckStyle = {
 };
 
 /** Finish names in a fixed order (tests, tuners, material-name parsing). */
-export const FINISH_NAMES: readonly FinishName[] = ['white', 'shaded', 'vessel', 'flask', 'accent', 'liquid'];
+export const FINISH_NAMES: readonly FinishName[] = ['white', 'shaded', 'vessel', 'flask', 'accent'];
+
+/** Every `hd.<name>` material a GLB may use: the shell finishes plus `hd.liquid`. */
+export const MATERIAL_FINISH_NAMES: readonly MaterialFinishName[] = [...FINISH_NAMES, 'liquid'];
 
 /** The liquid finish of `style`, defaulted for themes that predate it. */
 export function liquidFinish(style: HolodeckStyle): LiquidFinish {
@@ -320,7 +333,9 @@ export function liquidFinish(style: HolodeckStyle): LiquidFinish {
 }
 
 /** A finish token by name; `liquid` falls back to `LIQUID_FINISH` for older themes. */
-export function finishToken(style: HolodeckStyle, name: FinishName): Finish {
+export function finishToken(style: HolodeckStyle, name: FinishName): Finish;
+export function finishToken(style: HolodeckStyle, name: MaterialFinishName): Finish | LiquidFinish;
+export function finishToken(style: HolodeckStyle, name: MaterialFinishName): Finish | LiquidFinish {
   return name === 'liquid' ? liquidFinish(style) : style.finishes[name];
 }
 
