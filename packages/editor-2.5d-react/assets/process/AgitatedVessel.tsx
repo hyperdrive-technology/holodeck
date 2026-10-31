@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useHolodeckStyle } from './style-context';
 import type { Object3D } from 'three';
 import { modelUrl } from '../models';
 import { findAnimNodes } from './apply-style';
 import { HolodeckModel } from './HolodeckModel';
-import { agitatedVesselScale, MIXER_GLB } from './agitated-vessel';
+import { agitatedVesselScale, mixerGlbStyle, MIXER_GLB, type MixerShade } from './agitated-vessel';
 
 /**
  * The agitated vessel as the Blender mixer (mixer.glb): replaces the
@@ -30,6 +31,7 @@ export function AgitatedVessel({
   floorY,
   fill,
   agitator = true,
+  shade,
   color,
   opacity,
   edgeColor,
@@ -41,12 +43,21 @@ export function AgitatedVessel({
   fill: number;
   /** Show the GLB's `anim.agitator` (shaft + impeller); false hides it (`TankParams.agitator` off). */
   agitator?: boolean;
+  /** Caller shell shading (`shadeMin` / `shadeMax` / `hubWhite`) for the GLB's `hd.flask` shells. */
+  shade?: MixerShade;
   color: string;
   opacity?: number;
   edgeColor?: string;
   instanceKey?: string;
 }) {
   const scale = agitatedVesselScale(radius, height);
+  const theme = useHolodeckStyle();
+  // Keyed on the values: a new style object would rebuild HolodeckModel's styled clone every render.
+  const style = useMemo(
+    () => mixerGlbStyle(theme, shade),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [theme, shade?.shadeMin, shade?.shadeMax, shade?.hubWhite],
+  );
   const [root, setRoot] = useState<Object3D | null>(null);
   const onReady = useCallback((o: Object3D) => setRoot(o), []);
   useEffect(() => {
@@ -70,6 +81,7 @@ export function AgitatedVessel({
         liquid={color}
         liquidOpacity={opacity}
         edgeColor={edgeColor}
+        style={style}
         onReady={onReady}
       />
     </group>

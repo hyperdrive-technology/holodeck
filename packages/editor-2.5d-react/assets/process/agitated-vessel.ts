@@ -12,6 +12,7 @@
  */
 import { mergeTankParams, type TankParams } from './tank-params';
 import { MASH_TUN_PRESET } from './tank-presets';
+import type { HolodeckStyle } from './style';
 
 export const MIXER_GLB = {
   model: 'mixer',
@@ -53,9 +54,24 @@ export const MIXER_GLB_SHAPE = {
 } as const;
 
 /**
- * Params the mixer.glb path honours (size, liquid, colours, agitator on/off)
- * or that change nothing (deprecated `bodyRings`). Every OTHER param must
- * equal the mixer body's own value for the GLB to be drawn.
+ * TankParams that change nothing on EITHER body: the deprecated body hoops
+ * (removed with the interior rings in #228) and three thresholds main never
+ * read either. Overriding them keeps mixer.glb.
+ */
+export const TANK_PARAMS_NO_OP = new Set<keyof TankParams>([
+  'bodyRings',
+  'bodyRingWidth',
+  'cageThreshold',
+  'domeThreshold',
+  'bowlThreshold',
+]);
+
+/**
+ * Params the mixer.glb path honours: each reaches `AgitatedVessel` through
+ * `mixerGlbProps` (size, liquid level / colour / opacity / visibility, edge
+ * colour, shell shading, agitator on/off). Every OTHER param (apart from
+ * `TANK_PARAMS_NO_OP`) must equal the mixer body's own value for the GLB to
+ * be drawn; tank-params-coverage.test.ts checks all of TankParams.
  */
 export const MIXER_GLB_HONOURED = new Set<keyof TankParams>([
   'height',
@@ -70,9 +86,65 @@ export const MIXER_GLB_HONOURED = new Set<keyof TankParams>([
   'hubWhite',
   'agitator',
   'mixerModel',
-  'bodyRings',
-  'bodyRingWidth',
 ]);
+
+/** Shell shading a caller set explicitly (`shadeMin` / `shadeMax` / `hubWhite`). */
+export type MixerShade = Partial<Pick<TankParams, 'shadeMin' | 'shadeMax' | 'hubWhite'>>;
+
+/** What `Tank` resolved for the vessel (its size, floor, level, liquid colour). */
+export type MixerGeometry = { tankR: number; tankH: number; floorY: number; level: number; empty: boolean; color: string };
+
+/**
+ * The props `Tank` gives `AgitatedVessel` (one place, so every honoured param
+ * provably reaches it). `shade` carries only the shading the CALLER passed
+ * (`callerParams`): without it the GLB keeps the theme's `hd.flask` look
+ * rather than the vessel shade `Tank` seeds from the theme. Fourth review of
+ * #228: `<Mixer params={{ shadeMin }}>` used to be dropped here.
+ */
+export function mixerGlbProps(
+  p: Partial<TankParams>,
+  callerParams: Partial<TankParams>,
+  g: MixerGeometry,
+): {
+  radius: number;
+  height: number;
+  floorY: number;
+  fill: number;
+  agitator: boolean;
+  color: string;
+  opacity: number | undefined;
+  edgeColor: string | undefined;
+  shade: MixerShade | undefined;
+} {
+  const shade: MixerShade = {};
+  for (const k of ['shadeMin', 'shadeMax', 'hubWhite'] as const) {
+    if (typeof callerParams[k] === 'number') shade[k] = p[k] ?? callerParams[k];
+  }
+  return {
+    radius: g.tankR,
+    height: g.tankH,
+    floorY: g.floorY,
+    fill: mixerModelFill(p, g.level, g.empty),
+    agitator: p.agitator !== false,
+    color: g.color,
+    opacity: p.liquidOpacity,
+    edgeColor: p.edgeColor,
+    shade: Object.keys(shade).length ? shade : undefined,
+  };
+}
+
+/** `style` with the shell finishes (`hd.flask`, `hd.vessel`) shaded by `shade`; `style` itself when none. */
+export function mixerGlbStyle(style: HolodeckStyle, shade: MixerShade | undefined): HolodeckStyle {
+  if (!shade) return style;
+  return {
+    ...style,
+    finishes: {
+      ...style.finishes,
+      flask: { ...style.finishes.flask, ...shade },
+      vessel: { ...style.finishes.vessel, ...shade },
+    },
+  };
+}
 
 let reference: Record<string, unknown> | null = null;
 /** The mixer body's params (the mash tun preset over the defaults): what mixer.glb looks like. */
@@ -99,7 +171,7 @@ export function usesMixerModel(p: Partial<TankParams>): boolean {
   const merged = mergeTankParams(p) as unknown as Record<string, unknown>;
   const ref = mixerReference();
   for (const key of Object.keys(ref)) {
-    if (MIXER_GLB_HONOURED.has(key as keyof TankParams)) continue;
+    if (MIXER_GLB_HONOURED.has(key as keyof TankParams) || TANK_PARAMS_NO_OP.has(key as keyof TankParams)) continue;
     if (!sameValue(merged[key], ref[key])) return false;
   }
   return true;

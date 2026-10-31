@@ -11,7 +11,7 @@ import { ShadedMesh, WhiteFill } from './Shell';
 import { useHolodeckStyle } from './style-context';
 import { liquidFinish, type HolodeckStyle } from './style';
 import { AgitatedVessel } from './AgitatedVessel';
-import { mixerModelFill, usesMixerModel } from './agitated-vessel';
+import { mixerGlbProps, usesMixerModel } from './agitated-vessel';
 import { TankAgitator } from './TankAgitator';
 import {
   mergeTankParams,
@@ -302,14 +302,7 @@ export function Tank({
     return (
       <group position={position}>
         <AgitatedVessel
-          radius={tankR}
-          height={tankH}
-          floorY={layout.floorY}
-          fill={mixerModelFill(p, level, empty)}
-          agitator={p.agitator}
-          color={color}
-          opacity={p.liquidOpacity}
-          edgeColor={p.edgeColor}
+          {...mixerGlbProps(p, params ?? {}, { tankR, tankH, floorY: layout.floorY, level, empty, color })}
         />
       </group>
     );
