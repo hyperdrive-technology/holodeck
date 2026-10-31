@@ -9,6 +9,7 @@ import { bowlMeridianThetas, bowlWindow, flatLidHatch, tankLinePlan } from './ta
 import { BackSide, BufferAttribute, BufferGeometry, Vector2, type Vector3Tuple } from 'three';
 import { ShadedMesh, WhiteFill } from './Shell';
 import { useHolodeckStyle } from './style-context';
+import { liquidFinish, type HolodeckStyle } from './style';
 import { AgitatedVessel } from './AgitatedVessel';
 import { mixerModelFill, usesMixerModel } from './agitated-vessel';
 import { TankAgitator } from './TankAgitator';
@@ -88,6 +89,24 @@ function LineBag({ positions, color }: { positions: Float32Array; color: string 
   return <LineSet positions={positions} color={color} width={TANK_LINE_WIDTH} />;
 }
 
+/**
+ * The theme's share of a Tank's params: edge / liquid colours, the vessel
+ * shade and the liquid finish's opacity. Explicit params (presets, tuner,
+ * `liquidOpacity`) are spread over it. holodeck#239: the liquid opacity used to
+ * come from DEFAULT_TANK_PARAMS (0.78) and beat the theme's
+ * `finishes.liquid.opacity` every time.
+ */
+export function tankParamsFromStyle(style: HolodeckStyle): Partial<TankParams> {
+  return {
+    edgeColor: style.colors.edge,
+    fillColor: style.colors.liquid,
+    shadeMin: style.finishes.vessel.shadeMin,
+    shadeMax: style.finishes.vessel.shadeMax,
+    hubWhite: style.finishes.vessel.hubWhite,
+    liquidOpacity: liquidFinish(style).opacity,
+  };
+}
+
 export function Tank({
   position,
   fill,
@@ -110,14 +129,7 @@ export function Tank({
 }) {
   const style = useHolodeckStyle();
   // Theme tokens are the base; explicit params (tuner sliders, presets) win.
-  const p = mergeTankParams({
-    edgeColor: style.colors.edge,
-    fillColor: style.colors.liquid,
-    shadeMin: style.finishes.vessel.shadeMin,
-    shadeMax: style.finishes.vessel.shadeMax,
-    hubWhite: style.finishes.vessel.hubWhite,
-    ...params,
-  });
+  const p = mergeTankParams({ ...tankParamsFromStyle(style), ...params });
   const top = cap ?? p.top;
   const tankH = height ?? p.height;
   const tankR = radius ?? p.radius;
