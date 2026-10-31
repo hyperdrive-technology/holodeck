@@ -6,7 +6,7 @@
  * never sleeps. Kept to a few interactions: software WebGPU (SwiftShader on
  * Linux CI) is slow and starves input events.
  */
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 const STARTER_OBJECTS = 12;
 
@@ -19,29 +19,8 @@ const STARTER_OBJECTS = 12;
 // Smaller canvas than the project default (as the sample baseline): less software fill work.
 const T0 = new Date('2026-01-01T00:00:02Z').getTime();
 const FIRST_RENDER_MS = 300_000;
-
-/**
- * Its own browser (same launch options as the `webgpu` project), closed when
- * the test ends. On CI the next spec, sample.webgpu.spec.ts, timed out on its
- * PNG download in every run where this spec had run in the same browser
- * first (and passed whenever this one ended early): the shared SwiftShader GPU
- * process is left loaded. A browser of our own keeps that out of the other
- * specs. (That download timeout also shows up on other branches: a
- * pre-existing flake this spec should not make worse.)
- */
-const test = base.extend<{ page: Page }>({
-  page: async ({ playwright }, use, testInfo) => {
-    const { launchOptions, baseURL } = testInfo.project.use;
-    const browser = await playwright.chromium.launch(launchOptions);
-    try {
-      const context = await browser.newContext({ baseURL, viewport: { width: 1080, height: 560 }, deviceScaleFactor: 1 });
-      await use(await context.newPage());
-    } finally {
-      await browser.close();
-    }
-  },
-});
 test.setTimeout(600_000);
+test.use({ viewport: { width: 1080, height: 560 } });
 const pageErrors: Error[] = [];
 
 test.beforeEach(async ({ page }) => {
