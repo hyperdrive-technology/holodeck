@@ -33,8 +33,10 @@ PLC or Hyperdrive code: the studio is a plain Holodeck host.
   traffic. The sample can also be imported from
   [`samples/three-tier-web-app.holodeck.json`](samples/three-tier-web-app.holodeck.json).
 - **Library** sidebar: placeable items of every installed package, grouped by
-  package and category, with multi-term search. Click an item to arm the
-  canvas place tool (then click the floor); "+" adds it next to the scene.
+  package and category, with multi-term search. Drag an item onto the canvas
+  (pointer events: the editor's ghost follows with grid / port snap), or click
+  it to arm the canvas place tool (then click the floor); "+" adds it next to
+  the scene.
 - **Inspector**: document properties (name, packages used, timestamps) or the
   selected object (position, rotation, part params).
 - **Canvas**: the engine's `ProcessEditor` with `chrome="canvas"`. Library and
@@ -86,6 +88,53 @@ PLC or Hyperdrive code: the studio is a plain Holodeck host.
 - **Layout**: T3 Code idioms: resizable, persisted side panels
   (`src/layout/`), TanStack Store for UI state, TanStack Hotkeys for
   shortcuts (`Mod+/` lists them).
+
+## Playground (`/playground`)
+
+One page to build a scene and watch it run: `pnpm playground` (Vite dev
+server, opens `/playground`), or `/playground` on any studio deployment.
+No document list or welcome screen; the studio at `/` is unchanged.
+
+- **Tabs** (`?tab=edit` | `?tab=viewer`, TanStack Router search param, so a
+  tab is linkable and survives a reload; Back returns to the previous tab).
+  Both tabs show the *same* `ProcessEditor` element with only `mode`
+  changing (`edit` / `run`), so switching never loses unsaved edits, the
+  selection or the undo history.
+- **Edit tab**: the library (drag an item onto the canvas, or click it then
+  click the floor, or "+" to add it next to the scene), the canvas (move,
+  snap, pipes follow a dragged vessel, Mod+Z / header Undo and Redo), and the
+  inspector: position, rotation, parameters, appearance, label text, and per
+  parameter **Bind to signal**. The Connections tab of the inspector adds,
+  edits and removes provider connections (`holodeck.sim`, `holodeck.http`,
+  `aws.cloudwatch`), exactly as in the studio.
+- **Binding**: "Bind to signal" opens the binding dialog, which lists the
+  connection's signals (the provider's `browse`) as soon as it opens. Picking
+  a percent signal (`unit: '%'` or "0–100" in its label, like every sim
+  signal) for a ranged parameter (a vessel's 0..1 `level`) fills in a 0–100 →
+  range `scale` transform and says so; any other transform can be chosen.
+- **Viewer tab**: the scene in run mode with no editing chrome; a side panel
+  with one status badge per connection (and the provider's message on error),
+  the live values as a table (`LiveValues`), and Pause / Resume (freezes what
+  the Viewer shows; providers keep running). A connection in error is also
+  called out over the canvas; the objects it drives keep their own values.
+- **One persistent document**, id `playground`, in the same IndexedDB store
+  and through the same `DocumentWriter` (autosave, revision checks, cross-tab
+  adoption) as any document: it is also listed on `/`. First use creates the
+  **starter** (`src/playground/starter.ts`): feed tank → valve → mixer →
+  valve → product tank, labels with live readings, a process area whose
+  accent colour follows the feed level, and a secret-free `holodeck.sim`
+  connection (`sim`) with every binding in place, so the Viewer animates with
+  zero configuration. **Reset** (header) restores the starter: scene,
+  connections, bindings; it clears the undo history and this tab's secrets
+  for the document. Deleted from another tab, the playground starts again
+  from the starter.
+- Shared code: the working copy, writer and every command live in
+  `useDocumentSession` (`src/features/use-document-session.ts`), used by both
+  `/d/$docId` and `/playground`. Secrets follow the studio rules above (never
+  in the document).
+- Without WebGPU the canvas shows the engine's "unsupported" message; the
+  library "+", inspector, connections, bindings, Viewer values and Reset all
+  still work.
 
 ## Three-tier web app sample (S3)
 
@@ -205,6 +254,7 @@ copied at install time). After changing either, rebuild it and reinstall:
 (cd ../../packages/provider-aws && pnpm install --frozen-lockfile && pnpm build)
 pnpm install
 pnpm dev          # http://localhost:5173
+pnpm playground   # the same dev server, opened on /playground
 ```
 
 ## Test
@@ -219,8 +269,11 @@ E2E browser: `HOLODECK_CHROMIUM=/path/to/chrome`, else a local Google Chrome on
 macOS, else Playwright's Chromium. CI uses the runner's Google Chrome.
 The `chromium` project runs without WebGPU on purpose (see `e2e/studio.spec.ts`);
 rendering is covered by the engine's render tests. The `webgpu` project runs
-only `*.webgpu.spec.ts` (PNG export and sample baseline) with headless-WebGPU flags (SwiftShader on
-Linux CI). The embed spec serves its cross-origin parent page from a local
+only `*.webgpu.spec.ts` (PNG export, sample baseline, playground drag and drop) with headless-WebGPU flags (SwiftShader on
+Linux CI). The playground has `e2e/playground.spec.ts` (no WebGPU: starter
+animates, add / move / configure / bind, own sim connection, broken HTTP
+source, pause, reload, Reset) and `e2e/playground.webgpu.spec.ts` (library
+drag onto the canvas, move drag, Viewer re-renders as data arrives). The embed spec serves its cross-origin parent page from a local
 server on 127.0.0.1 (Chrome's Local Network Access blocks route-fulfilled
 "public" pages from framing localhost).
 
@@ -269,6 +322,13 @@ list the tests but cannot capture or approve a reference. The first reference
 capture remains required on a browser-capable runner.
 
 ## Known gaps (follow-ups)
+
+- Playground: the binding dialog's percent detection reads the leaf's `unit`
+  / label because `SignalNode` has no numeric range yet (a holodeck-sdk
+  contract change). Reset keeps the stored camera of the old scene until the
+  view is next moved (the canvas itself refits).
+- Playground: Pause freezes the view only; it does not stop provider
+  polling (cheap, and resuming is instant).
 
 - Adopting another tab's version still remounts the canvas to reset undo
   history (no history-reset action on `ProcessEditor` yet); camera and
