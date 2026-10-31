@@ -4,6 +4,16 @@ import { Label } from '@/components/ui/label';
 import type { Coerced } from './inspector.logic';
 
 /**
+ * Fields whose text differs from their committed value (typed and not yet
+ * committed, or refused by validation). The playground asks before throwing
+ * its workspace away (holodeck#249): such text exists nowhere else.
+ */
+const uncommittedDrafts = new Set<string>();
+export function hasUncommittedDraft(): boolean {
+  return uncommittedDrafts.size > 0;
+}
+
+/**
  * A text-like field with a draft: typing edits the draft only; Enter or blur
  * commits it through `coerce`, Escape reverts. An invalid draft is flagged and
  * not committed. The draft resets whenever the committed value changes from
@@ -33,6 +43,11 @@ export function DraftField({
     setDraft(value);
     setProblem(null);
   }, [value]);
+  useEffect(() => {
+    if (draft === value) return;
+    uncommittedDrafts.add(id);
+    return () => void uncommittedDrafts.delete(id);
+  }, [draft, value, id]);
 
   const commit = () => {
     if (draft === value) return;

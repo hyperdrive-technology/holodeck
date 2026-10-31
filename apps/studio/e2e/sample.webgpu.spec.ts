@@ -20,6 +20,12 @@ test.afterEach(() => {
 // (holodeck#175). ~8x fewer pixels keeps the full check on CI.
 test.use({ viewport: { width: 1080, height: 520 } });
 
+// On the hosted runner this test takes 1.1 to 3.2 min (CI logs, 2026-10-30/31:
+// main 2.5 and 3.2 min, other branches 1.1 to 1.9 min) and failed several
+// times at the 3 min project limit, waiting for the download. The budget is
+// sized for the slow end; waits stay on events, so a fast run stays fast.
+test.setTimeout(480_000);
+
 test('sample visual baseline and PNG download', async ({ page }, testInfo) => {
   const failedAssets: string[] = [];
   page.on('response', (response) => {
@@ -43,7 +49,7 @@ test('sample visual baseline and PNG download', async ({ page }, testInfo) => {
   const dialog = page.getByTestId('export-dialog');
   await dialog.getByRole('radio', { name: '1×' }).click();
   await expect(dialog.getByRole('radio', { name: '1×' })).toHaveAttribute('aria-checked', 'true');
-  const downloadPromise = page.waitForEvent('download', { timeout: 120_000 });
+  const downloadPromise = page.waitForEvent('download', { timeout: 300_000 });
   await dialog.getByTestId('export-png').click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe('three-tier-web-app@1x.png');

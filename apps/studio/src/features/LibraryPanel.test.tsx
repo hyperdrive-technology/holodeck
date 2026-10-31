@@ -7,7 +7,7 @@ import { createStudioHost } from '../host/studio-host';
 import { SessionSecretStore } from '../connections/secrets';
 import { StudioProvider } from '../studio-context';
 import { NO_CHANNEL } from '../test-support';
-import { activeDocumentStore } from './active-document';
+import { activeDocumentStore, type ActiveDocument } from './active-document';
 import { LibraryPanel } from './LibraryPanel';
 
 let host: HolodeckHost;
@@ -25,6 +25,22 @@ function renderPanel() {
   );
 }
 
+function activeDoc(): ActiveDocument {
+  return {
+    id: 'd',
+    name: 'Doc',
+    placing: null,
+    armItem: vi.fn(),
+    addItem: vi.fn(),
+    startDragItem: vi.fn(),
+    dropItem: vi.fn(),
+    exportFile: vi.fn(),
+    exportComponents: vi.fn(),
+    exportImage: vi.fn(),
+    save: vi.fn(),
+  };
+}
+
 describe('<LibraryPanel />', () => {
   it('lists installed parts grouped by package and category', () => {
     renderPanel();
@@ -40,7 +56,7 @@ describe('<LibraryPanel />', () => {
     expect(screen.getByText('Open a document to place components.')).toBeInTheDocument();
     const armItem = vi.fn();
     const addItem = vi.fn();
-    act(() => activeDocumentStore.setState(() => ({ id: 'd', placing: null, armItem, addItem, name: 'Doc', exportFile: vi.fn(), exportComponents: vi.fn(), exportImage: vi.fn(), save: vi.fn() })));
+    act(() => activeDocumentStore.setState(() => ({ ...activeDoc(), armItem, addItem })));
     expect(tank).toBeEnabled();
     expect(tank).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(tank);
@@ -50,6 +66,79 @@ describe('<LibraryPanel />', () => {
     // The armed item shows as pressed.
     act(() => activeDocumentStore.setState((s) => (s ? { ...s, placing: 'tank' } : s)));
     expect(tank).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('drags an item: arms it past the threshold, drops it with the element under the pointer, and swallows the trailing click', () => {
+    renderPanel();
+    const startDragItem = vi.fn();
+    const dropItem = vi.fn();
+    const armItem = vi.fn();
+    act(() => activeDocumentStore.setState(() => ({ ...activeDoc(), armItem, startDragItem, dropItem })));
+    const tank = screen.getByRole('button', { name: /^Tank/ });
+    const target = document.createElement('canvas');
+    document.body.append(target);
+    const elementFromPoint = vi.fn(() => target);
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: elementFromPoint });
+    try {
+      fireEvent.pointerDown(tank, { button: 0, clientX: 10, clientY: 10, pointerId: 1 });
+      // Under the threshold: still a click.
+      fireEvent.pointerMove(window, { clientX: 12, clientY: 11 });
+      expect(startDragItem).not.toHaveBeenCalled();
+      fireEvent.pointerMove(window, { clientX: 40, clientY: 30 });
+      expect(startDragItem).toHaveBeenCalledWith('holodeck.iso.part', 'tank');
+      fireEvent.pointerMove(window, { clientX: 80, clientY: 60 });
+      expect(startDragItem).toHaveBeenCalledTimes(1);
+      fireEvent.pointerUp(window, { clientX: 300, clientY: 200 });
+      expect(elementFromPoint).toHaveBeenCalledWith(300, 200);
+      expect(dropItem).toHaveBeenCalledWith('holodeck.iso.part', 'tank', target);
+      // The pointer click dispatched with the release (released over the item itself) does not arm it again.
+      fireEvent.click(tank, { detail: 1 });
+      expect(armItem).not.toHaveBeenCalled();
+      // A plain press + release without moving stays a click.
+      fireEvent.pointerDown(tank, { button: 0, clientX: 10, clientY: 10, pointerId: 1 });
+      fireEvent.pointerUp(window, { clientX: 10, clientY: 10 });
+      fireEvent.click(tank, { detail: 1 });
+      expect(armItem).toHaveBeenCalledWith('holodeck.iso.part', 'tank');
+      expect(dropItem).toHaveBeenCalledTimes(1);
+    } finally {
+      target.remove();
+      Reflect.deleteProperty(document, 'elementFromPoint');
+    }
+  });
+
+  // holodeck#244: a drag released on the canvas leaves no click on the item to
+  // consume the suppression; the next keyboard or pointer click must still work.
+  it('after a drag released over the canvas, the next keyboard activation and the next pointer click arm the item', async () => {
+    renderPanel();
+    const armItem = vi.fn();
+    act(() => activeDocumentStore.setState(() => ({ ...activeDoc(), armItem })));
+    const tank = screen.getByRole('button', { name: /^Tank/ });
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => null });
+    try {
+      fireEvent.pointerDown(tank, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+      fireEvent.pointerMove(window, { clientX: 300, clientY: 200 });
+      fireEvent.pointerUp(window, { clientX: 300, clientY: 200 });
+      // Enter / Space on the focused item: a click with detail 0, right away.
+      fireEvent.click(tank, { detail: 0 });
+      expect(armItem).toHaveBeenCalledTimes(1);
+      // A later pointer click (next task) arms it too.
+      await act(() => new Promise((r) => setTimeout(r, 0)));
+      fireEvent.click(tank, { detail: 1 });
+      expect(armItem).toHaveBeenCalledTimes(2);
+    } finally {
+      Reflect.deleteProperty(document, 'elementFromPoint');
+    }
+  });
+
+  it('a cancelled drag (pointercancel) drops with no target', () => {
+    renderPanel();
+    const dropItem = vi.fn();
+    act(() => activeDocumentStore.setState(() => ({ ...activeDoc(), dropItem })));
+    const tank = screen.getByRole('button', { name: /^Tank/ });
+    fireEvent.pointerDown(tank, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+    fireEvent.pointerMove(window, { clientX: 50, clientY: 0 });
+    fireEvent.pointerCancel(window);
+    expect(dropItem).toHaveBeenCalledWith('holodeck.iso.part', 'tank', null);
   });
 
   it('filters by search and clears on Escape', () => {

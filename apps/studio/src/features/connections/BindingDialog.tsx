@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { bindingProblems, formToTransform, TRANSFORM_KINDS, transformToForm, type TransformForm } from '../../connections/bindings';
+import { bindingProblems, EMPTY_TRANSFORM_FORM, formToTransform, suggestedTransformForm, TRANSFORM_KINDS, transformToForm, type ParamRange, type TransformForm } from '../../connections/bindings';
 
 const selectClass = 'h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm';
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -16,6 +16,7 @@ const messageOf = (error: unknown) => (error instanceof Error ? error.message : 
  */
 export function BindingDialog({
   paramLabel,
+  paramRange,
   connections,
   current,
   hub,
@@ -24,6 +25,8 @@ export function BindingDialog({
   onClose,
 }: {
   paramLabel: string;
+  /** The parameter's declared numeric range, for the transform suggested when a browse leaf is picked. */
+  paramRange?: ParamRange;
   connections: readonly ProviderConnection[];
   current: SignalBinding | undefined;
   hub: ProviderHub | undefined;
@@ -36,8 +39,35 @@ export function BindingDialog({
   const [source, setSource] = useState(current?.source ?? '');
   const [transform, setTransform] = useState<TransformForm>(transformToForm(current?.transform));
   const [problems, setProblems] = useState<string[]>([]);
+  /** Set when picking a browse leaf filled in a suggested transform (shown, so the user can change it). */
+  const [suggested, setSuggested] = useState(false);
   const conn = connections.find((c) => c.id === connection);
   const provider = providerOf(conn);
+
+  /**
+   * The suggested transform belongs to the leaf it was suggested for
+   * (holodeck#243): picking another leaf recomputes it, and typing a source or
+   * switching connection drops it, so an already-0..1 signal is never shown
+   * at 1/100. A transform the user edited is theirs and is never touched.
+   */
+  const pick = (node: SignalNode) => {
+    if (!node.source) return;
+    setSource(node.source);
+    const base = suggested ? EMPTY_TRANSFORM_FORM : transform;
+    const next = suggestedTransformForm(node, paramRange, base);
+    if (next) {
+      setTransform(next);
+      setSuggested(true);
+    } else if (suggested) {
+      setTransform(EMPTY_TRANSFORM_FORM);
+      setSuggested(false);
+    }
+  };
+  const dropSuggestion = () => {
+    if (!suggested) return;
+    setTransform(EMPTY_TRANSFORM_FORM);
+    setSuggested(false);
+  };
 
   const save = () => {
     const t = formToTransform(transform);
@@ -81,7 +111,11 @@ export function BindingDialog({
           >
             <div className="grid grid-cols-[7rem_1fr] items-center gap-2">
               <Label htmlFor="binding-connection">Connection</Label>
-              <select id="binding-connection" className={selectClass} value={connection} onChange={(e) => setConnection(e.target.value)}>
+              <select id="binding-connection" className={selectClass} value={connection} onChange={(e) => {
+                  setConnection(e.target.value);
+                  dropSuggestion();
+                }}
+              >
                 {connections.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.label ?? c.id} ({c.provider})
@@ -89,15 +123,35 @@ export function BindingDialog({
                 ))}
               </select>
               <Label htmlFor="binding-source">Source</Label>
-              <Input id="binding-source" value={source} onChange={(e) => setSource(e.target.value)} placeholder={provider?.sourceSyntax ?? 'signal address'} />
+              <Input
+                id="binding-source"
+                value={source}
+                onChange={(e) => {
+                  setSource(e.target.value);
+                  dropSuggestion();
+                }}
+                placeholder={provider?.sourceSyntax ?? 'signal address'} />
             </div>
             {provider?.sourceSyntax ? (
               <p className="text-[11px] text-muted-foreground">
                 Syntax: <code>{provider.sourceSyntax}</code>
               </p>
             ) : null}
-            {provider?.capabilities.browse ? <SourceBrowser key={connection} hub={hub} connectionId={connection} onPick={setSource} /> : null}
-            <TransformEditor value={transform} onChange={setTransform} />
+            {provider?.capabilities.browse ? <SourceBrowser key={connection} hub={hub} connectionId={connection} onPick={pick} /> : null}
+            {suggested && transform.kind === 'scale' ? (
+              <p className="text-[11px] text-muted-foreground" data-testid="binding-suggested-scale">
+                Scaled {transform.inMin}–{transform.inMax} to {paramLabel}’s range {transform.outMin}–{transform.outMax}. Change “in min / in max” if
+                the signal uses another range.
+              </p>
+            ) : null}
+            <TransformEditor
+              value={transform}
+              onChange={(next) => {
+                // Edited by the user: no longer a suggestion.
+                setTransform(next);
+                setSuggested(false);
+              }}
+            />
             {problems.length ? (
               <ul role="alert" data-testid="binding-problems" className="list-disc pl-5 text-xs text-destructive">
                 {problems.map((p) => (
@@ -127,8 +181,13 @@ export function BindingDialog({
   );
 }
 
-/** Walks the provider's `browse` tree; picking a leaf with a `source` fills the source field. */
-function SourceBrowser({ hub, connectionId, onPick }: { hub: ProviderHub | undefined; connectionId: string; onPick: (source: string) => void }) {
+/**
+ * Walks the provider's `browse` tree; picking a leaf with a `source` fills the
+ * source field. The top level is listed as soon as the dialog opens when the
+ * connection is already open, so the signals are discoverable without
+ * knowing the provider's address syntax; otherwise "Browse" retries.
+ */
+function SourceBrowser({ hub, connectionId, onPick }: { hub: ProviderHub | undefined; connectionId: string; onPick: (node: SignalNode) => void }) {
   const [path, setPath] = useState<string[]>([]);
   const [nodes, setNodes] = useState<SignalNode[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -136,8 +195,12 @@ function SourceBrowser({ hub, connectionId, onPick }: { hub: ProviderHub | undef
 
   // Only the newest request may apply its result (holodeck#173): a slow
   // response that lands after the user navigated elsewhere is dropped.
+  // Unmount drops anything in flight by moving the counter ON (holodeck#248):
+  // resetting it to -1 let StrictMode's remount reuse request numbers, so a
+  // late first top-level listing could replace a folder's contents. The
+  // counter only ever grows, so no two requests share a number.
   const latest = useRef(0);
-  useEffect(() => () => void (latest.current = -1), []); // unmount: drop anything in flight
+  useEffect(() => () => void (latest.current += 1), []);
 
   const load = async (stack: string[]) => {
     const request = ++latest.current;
@@ -160,6 +223,17 @@ function SourceBrowser({ hub, connectionId, onPick }: { hub: ProviderHub | undef
       if (request === latest.current) setLoading(false);
     }
   };
+
+  // List the top level on open when the connection is already open (no error
+  // if it is not: the user can press Browse once it is). No "already loaded"
+  // guard: under StrictMode the first run's response is dropped by the
+  // unmount cleanup above (latest = -1), so the second run must load again
+  // (found in the browser: the list never appeared in `vite dev`).
+  useEffect(() => {
+    if (!hub?.session(connectionId)?.browse) return;
+    void load([]);
+    // `load` is recreated every render; it only reads refs and setters.
+  }, [hub, connectionId]);
 
   return (
     <div className="rounded-md border p-2" data-testid="source-browser">
@@ -184,7 +258,7 @@ function SourceBrowser({ hub, connectionId, onPick }: { hub: ProviderHub | undef
                 type="button"
                 className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left hover:bg-accent"
                 data-browse-path={n.path}
-                onClick={() => (n.source ? onPick(n.source) : n.hasChildren ? void load([...path, n.path]) : undefined)}
+                onClick={() => (n.source ? onPick(n) : n.hasChildren ? void load([...path, n.path]) : undefined)}
               >
                 <span className="flex-1 truncate">{n.label}</span>
                 {n.type ? <span className="text-[11px] text-muted-foreground">{n.type}</span> : null}

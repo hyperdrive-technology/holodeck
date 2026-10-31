@@ -11,7 +11,7 @@ import { createRef } from 'react';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createStudioHost } from '../host/studio-host';
 import { withPart } from '../test-support';
-import { inspectorActions, libraryAddActions } from './editor-commands';
+import { inspectorActions, libraryAddActions, libraryDropActions } from './editor-commands';
 
 let host: HolodeckHost;
 beforeAll(async () => {
@@ -106,5 +106,50 @@ describe('inspectorActions on the real editor', () => {
     expect(objects()[0]).not.toHaveProperty('bindings');
     act(() => ref.current!.dispatch({ type: 'undo' }));
     expect(objects()[0]?.bindings).toEqual({ level: binding });
+  });
+});
+
+describe('libraryDropActions (library drag released)', () => {
+  const state = (over: Partial<{ mode: string; placing: string | null; cursor: { x: number; y: number } | null }>) =>
+    ({ mode: 'place', placing: 'tank', cursor: { x: 3, y: 4 }, ...over }) as Parameters<typeof libraryDropActions>[1];
+
+  it('stamps the part at the ghost cell when released over the canvas', () => {
+    expect(libraryDropActions(host.registry, state({}), 'tank', true)).toEqual([{ type: 'palette-drop', object: 'tank', x: 3, y: 4 }]);
+  });
+
+  it('cancels (back to select) when released off the canvas, or before the ghost reached a cell', () => {
+    expect(libraryDropActions(host.registry, state({}), 'tank', false)).toEqual([{ type: 'select-mode' }]);
+    expect(libraryDropActions(host.registry, state({ cursor: null }), 'tank', true)).toEqual([{ type: 'select-mode' }]);
+  });
+
+  it('does nothing when the tool no longer holds this part (Escape mid-drag, another tool)', () => {
+    expect(libraryDropActions(host.registry, state({ mode: 'select', placing: null }), 'tank', true)).toEqual([]);
+    expect(libraryDropActions(host.registry, state({ placing: 'valve' }), 'tank', true)).toEqual([]);
+  });
+
+  it('leaves a run part (pipe) armed: pipes are drawn click-click', () => {
+    expect(libraryDropActions(host.registry, state({ mode: 'draw-pipe', placing: null }), 'pipe', true)).toEqual([]);
+    expect(libraryDropActions(host.registry, state({ placing: 'pipe' }), 'pipe', true)).toEqual([]);
+  });
+
+  it('on the real editor: armed + ghost + drop is one undoable step that selects the new part', () => {
+    const { ref, run, objects, changes } = mount(twoTanks());
+    run([{ type: 'place-mode', object: 'mixer' }, { type: 'cursor', x: 3, y: 6 }]);
+    run(libraryDropActions(host.registry, ref.current!.getState(), 'mixer', true));
+    const placed = objects().find((o) => o.object === 'mixer');
+    expect(placed).toMatchObject({ x: 3, y: 6 });
+    expect(ref.current!.getState()).toMatchObject({ mode: 'select', selectedIds: [placed!.id] });
+    expect(changes).toHaveLength(1);
+    act(() => ref.current!.dispatch({ type: 'undo' }));
+    expect(objects().some((o) => o.object === 'mixer')).toBe(false);
+  });
+
+  it('on the real editor: released off the canvas places nothing and drops the tool', () => {
+    const { ref, run, objects, changes } = mount(twoTanks());
+    run([{ type: 'place-mode', object: 'valve' }, { type: 'cursor', x: 3, y: 6 }]);
+    run(libraryDropActions(host.registry, ref.current!.getState(), 'valve', false));
+    expect(objects()).toHaveLength(2);
+    expect(ref.current!.getState().mode).toBe('select');
+    expect(changes).toHaveLength(0);
   });
 });

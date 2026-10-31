@@ -293,6 +293,29 @@ describe('DocumentWorkspace <-> ProcessEditor', () => {
   });
 });
 
+// holodeck#116: leaving with unsaved edits asks first (the blocker moved into
+// useDocumentSession, which skips same-path search changes for the playground tabs).
+describe('leaving with unsaved edits', () => {
+  it('asks before navigating to another route while a save is pending, and stays when refused', async () => {
+    await store.create(tankDoc());
+    const { router } = await openWorkspace(tankDoc());
+    vi.spyOn(store, 'save').mockImplementation(() => new Promise(() => undefined));
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    try {
+      act(() => editor.props!.onChange({ ...editor.props!.scene, objects: [] }));
+      // A blocked navigation's promise does not settle: fire and observe.
+      act(() => void router.navigate({ to: '/' }));
+      await waitFor(() => expect(confirm).toHaveBeenCalledWith('This document has changes that are not saved. Leave anyway?'));
+      expect(router.state.location.pathname).toBe('/d/p');
+      confirm.mockReturnValue(true);
+      act(() => void router.navigate({ to: '/' }));
+      await waitFor(() => expect(router.state.location.pathname).toBe('/'));
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});
+
 // holodeck#164 / review of #163: an undo that brings back a binding to a connection
 // removed meanwhile must keep the document valid (and saving).
 describe('connections and undo', () => {

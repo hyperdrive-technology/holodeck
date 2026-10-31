@@ -18,6 +18,10 @@ export interface ActiveDocument {
   armItem: (kind: string, itemId: string) => void;
   /** Add a library item next to the scene right away (one undoable editor step) and select it. */
   addItem: (kind: string, itemId: string) => void;
+  /** A library drag passed its threshold: arm the place tool so the canvas ghost follows the pointer. */
+  startDragItem: (kind: string, itemId: string) => void;
+  /** A library drag ended over `target` (null = cancelled): place at the ghost when it is this canvas. */
+  dropItem: (kind: string, itemId: string, target: Element | null) => void;
   /** Download the document as a `.holodeck.json` file. */
   exportFile: () => void;
   /** Download the components table as a `.components.csv` file. */

@@ -65,6 +65,8 @@ export class DocumentExistsError extends Error {
 export interface VersionedDocument {
   document: HolodeckDocument;
   revision: number;
+  /** The record's generation (see StoredDocument.generation); absent on records that predate it. */
+  generation?: string;
 }
 
 /** Posted after every committed write, e.g. to a BroadcastChannel so other tabs can refresh. */
@@ -94,7 +96,11 @@ function cameraProblems(camera: StudioCamera): string[] {
 
 /** Records written before revisions existed count as revision 0. */
 const revisionOf = (record: StoredDocument) => record.revision ?? 0;
-const versioned = (record: StoredDocument): VersionedDocument => ({ document: record.document, revision: revisionOf(record) });
+const versioned = (record: StoredDocument): VersionedDocument => ({
+  document: record.document,
+  revision: revisionOf(record),
+  ...(record.generation ? { generation: record.generation } : {}),
+});
 
 function summarize(record: StoredDocument): DocumentSummary {
   const { id, document, createdAt, updatedAt } = record;
@@ -155,8 +161,8 @@ export class DocumentStore {
    * throws `DocumentConflictError` carrying the latest stored version, and
    * nothing is written. Keeps the original `createdAt`.
    */
-  async save(doc: HolodeckDocument, expectedRevision: number): Promise<VersionedDocument> {
-    return this.write(doc.id, 'update', () => doc, expectedRevision);
+  async save(doc: HolodeckDocument, expectedRevision: number, expectedGeneration?: string): Promise<VersionedDocument> {
+    return this.write(doc.id, 'update', () => doc, expectedRevision, expectedGeneration);
   }
 
   /**
@@ -165,10 +171,10 @@ export class DocumentStore {
    * so a concurrent save is never undone. With `expectedRevision`, a newer
    * stored revision is a conflict, like `save`.
    */
-  async rename(id: string, name: string, expectedRevision?: number): Promise<VersionedDocument> {
+  async rename(id: string, name: string, expectedRevision?: number, expectedGeneration?: string): Promise<VersionedDocument> {
     const trimmed = name.trim();
     if (!trimmed) throw new DocumentValidationError(['name: must not be empty']);
-    return this.write(id, 'update', (current) => withDocumentName(current!, trimmed), expectedRevision);
+    return this.write(id, 'update', (current) => withDocumentName(current!, trimmed), expectedRevision, expectedGeneration);
   }
 
   /** Delete a document and its view state. Deleting a missing id is a no-op. */
@@ -212,6 +218,8 @@ export class DocumentStore {
     mode: 'create' | 'update',
     next: (current: HolodeckDocument | undefined) => HolodeckDocument,
     expectedRevision?: number,
+    /** The generation the caller's copy came from: any other life of the id is a conflict. */
+    expectedGeneration?: string,
   ): Promise<VersionedDocument> {
     const db = await this.db;
     const tx = db.transaction('documents', 'readwrite');
@@ -229,6 +237,10 @@ export class DocumentStore {
       }
       if (expectedRevision !== undefined && revisionOf(existing) !== expectedRevision) {
         return fail(new DocumentConflictError(id, expectedRevision, versioned(existing)));
+      }
+      // Same revision number, other life of the id (deleted and created again): still a conflict.
+      if (expectedGeneration !== undefined && existing.generation !== expectedGeneration) {
+        return fail(new DocumentConflictError(id, expectedRevision ?? revisionOf(existing), versioned(existing)));
       }
     }
     const at = this.now();
@@ -248,6 +260,7 @@ export class DocumentStore {
       id,
       document: structuredClone(stamped),
       revision: existing ? revisionOf(existing) + 1 : 1,
+      generation: existing?.generation ?? crypto.randomUUID(),
       createdAt: existing?.createdAt ?? at,
       updatedAt: at,
     };
@@ -262,6 +275,6 @@ export class DocumentStore {
       throw error;
     }
     this.onChange?.({ type: 'saved', id, revision: record.revision });
-    return { document: stamped, revision: record.revision };
+    return { document: stamped, revision: record.revision, generation: record.generation };
   }
 }

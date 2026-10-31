@@ -4,7 +4,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { openStudioDb } from './db';
 import { createIsoDocument } from './new-document';
-import { DocumentStore, type VersionedDocument } from './store';
+import { DocumentConflictError, DocumentStore, type VersionedDocument } from './store';
 import { DocumentWriter } from './writer';
 
 type IsoDoc = HolodeckDocument<IsoSceneFile>;
@@ -207,5 +207,143 @@ describe('DocumentWriter', () => {
       expect((await writer.persist(withObject(base.document, 'mine'))).kind).toBe('conflict');
       expect(save).not.toHaveBeenCalled();
     });
+  });
+});
+
+/** A promise whose settling the test controls. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+// Review of holodeck#241 (round 3): a deletion must freeze the writer for good,
+// even when a save was already running when it arrived.
+describe('DocumentWriter: deleted elsewhere is sticky', () => {
+  const deletedConflict = { kind: 'conflict', latest: undefined };
+
+  it('a running save that RESOLVES after markDeleted keeps the deletion conflict and writes nothing more', async () => {
+    const committed = vi.fn();
+    const writer = new DocumentWriter(store, 'p', base.revision, committed);
+    const running = deferred<VersionedDocument>();
+    const save = vi.spyOn(store, 'save').mockImplementationOnce(() => running.promise);
+    void writer.save(withObject(base.document, 'tank-1'));
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    writer.markDeleted();
+    running.resolve({ document: base.document, revision: 2 });
+    await writer.flush();
+    expect(writer.getState()).toMatchObject({ status: deletedConflict, revision: base.revision, dirty: true });
+    expect(committed).not.toHaveBeenCalled();
+    expect(writer.isDeleted()).toBe(true);
+    // The next edit is not written.
+    expect(await writer.save(withObject(base.document, 'tank-2'))).toBeUndefined();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(writer.getState().status).toEqual(deletedConflict);
+  });
+
+  it('a running save that REJECTS (not a conflict) after markDeleted keeps the deletion conflict, not `error`', async () => {
+    const writer = new DocumentWriter(store, 'p', base.revision);
+    const running = deferred<VersionedDocument>();
+    const save = vi.spyOn(store, 'save').mockImplementationOnce(() => running.promise);
+    void writer.save(withObject(base.document, 'tank-1'));
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    writer.markDeleted();
+    running.reject(new Error('disk full'));
+    await writer.flush();
+    expect(writer.getState().status).toEqual(deletedConflict);
+    expect(await writer.save(withObject(base.document, 'tank-2'))).toBeUndefined();
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it('a running save that hits a CONFLICT with a newer version after markDeleted still reports the deletion', async () => {
+    const writer = new DocumentWriter(store, 'p', base.revision);
+    const running = deferred<VersionedDocument>();
+    const save = vi.spyOn(store, 'save').mockImplementationOnce(() => running.promise);
+    void writer.save(withObject(base.document, 'tank-1'));
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    writer.markDeleted();
+    running.reject(new DocumentConflictError('p', 1, { document: base.document, revision: 5 }));
+    await writer.flush();
+    expect(writer.getState().status).toEqual(deletedConflict);
+  });
+
+  it('writes queued behind the running one are dropped (saves and renames)', async () => {
+    const writer = new DocumentWriter(store, 'p', base.revision);
+    const running = deferred<VersionedDocument>();
+    const save = vi.spyOn(store, 'save').mockImplementationOnce(() => running.promise);
+    const rename = vi.spyOn(store, 'rename');
+    void writer.save(withObject(base.document, 'tank-1'));
+    void writer.save(withObject(base.document, 'tank-2'));
+    void writer.rename('Gone');
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    writer.markDeleted();
+    running.resolve({ document: base.document, revision: 2 });
+    expect(await writer.flush()).toEqual(deletedConflict);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(rename).not.toHaveBeenCalled();
+    expect(writer.busy).toBe(false);
+  });
+
+  it('markDeleted then adopt re-opens the writer on the adopted version', async () => {
+    const writer = new DocumentWriter(store, 'p', base.revision);
+    writer.markDeleted();
+    expect(await writer.save(withObject(base.document, 'x'))).toBeUndefined();
+    const latest = (await store.get('p'))!;
+    writer.adopt(latest);
+    expect(writer.isDeleted()).toBe(false);
+    const saved = await writer.save(withObject(latest.document, 'tank-9'));
+    expect(saved?.revision).toBe(latest.revision + 1);
+    expect(writer.getState().status).toEqual({ kind: 'saved' });
+  });
+
+  it('hasUnsavedEdits: nothing to lose when deleted while clean; edits, failures and conflicts count', async () => {
+    const clean = new DocumentWriter(store, 'p', base.revision);
+    expect(clean.hasUnsavedEdits()).toBe(false);
+    clean.markDeleted();
+    expect(clean.isClean()).toBe(false);
+    expect(clean.hasUnsavedEdits()).toBe(false);
+    const dirty = new DocumentWriter(store, 'p', base.revision);
+    // Deleted before the queued save runs: it is dropped, the edit stays unsaved.
+    void dirty.save(withObject(base.document, 'tank-1'));
+    dirty.markDeleted();
+    expect(dirty.hasUnsavedEdits()).toBe(true);
+    const failed = new DocumentWriter(store, 'p', base.revision);
+    vi.spyOn(store, 'save').mockRejectedValueOnce(new Error('disk full'));
+    await failed.save(withObject(base.document, 'tank-1'));
+    expect(failed.hasUnsavedEdits()).toBe(true);
+  });
+});
+
+// A deleted id created again restarts at revision 1: a writer holding the old life must not write over the new one.
+describe('DocumentWriter: another life of the same id', () => {
+  it('a writer from before a delete + re-create conflicts instead of overwriting, even at the same revision', async () => {
+    const old = new DocumentWriter(store, 'p', base.revision, undefined, base.generation);
+    expect(base.generation).toEqual(expect.any(String));
+    await store.remove('p');
+    const reborn = await store.create(withObject(createIsoDocument('Plant', 'p'), 'new-life'));
+    expect(reborn.revision).toBe(base.revision);
+    expect(reborn.generation).not.toBe(base.generation);
+    expect(await old.save(withObject(base.document, 'old-life'))).toBeUndefined();
+    expect(old.getState().status).toEqual({ kind: 'conflict', latest: expect.objectContaining({ revision: 1, generation: reborn.generation }) });
+    expect(ids((await store.get('p'))?.document)).toEqual(['new-life']);
+    // Renames too.
+    const renamer = new DocumentWriter(store, 'p', 1, undefined, base.generation);
+    await renamer.rename('Old life');
+    expect((await store.get('p'))?.document.name).toBe('Plant');
+  });
+
+  it('a writer opened without a generation (older records) learns it from its first save', async () => {
+    const writer = new DocumentWriter(store, 'p', base.revision);
+    await writer.save(withObject(base.document, 'a'));
+    await store.remove('p');
+    await store.create(createIsoDocument('Plant', 'p'));
+    await store.save(withObject(createIsoDocument('Plant', 'p'), 'b'), 1);
+    // Same revision (2) as the writer's, other life: refused.
+    expect(await writer.save(withObject(base.document, 'c'))).toBeUndefined();
+    expect(writer.getState().status.kind).toBe('conflict');
   });
 });

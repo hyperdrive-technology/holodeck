@@ -8,7 +8,8 @@ import { describeSaveStatus } from './save-status';
 import { LIBRARY_SEARCH_ID } from './LibraryPanel';
 import { useStudioActions } from './use-studio-actions';
 
-function focusLibrarySearch() {
+/** Focus the library search box (opening the sidebar first if it is closed). */
+export function focusLibrarySearch() {
   if (!panelStore.state.sidebarOpen) {
     // Render the sidebar now so its search box exists to focus.
     flushSync(() => togglePanel('sidebarOpen'));
