@@ -138,8 +138,9 @@ describe('scene document', () => {
     expect(TANK_DOME_HEIGHT_SEGMENTS).toBe(3); // round 3: 2 -> 3 latitude rings, denser cap like the reference
     expect(TANK_DOME_HEIGHT_SEGMENTS).toBeLessThan(4);
     expect(DEFAULT_TANK_PARAMS.domeHeightSegments).toBe(TANK_DOME_HEIGHT_SEGMENTS);
-    // Body hoops are gone (round 5, Des 2026-10-30: no horizontal rings inside the tank).
-    expect(DEFAULT_TANK_PARAMS).not.toHaveProperty('bodyRings');
+    // Body hoops are gone (round 5, Des 2026-10-30: no horizontal rings inside the tank); the param stays
+    // as a deprecated no-op with main's default so main-era code still compiles (public-api-compat.test.tsx).
+    expect(DEFAULT_TANK_PARAMS.bodyRings).toBe(0);
     expect(TANK_SHADE_MIN).toBeCloseTo(0.22);
     expect(TANK_SHADE_MIN).toBeLessThan(0.27);
     expect(DEFAULT_TANK_PARAMS.shadeMin).toBe(TANK_SHADE_MIN);
