@@ -10,11 +10,14 @@ import { expect, test, type Page } from '@playwright/test';
 
 const STARTER_OBJECTS = 12;
 
-// SwiftShader on the hosted Linux runner is slow and its first frame time
-// varies a lot: this test passed in 1.8 min on one CI run and timed out
-// waiting 120 s for the FIRST `ready` on the next (same code). Generous
-// budgets plus a smaller canvas (less software fill work), as the sample
-// baseline does (holodeck#175). Waits stay on render signals, not sleeps.
+// Time is frozen (Date.now only; timers and frames run normally), as in
+// sample.webgpu.spec.ts. The starter streams sim data every 250 ms, and on
+// the hosted runner's SwiftShader one frame takes longer than that: with a
+// live clock the picture never caught up and `data-render-state` stayed
+// `pending` for 5 min (CI, two runs), although it passed on a real GPU. The
+// Viewer step then moves the clock on once, so the change is deterministic.
+// Smaller canvas than the project default: less software fill work.
+const T0 = new Date('2026-01-01T00:00:02Z').getTime();
 const FIRST_RENDER_MS = 300_000;
 test.setTimeout(600_000);
 test.use({ viewport: { width: 1180, height: 680 } });
@@ -23,6 +26,7 @@ const pageErrors: Error[] = [];
 test.beforeEach(async ({ page }) => {
   pageErrors.length = 0;
   page.on('pageerror', (error) => pageErrors.push(error));
+  await page.clock.setFixedTime(T0);
 });
 test.afterEach(() => {
   expect(pageErrors.map((e) => e.message)).toEqual([]);
@@ -93,9 +97,13 @@ test('drag a tank from the library onto the canvas, move it, bind it, and watch 
   await expect(page.getByTestId('viewer-status-sim')).toHaveAttribute('data-state', 'live');
   await rendered(page);
   const output = page.getByTestId('live-values').getByLabel('tank-1.level', { exact: true });
+  await expect(output).toHaveText(/^0(\.\d+)?$|^1$/);
   const before = { value: await output.textContent(), presented: Number(await editor.getAttribute('data-holodeck-rendered')) };
+  // Data arrives: 2.5 s later on the sim's clock (sine:10 moves a quarter period).
+  await page.clock.setFixedTime(T0 + 2500);
   await expect(output).not.toHaveText(before.value!);
   await expect.poll(async () => Number(await editor.getAttribute('data-holodeck-rendered')), { timeout: FIRST_RENDER_MS }).toBeGreaterThan(before.presented);
+  await rendered(page);
 
   // Reload: still there, still bound.
   await expect(page.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved');
