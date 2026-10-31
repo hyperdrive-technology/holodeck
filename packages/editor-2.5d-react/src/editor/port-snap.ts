@@ -18,6 +18,7 @@ import { headingOf, pipeArmsAt } from '../routing/elbows';
 import type { GridPoint, Heading } from '../routing/grid';
 import { positionOnPipe, segOf } from '../routing/inline';
 import type { IsoPartDefinition } from '../registry/types';
+import { placementPorts } from '../registry/params';
 
 /** Largest pull (grid units, per axis) a port snap may add to a move. */
 export const PORT_SNAP_RADIUS = 1;
@@ -58,7 +59,7 @@ export function freePipeEnds(
 /** World ports of a placement with their outward headings. */
 function portsOf(part: IsoPlacement, registry: ContributionRegistry): Array<{ point: GridPoint; heading: Heading }> {
   if (!isAttachTarget(part, registry)) return [];
-  return Object.keys(registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, part.object)?.ports ?? {})
+  return Object.keys(placementPorts(registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, part.object), part))
     .map((name) => portWorld(part, registry, name))
     .filter((p): p is { point: GridPoint; heading: Heading } => p !== null);
 }

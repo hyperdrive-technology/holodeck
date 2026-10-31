@@ -5,10 +5,10 @@
   "objects": [
     { "id": "supply-slab", "object": "area", "x": 4.2, "y": -13.2, "width": 14.5, "height": 8.4 },
 
-    { "id": "holding", "object": "tank", "x": 1, "y": -1, "params": { "level": 0.12 }, "height": 3.05, "fillColor": "#2f7eb8" },
+    { "id": "holding", "object": "tank", "x": 1, "y": -1, "params": { "level": 0.12 }, "height": 3.05, "fillColor": "#6fd6ee" },
     { "id": "mixer", "object": "mixer", "x": 3.9, "y": -4.42, "params": { "level": 0.52 }, "height": 2.7, "fillColor": "#18BAE6" },
-    { "id": "ingredient-a", "object": "tank", "x": 0.5, "y": -10.72, "params": { "level": 0.12 }, "height": 3.05, "fillColor": "#2a6fa8" },
-    { "id": "ingredient-b", "object": "tank", "x": 6.82, "y": -10.73, "params": { "level": 0.12 }, "height": 3.05, "fillColor": "#2a6fa8" },
+    { "id": "ingredient-a", "object": "tank", "x": 0.5, "y": -10.72, "params": { "level": 0.12 }, "height": 3.05, "fillColor": "#6c93f0" },
+    { "id": "ingredient-b", "object": "tank", "x": 6.82, "y": -10.73, "params": { "level": 0.12 }, "height": 3.05, "fillColor": "#6c93f0" },
 
     { "id": "pipe-packaging", "object": "pipe", "x": 1, "y": 0, "toX": 1, "toY": 1.5, "band": "#c0392b" },
     { "id": "pipe-packaging-b", "object": "pipe", "x": 1, "y": 1.5, "toX": 1, "toY": 2.7, "band": "#ffffff" },

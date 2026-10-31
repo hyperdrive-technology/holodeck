@@ -51,8 +51,10 @@ export function sceneWorldBox(
     if (p.object === 'area') {
       add(p.x, p.y, (p.width ?? 1) / 2, (p.height ?? 1) / 2);
     } else {
-      let w = def?.footprint.w ?? 1;
-      let h = def?.footprint.h ?? 1;
+      // Per-placement footprint (a tank sized by its radius / preset), as routing and the halo use (holodeck#238).
+      const fp = def?.footprintOf?.(p) ?? def?.footprint;
+      let w = fp?.w ?? 1;
+      let h = fp?.h ?? 1;
       if (Math.abs(Math.sin(p.rotation ?? 0)) > 0.7) [w, h] = [h, w];
       add(p.x, p.y, w / 2, h / 2);
       if (isRunPlacement(p, def) && typeof p.toX === 'number' && typeof p.toY === 'number') {

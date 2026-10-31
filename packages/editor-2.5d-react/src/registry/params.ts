@@ -1,5 +1,5 @@
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
-import type { IsoMetrics, IsoPartDefinition } from './types';
+import type { IsoMetrics, IsoPartDefinition, IsoPartPort } from './types';
 import type { IsoPlacement } from '../iso/scene';
 
 /**
@@ -58,4 +58,16 @@ export function snapParamValue(
   if (spec?.min !== undefined) v = Math.max(spec.min, v);
   if (spec?.max !== undefined) v = Math.min(spec.max, v);
   return v;
+}
+
+/**
+ * Ports of one placement: `def.portsOf(placement)` when the part sizes them
+ * from a param, else the static `def.ports`. Every consumer (routing ends,
+ * attach, connect, port snap, replan, connectors) goes through this.
+ */
+export function placementPorts(
+  def: Pick<IsoPartDefinition, 'ports' | 'portsOf'> | undefined,
+  placement: IsoPlacement,
+): Record<string, IsoPartPort> {
+  return def?.portsOf?.(placement) ?? def?.ports ?? {};
 }

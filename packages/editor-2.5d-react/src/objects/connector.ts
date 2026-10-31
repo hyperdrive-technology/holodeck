@@ -25,6 +25,7 @@
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoPlacement } from '../iso/scene';
 import type { IsoPartDefinition } from '../registry/types';
+import { placementPorts } from '../registry/params';
 import { planRoute } from '../editor/routing';
 import { rotateHeading, rotateOffset, type GridPoint, type Heading } from '../routing/grid';
 import { rotatedFootprint } from '../routing/occupancy';
@@ -64,7 +65,7 @@ export function resolveLinkEnd(
   const target = byId.get(end.object);
   if (!target) return null;
   const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, target.object);
-  const port = end.port ? def?.ports?.[end.port] : undefined;
+  const port = end.port ? placementPorts(def, target)[end.port] : undefined;
   if (port) {
     const off = rotateOffset(port.x, port.y, target.rotation);
     return {

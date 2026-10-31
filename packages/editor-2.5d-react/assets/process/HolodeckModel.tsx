@@ -49,6 +49,10 @@ interface ModelProps {
   body?: ColorRepresentation;
   /** Outline colour for this instance; default `style.colors.edge`. */
   edgeColor?: ColorRepresentation;
+  /** `hd.liquid` colour for this instance (live level colour / alarm); default `style.colors.liquid`. */
+  liquid?: ColorRepresentation;
+  /** `hd.liquid` opacity for this instance; default the liquid finish token. */
+  liquidOpacity?: number;
   style?: HolodeckStyle;
   /** Called once the styled clone is mounted (e.g. to fit a camera to its bounds). */
   onReady?: (root: Object3D) => void;
@@ -112,6 +116,8 @@ function HolodeckModelBody({
   accent,
   body,
   edgeColor,
+  liquid,
+  liquidOpacity,
   style: styleProp,
   onReady,
 }: BodyProps & { onMounted?: (url: string) => void }) {
@@ -132,8 +138,10 @@ function HolodeckModelBody({
     if (accent !== undefined) overrides.accent = accent;
     if (body !== undefined) overrides.body = body;
     if (edgeColor !== undefined) overrides.edgeColor = edgeColor;
+    if (liquid !== undefined) overrides.liquid = liquid;
+    if (liquidOpacity !== undefined) overrides.liquidOpacity = liquidOpacity;
     return { scene: clone, dispose: applyHolodeckStyle(clone, style, overrides) };
-  }, [gltf, style, accent, body, edgeColor]);
+  }, [gltf, style, accent, body, edgeColor, liquid, liquidOpacity]);
   useEffect(() => dispose, [dispose]);
   useEffect(() => onReady?.(scene), [scene, onReady]);
   return <primitive object={scene} position={position} rotation={[0, rotationY, 0]} scale={scale} />;

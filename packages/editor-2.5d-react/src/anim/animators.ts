@@ -34,7 +34,7 @@ export const SPIN_ANIMATOR: IsoAnimator = {
  * e.g. `scale: 100` for a percent param). Matches the GLB liquid convention: the node's
  * origin sits at the liquid bottom, so scaling Y grows it upward.
  * Floors at 0.001: a zero scale makes a singular matrix (NaN normals, and
- * the node cannot be raycast).
+ * the node cannot be raycast). An empty (0) value hides the node instead.
  */
 export const FILL_ANIMATOR: IsoAnimator = {
   id: 'fill',
@@ -47,7 +47,10 @@ export const FILL_ANIMATOR: IsoAnimator = {
   apply({ node, value, settings }) {
     const full = num(settings?.scale, 1);
     // A non-positive full scale would divide by zero; treat it as the default.
-    node.scale.y = Math.max(0.001, clamp01(num(value, 0) / (full > 0 ? full : 1)));
+    const fraction = clamp01(num(value, 0) / (full > 0 ? full : 1));
+    node.scale.y = Math.max(0.001, fraction);
+    // Empty = no liquid: the 0.001 sliver read as a disc on the vessel floor (round 5, 2026-10-30).
+    node.visible = fraction > 0;
   },
 };
 

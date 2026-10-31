@@ -17,6 +17,7 @@
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoSceneFile } from '../iso/scene';
 import type { IsoPartDefinition } from '../registry/types';
+import { placementPorts } from '../registry/params';
 import { rotateHeading, rotateOffset, type GridPoint, type Heading } from './grid';
 import { footprintContains, rotatedFootprint } from './occupancy';
 import type { RouteEnd } from './astar';
@@ -49,7 +50,7 @@ export function resolveRouteEnd(
     if (opts.exclude?.has(obj.id)) continue;
     const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, obj.object);
     if (!def) continue;
-    const ports = def.ports ?? {};
+    const ports = placementPorts(def, obj);
     if (Object.keys(ports).length === 0) continue;
     const { w, h } = rotatedFootprint(def, obj.rotation, obj);
     if (!footprintContains(obj.x, obj.y, w, h, cell)) continue;

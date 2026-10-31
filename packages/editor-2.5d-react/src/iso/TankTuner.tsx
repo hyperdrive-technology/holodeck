@@ -11,6 +11,7 @@ import {
   type TankParams,
 } from '../../assets/process/tank-params';
 import { ProcessSceneView, REFERENCE_ZOOM } from '../editor/ProcessSceneView';
+import { editTankParam, initialTankTuning, resetTankTuning, tankTuningOverrides, type TankTuning } from './tuner-tank-state';
 import { PROCESS_SCENE } from './load-process-scene';
 import { PROCESS_SNAPSHOT_METRICS } from './ProcessLineSketch';
 import { SceneGraph } from './SceneGraph';
@@ -77,8 +78,6 @@ const SLIDERS: TankSlider[] = [
   { group: 'Cutout', key: 'windowYawDeg', label: 'Window yaw (°)', min: 0, max: 360, step: 1 },
   { group: 'Cage', key: 'radialSegments', label: 'Meridians (every 2nd on back/bowl)', min: 4, max: 32, step: 1 },
   { group: 'Cage', key: 'bodyHeightSegments', label: 'Body height segs', min: 1, max: 16, step: 1 },
-  { group: 'Cage', key: 'bodyRings', label: 'Extra body rings', min: 0, max: 12, step: 1 },
-  { group: 'Cage', key: 'bodyRingWidth', label: 'Body ring width', min: 0.004, max: 0.06, step: 0.002 },
   { group: 'Cage', key: 'cageThreshold', label: 'Cage edge threshold', min: 1, max: 45, step: 1 },
   { group: 'Cage', key: 'wallThreshold', label: 'Window-wall edge threshold', min: 1, max: 45, step: 1 },
   { group: 'Cage', key: 'lineWidth', label: 'Line width (WebGL often 1)', min: 1, max: 6, step: 0.5 },
@@ -172,24 +171,25 @@ const FITTING_CHECKS: { key: keyof FittingParams; label: string }[] = [
   { key: 'valveShowWire', label: 'Valve mesh outline' },
 ];
 
-function loadStored(): { params: TankParams; fittings: FittingParams; extras: TunerExtras } {
+function loadStored(): { tank: TankTuning; fittings: FittingParams; extras: TunerExtras } {
   try {
     const raw = localStorage.getItem(STORE);
     if (!raw) {
-      return { params: DEFAULT_TANK_PARAMS, fittings: DEFAULT_FITTING_PARAMS, extras: DEFAULT_EXTRAS };
+      return { tank: resetTankTuning(), fittings: DEFAULT_FITTING_PARAMS, extras: DEFAULT_EXTRAS };
     }
     const parsed = JSON.parse(raw) as {
       params?: Partial<TankParams>;
+      touched?: string[];
       fittings?: Partial<FittingParams>;
       extras?: Partial<TunerExtras>;
     };
     return {
-      params: mergeTankParams(parsed.params),
+      tank: initialTankTuning({ params: parsed.params, touched: parsed.touched }),
       fittings: mergeFittingParams(parsed.fittings),
       extras: { ...DEFAULT_EXTRAS, ...parsed.extras },
     };
   } catch {
-    return { params: DEFAULT_TANK_PARAMS, fittings: DEFAULT_FITTING_PARAMS, extras: DEFAULT_EXTRAS };
+    return { tank: resetTankTuning(), fittings: DEFAULT_FITTING_PARAMS, extras: DEFAULT_EXTRAS };
   }
 }
 
@@ -230,14 +230,19 @@ function RangeRow({
 
 export function TankTuner() {
   const initial = useMemo(() => loadStored(), []);
-  const [params, setParams] = useState<TankParams>(initial.params);
+  // Tank params plus the keys the user edited: parts get exactly those (tuner-tank-state.ts).
+  const [tank, setTank] = useState<TankTuning>(initial.tank);
+  const params = tank.params;
+  const setParam = <K extends keyof TankParams>(key: K, value: TankParams[K]) =>
+    setTank((t) => editTankParam(t, key, value));
   const [fittings, setFittings] = useState<FittingParams>(initial.fittings);
   const [extras, setExtras] = useState<TunerExtras>(initial.extras);
   const [copied, setCopied] = useState(false);
+  const tunedParams = useMemo(() => tankTuningOverrides(tank), [tank]);
 
   useEffect(() => {
-    localStorage.setItem(STORE, JSON.stringify({ params, fittings, extras }));
-  }, [params, fittings, extras]);
+    localStorage.setItem(STORE, JSON.stringify({ params, touched: tank.touched, fittings, extras }));
+  }, [params, tank.touched, fittings, extras]);
 
   const groups = [...new Set(SLIDERS.map((s) => s.group))];
   const fittingGroups = [...new Set(FITTING_SLIDERS.map((s) => s.group))];
@@ -302,7 +307,7 @@ export function TankTuner() {
           <button
             type="button"
             onClick={() => {
-              setParams(DEFAULT_TANK_PARAMS);
+              setTank(resetTankTuning());
               setFittings(DEFAULT_FITTING_PARAMS);
               setExtras(DEFAULT_EXTRAS);
             }}
@@ -429,7 +434,7 @@ export function TankTuner() {
           <input
             type="color"
             value={params.fillColor}
-            onChange={(e) => setParams((p) => ({ ...p, fillColor: e.target.value }))}
+            onChange={(e) => setParam('fillColor', e.target.value)}
             style={{ marginLeft: 8 }}
           />
         </label>
@@ -438,7 +443,7 @@ export function TankTuner() {
           <input
             type="color"
             value={params.edgeColor}
-            onChange={(e) => setParams((p) => ({ ...p, edgeColor: e.target.value }))}
+            onChange={(e) => setParam('edgeColor', e.target.value)}
             style={{ marginLeft: 8 }}
           />
         </label>
@@ -447,7 +452,7 @@ export function TankTuner() {
           <input
             type="color"
             value={params.linerColor}
-            onChange={(e) => setParams((p) => ({ ...p, linerColor: e.target.value }))}
+            onChange={(e) => setParam('linerColor', e.target.value)}
             style={{ marginLeft: 8 }}
           />
         </label>
@@ -483,7 +488,7 @@ export function TankTuner() {
             <input
               type="checkbox"
               checked={Boolean(params[c.key])}
-              onChange={(e) => setParams((p) => ({ ...p, [c.key]: e.target.checked }))}
+              onChange={(e) => setParam(c.key, e.target.checked)}
             />
             {c.label}
           </label>
@@ -527,7 +532,7 @@ export function TankTuner() {
                 min={s.min}
                 max={s.max}
                 step={s.step}
-                onChange={(n) => setParams((prev) => ({ ...prev, [s.key]: n }))}
+                onChange={(n) => setParam(s.key, n)}
               />
             ))}
           </details>
@@ -558,7 +563,8 @@ export function TankTuner() {
             <SceneGraph
               objects={objects}
               metrics={PROCESS_SNAPSHOT_METRICS}
-              tankParams={params}
+              // Only what was changed (holodeck#235): the full state would override every preset.
+              tankParams={tunedParams}
               fittings={fittings}
               instanced={false}
             />

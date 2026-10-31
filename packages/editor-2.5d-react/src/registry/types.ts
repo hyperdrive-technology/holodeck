@@ -154,6 +154,12 @@ export interface IsoPartDefinition extends Contribution {
    */
   ports?: Record<string, IsoPartPort>;
   /**
+   * Per-placement ports for parts whose size is a param (the built-in `tank`'s
+   * radius / preset): read through `placementPorts()` everywhere, so the
+   * ports sit on the same silhouette as `footprintOf`. Absent = `ports`.
+   */
+  portsOf?: (placement: IsoPlacement) => Record<string, IsoPartPort>;
+  /**
    * Along-pipe body length (grid cells) when the part sits inline on a pipe,
    * measured along its local x axis. Reroute keeps carried parts this far
    * apart (plus a margin) and clear of bends and retained endpoint parts
@@ -166,6 +172,18 @@ export interface IsoPartDefinition extends Contribution {
    * Pipes that run into it are clipped at the wall (routing/vessel-ports.ts).
    */
   cutout?: { windowYawDeg: number; windowDeg: number };
+  /**
+   * Per-placement window for parts whose window follows a param that is not
+   * `windowYaw` / `windowDeg` (the built-in `tank`'s `preset`). Returning
+   * undefined falls back to `cutout`.
+   */
+  cutoutOf?: (placement: Pick<IsoPlacement, 'params'>) => { windowYawDeg: number; windowDeg: number } | undefined;
+  /**
+   * Wall radius of a placement when it is not simply its `radius` param (the
+   * built-in `tank`'s `preset` carries its own radius). Pipes clip at it
+   * (routing/vessel-ports.ts `vesselRadius`). Undefined = the usual rule.
+   */
+  radiusOf?: (placement: Pick<IsoPlacement, 'params' | 'height'>) => number | undefined;
   /**
    * World Y range of the straight (windowed) wall, for vessels raised on
    * legs or a skirt: a floor-level pipe below `bottomY` passes under the

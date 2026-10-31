@@ -2,11 +2,11 @@
   "description": "Arcentry fidelity ratchet for src/iso/scene-render.test.ts: render of tests/scene.json vs tests/snapshots/reference-canvas.png (760x540, DPR 1). fidelity = 1 - (pixelmatch diffs + uncovered pixels) / relevant pixels (threshold 0.1, AA ignored; see src/visual/fidelity.ts). Runs fail below fidelity - epsilon; `pnpm visual:record` only raises the score. Lowering it is a deliberate hand edit with a reason in the PR.",
   "platforms": {
     "darwin": {
-      "fidelity": 0.16487,
+      "fidelity": 0.2054,
       "epsilon": 0.0005,
-      "rmse": 25.34,
-      "recordedAt": "2026-10-16T03:30:00Z",
-      "source": "Hand-lowered for the holodeck#70 rescoring (0.283 -> 0.16487, same render): pnpm visual on the pinned Playwright 1.59.1 build chromium-1217 (Chrome for Testing 147.0.7727.15), macOS arm64; three runs byte-identical. The old 0.283 record (chromium-1193) scores 0.283 on this build under the old metric too."
+      "rmse": 25.751,
+      "recordedAt": "2026-10-29T22:25:47.701Z",
+      "source": "holodeck#228 round 2 (liquid finish 0.78, light-cyan fills, inner ratio 0.9, liner shade, facet-aligned lines, mixer.glb agitated vessel): HOLODECK_CHROMIUM=system Google Chrome 156.0.8078.73, macOS arm64. The pinned chromium-1217 does not launch on this machine (missing framework after install); this Chrome reproduces main's 0.16487 record exactly, so scores are comparable."
     },
     "linux": {
       "fidelity": 0.1654,

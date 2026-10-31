@@ -1,10 +1,21 @@
 import {
+  MIXER_CAP_HEIGHT_RATIO,
   MIXER_CAP_LID_THICKNESS,
-  MIXER_LIQUID_OPACITY,
+  MIXER_CAP_RADIUS_RATIO,
+  MIXER_INNER_RATIO,
+  MIXER_LINER_COLOR,
+  MIXER_LINER_RATIO,
   MIXER_IMPELLER_RADIUS,
   MIXER_IMPELLER_SPAN,
+  MIXER_OUTER_BOWL,
+  MIXER_RADIAL_SEGMENTS,
   MIXER_SHAFT_LENGTH,
   MIXER_SHAFT_RADIUS,
+  MIXER_SHOULDER_RATIO,
+  MIXER_SHOULDER_TOP,
+  MIXER_WALL_THRESHOLD,
+  MIXER_WINDOW_DEG,
+  MIXER_WINDOW_YAW,
   type TankParams,
 } from './tank-params';
 
@@ -28,19 +39,42 @@ export interface TankPreset {
   params: Partial<TankParams>;
 }
 
-/** Agitator sizing shared by every agitated preset (the mixer's hat / shaft / impeller). */
+/**
+ * Agitator sizing shared by every agitated vessel: the Mixer palette part
+ * (`mixerDefaults` in src/registry/builtin.tsx) and the mash tun preset draw
+ * the same hat / shaft / impeller from these values (one code path:
+ * `TankAgitator`).
+ */
 export const AGITATOR_PRESET: Partial<TankParams> = {
   agitator: true,
-  // Slightly translucent (the mixer's value) so the impeller reads through the liquid; the
-  // flask still writes depth, so nothing behind it prints through the cutout.
-  liquidOpacity: MIXER_LIQUID_OPACITY,
-  capHeightRatio: 0.12,
-  capRadiusRatio: 0.32,
+  capHeightRatio: MIXER_CAP_HEIGHT_RATIO,
+  capRadiusRatio: MIXER_CAP_RADIUS_RATIO,
   capLidThickness: MIXER_CAP_LID_THICKNESS,
   shaftLength: MIXER_SHAFT_LENGTH,
   shaftRadius: MIXER_SHAFT_RADIUS,
-  impellerSpan: MIXER_IMPELLER_SPAN * 2.2,
+  impellerSpan: MIXER_IMPELLER_SPAN,
   impellerRadius: MIXER_IMPELLER_RADIUS,
+};
+
+/**
+ * The mixer's bottle body (reference.jpg's central mixer): rounded heel,
+ * cosine shoulder into the dome, inset flask and a narrower window so the
+ * right-hand wall survives. Shared by the Mixer part and the mash tun, so
+ * an agitated vessel always reads as the same object. Shade (flask finish)
+ * comes from the theme in `mixerDefaults`.
+ */
+export const MIXER_BODY_PRESET: Partial<TankParams> = {
+  top: 'dome',
+  radialSegments: MIXER_RADIAL_SEGMENTS,
+  innerRatio: MIXER_INNER_RATIO,
+  windowDeg: MIXER_WINDOW_DEG,
+  windowYawDeg: MIXER_WINDOW_YAW,
+  shoulderRatio: MIXER_SHOULDER_RATIO,
+  shoulderTopRatio: MIXER_SHOULDER_TOP,
+  outerBowlHeight: MIXER_OUTER_BOWL,
+  linerRatio: MIXER_LINER_RATIO,
+  linerColor: MIXER_LINER_COLOR,
+  wallThreshold: MIXER_WALL_THRESHOLD,
 };
 
 export const HLT_PRESET: TankPreset = {
@@ -49,16 +83,22 @@ export const HLT_PRESET: TankPreset = {
   params: { top: 'dome', bottom: 'flat', support: 'none' },
 };
 
+/**
+ * Mash tun = the agitated mixer (mixer.glb via AgitatedVessel since
+ * 2026-10-30), scaled to R 1.0 (brewery footprint / ports) and a 2.5 straight
+ * wall: reference.jpg's slim, tall mixer. mixer.glb stands flat on the floor,
+ * so no stand / bottom closure (they would only shift the layout floor).
+ */
 export const MASH_TUN_PRESET: TankPreset = {
-  height: 1.7,
+  height: 2.5,
   radius: 1.0,
   params: {
-    top: 'dome',
-    bottom: 'dish',
-    support: 'legs',
-    standHeight: 0.4,
-    dishBottomHeight: 0.12,
+    ...MIXER_BODY_PRESET,
+    bottom: 'flat',
+    support: 'none',
     ...AGITATOR_PRESET,
+    // Drawn as mixer.glb (an explicit choice: `agitator` alone keeps a vessel's own body).
+    mixerModel: true,
   },
 };
 

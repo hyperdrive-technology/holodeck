@@ -29,6 +29,7 @@ import type { IsoPlacement } from '../iso/scene';
 import type { IsoPipeAttach, IsoPipeEnds } from '../objects/validate';
 import { isRunPlacement } from '../registry/geometry';
 import type { IsoPartDefinition } from '../registry/types';
+import { placementPorts } from '../registry/params';
 import { headingOf } from './elbows';
 import { rotateHeading, rotateOffset, type GridPoint, type Heading } from './grid';
 import { isFloorPart } from './occupancy';
@@ -79,7 +80,7 @@ export function portWorld(
   registry: ContributionRegistry,
   name: string,
 ): { point: GridPoint; heading: Heading } | null {
-  const port = partDef(registry, part)?.ports?.[name];
+  const port = placementPorts(partDef(registry, part), part)[name];
   if (!port) return null;
   const off = rotateOffset(port.x, port.y, part.rotation);
   return { point: { x: part.x + off.x, y: part.y + off.y }, heading: rotateHeading(port.dir, part.rotation) };
@@ -126,7 +127,7 @@ function matchCentre(part: IsoPlacement, end: GridPoint, other: GridPoint, expli
 /** Best inferred attachment of `end` on `part`: nearest port (declaration order breaks ties), else the centre. */
 function inferOn(part: IsoPlacement, registry: ContributionRegistry, end: GridPoint, other: GridPoint): ResolvedAttach | null {
   let best: (ResolvedAttach & { gap: number }) | null = null;
-  for (const name of Object.keys(partDef(registry, part)?.ports ?? {})) {
+  for (const name of Object.keys(placementPorts(partDef(registry, part), part))) {
     const hit = matchPort(part, registry, name, end, other, true);
     if (hit && (!best || hit.gap < best.gap - EPS)) best = hit;
   }
@@ -209,7 +210,7 @@ export function endsAttachedTo(
   // Cheap pre-filter: an end can only be on a part within its bounding radius
   // (largest port offset + tolerance). Avoids resolving every end in big scenes.
   const reach = parts.map((part) => {
-    const ports = Object.values(partDef(registry, part)?.ports ?? {});
+    const ports = Object.values(placementPorts(partDef(registry, part), part));
     const r = Math.max(0, ...ports.map((p) => Math.max(Math.abs(p.x), Math.abs(p.y))));
     return { part, r: r + PORT_ATTACH_TOLERANCE + EPS };
   });

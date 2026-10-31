@@ -7,6 +7,7 @@ name: Blender drift
 #
 #   library-cloud      src/cloud-glb.test.ts     26 cloud archetypes
 #   editor-2.5d-react  src/models/valve-glb.test.ts   valve.glb
+#   editor-2.5d-react  src/models/mixer-glb-rebuild.test.ts   mixer.glb (holodeck#229)
 #
 # Runs on PRs/pushes that touch the scripts, the GLBs or the build tooling,
 # weekly (catches a drifting runner image), and on demand. Blender is the
@@ -188,4 +189,4 @@ jobs:
           HOLODECK_SKIP_RENDER_TESTS: '1'
         run: |
           pnpm install --frozen-lockfile
-          pnpm exec vitest run src/models/valve-glb.test.ts
+          pnpm exec vitest run src/models/valve-glb.test.ts src/models/mixer-glb-rebuild.test.ts

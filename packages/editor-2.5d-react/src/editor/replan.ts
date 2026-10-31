@@ -8,6 +8,7 @@ import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
 import type { IsoPlacement } from '../iso/scene';
 import type { IsoPipeAttach } from '../objects/validate';
 import type { IsoPartDefinition } from '../registry/types';
+import { placementPorts } from '../registry/params';
 import { attachRecord, withPipeAttach } from '../routing/attach';
 import type { RouteOptions } from '../routing/astar';
 import { headingOf, pipeArmsAt } from '../routing/elbows';
@@ -108,7 +109,7 @@ export function replanRun(
   // offsets: rounding a half-cell port would miss its retained branch.
   const fixed = hosted.filter((part) => {
     const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, part.object);
-    const connections = [part, ...Object.values(def?.ports ?? {}).map((port) => {
+    const connections = [part, ...Object.values(placementPorts(def, part)).map((port) => {
       const off = rotateOffset(port.x, port.y, part.rotation);
       return { x: part.x + off.x, y: part.y + off.y };
     })];

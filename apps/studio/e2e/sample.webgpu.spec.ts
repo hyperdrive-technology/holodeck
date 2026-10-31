@@ -21,6 +21,10 @@ test.afterEach(() => {
 test.use({ viewport: { width: 1080, height: 520 } });
 
 test('sample visual baseline and PNG download', async ({ page }, testInfo) => {
+  // 5 min (config default 3): on the SwiftShader runner this test took 2.8 min when it passed (PR #228,
+  // run 41113688445) and ran out of the 120 s download wait on slower runners (runs 41034207863 and
+  // 41136717892, neither touching studio). The export itself is unchanged; the budget had no headroom.
+  test.setTimeout(300_000);
   const failedAssets: string[] = [];
   page.on('response', (response) => {
     if (/\.(glb|svg)(\?|$)/.test(response.url()) && !response.ok()) failedAssets.push(response.url());
@@ -43,7 +47,7 @@ test('sample visual baseline and PNG download', async ({ page }, testInfo) => {
   const dialog = page.getByTestId('export-dialog');
   await dialog.getByRole('radio', { name: '1×' }).click();
   await expect(dialog.getByRole('radio', { name: '1×' })).toHaveAttribute('aria-checked', 'true');
-  const downloadPromise = page.waitForEvent('download', { timeout: 120_000 });
+  const downloadPromise = page.waitForEvent('download', { timeout: 210_000 });
   await dialog.getByTestId('export-png').click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toBe('three-tier-web-app@1x.png');

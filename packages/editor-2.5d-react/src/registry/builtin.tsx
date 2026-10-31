@@ -14,28 +14,24 @@ import { mergeFittingParams } from '../../assets/process/fitting-params';
 import { pipeWorldY } from '../../assets/process/pipe-math';
 import { pipeRunSpec } from '../iso/pipe-runs';
 import {
+  DEFAULT_TANK_PARAMS,
+  mergeTankParams,
+  tankLayout,
+  tankWallSpan,
   tunedVesselHeight,
-  MIXER_INNER_RATIO,
+  vesselFootprint,
+  vesselPorts,
   MIXER_WINDOW_DEG,
   MIXER_WINDOW_YAW,
-  MIXER_SHOULDER_RATIO,
-  MIXER_SHOULDER_TOP,
-  MIXER_OUTER_BOWL,
-  MIXER_IMPELLER_RADIUS,
-  MIXER_IMPELLER_SPAN,
-  MIXER_SHAFT_RADIUS,
-  MIXER_SHAFT_LENGTH,
-  MIXER_CAP_HEIGHT_RATIO,
-  MIXER_CAP_LID_THICKNESS,
-  MIXER_BODY_RINGS,
-  MIXER_CAP_RADIUS_RATIO,
-  MIXER_RADIAL_SEGMENTS,
-  MIXER_LIQUID_OPACITY,
-  MIXER_LINER_RATIO,
-  MIXER_LINER_COLOR,
-  MIXER_WALL_THRESHOLD,
   type TankParams,
 } from '../../assets/process/tank-params';
+import {
+  AGITATOR_PRESET,
+  MIXER_BODY_PRESET,
+  TANK_PRESETS,
+  type TankPreset,
+  type TankPresetId,
+} from '../../assets/process/tank-presets';
 import { ELBOW_BEND_MODES, ELBOW_BEND_PARAM } from '../routing/elbows';
 import { DEFAULT_TANK_CUTOUT } from '../routing/vessel-ports';
 import { INLINE_PART_LENGTH } from '../routing/inline';
@@ -45,6 +41,7 @@ import { gridToWorld } from '../iso/grid';
 import { InstancedCaps, InstancedElbows, InstancedPipes, InstancedValves } from '../iso/InstancedLibrary';
 import { BUILTIN_ISO_THEMES } from './themes';
 import type { IsoInstancedRendererProps, IsoPartDefinition, IsoPartProps } from './types';
+import type { IsoPlacement } from '../iso/scene';
 
 export const BUILTIN_ISO_EXTENSION_ID = 'holodeck.iso.builtin';
 
@@ -52,45 +49,76 @@ export const BUILTIN_ISO_EXTENSION_ID = 'holodeck.iso.builtin';
 function mixerDefaults(style: HolodeckStyle): Partial<TankParams> {
   const flask = style.finishes.flask;
   return {
-    capHeightRatio: MIXER_CAP_HEIGHT_RATIO,
-    capRadiusRatio: MIXER_CAP_RADIUS_RATIO,
-    capLidThickness: MIXER_CAP_LID_THICKNESS,
-    shaftLength: MIXER_SHAFT_LENGTH,
-    shaftRadius: MIXER_SHAFT_RADIUS,
-    impellerSpan: MIXER_IMPELLER_SPAN,
-    impellerRadius: MIXER_IMPELLER_RADIUS,
-    radialSegments: MIXER_RADIAL_SEGMENTS,
-    bodyRings: MIXER_BODY_RINGS,
-    innerRatio: MIXER_INNER_RATIO,
-    windowDeg: MIXER_WINDOW_DEG,
-    windowYawDeg: MIXER_WINDOW_YAW,
-    shoulderRatio: MIXER_SHOULDER_RATIO,
-    shoulderTopRatio: MIXER_SHOULDER_TOP,
-    outerBowlHeight: MIXER_OUTER_BOWL,
+    // Same bottle body and agitator as the mash tun preset (one code path; tank-presets.ts).
+    ...MIXER_BODY_PRESET,
+    ...AGITATOR_PRESET,
     shadeMin: flask.shadeMin,
-    liquidOpacity: MIXER_LIQUID_OPACITY,
     hubWhite: flask.hubWhite,
     shadeMax: flask.shadeMax,
-    linerRatio: MIXER_LINER_RATIO,
-    linerColor: MIXER_LINER_COLOR,
-    wallThreshold: MIXER_WALL_THRESHOLD,
   };
 }
 
 const levelOf = (params: Record<string, unknown>): number =>
   typeof params.level === 'number' ? params.level : 0;
 
+/**
+ * The tuner's `tankParams` minus what it must not change: `mixerModel` is a
+ * part / preset choice (Mixer, mash tun), and the TankTuner passes a FULL
+ * TankParams whose default `mixerModel: false` would switch mixer.glb off
+ * whenever the tuner is open (holodeck#233).
+ */
+function tunable(tankParams: Partial<TankParams> | undefined): Partial<TankParams> {
+  if (!tankParams) return {};
+  const { mixerModel: _choice, ...rest } = tankParams;
+  return rest;
+}
+
+/** `tank` shape param: `plain` (the original built-in tank) or one of the vessel presets (tank-presets.ts). */
+export const TANK_SHAPE_PLAIN = 'plain';
+export const TANK_SHAPES = [TANK_SHAPE_PLAIN, ...(Object.keys(TANK_PRESETS) as TankPresetId[])] as const;
+
+const presetOf = (params: Record<string, unknown> | undefined): TankPreset | undefined =>
+  typeof params?.preset === 'string' && Object.prototype.hasOwnProperty.call(TANK_PRESETS, params.preset)
+    ? TANK_PRESETS[params.preset as TankPresetId]
+    : undefined;
+
+/**
+ * A `tank` placement's effective size and shape: its `preset` (HLT, mash tun,
+ * whirlpool...) under the tuner's `tankParams`; `radius` param over the
+ * preset's radius; the placement height over the preset's. A preset tank is
+ * the same base `Tank` core's brewery parts draw, so a holodeck-only scene can
+ * show a flat-lid whirlpool or the agitated mash tun (mixer.glb) without the
+ * brewery pack. Round 5 (2026-10-30): the brewhouse render mapped every
+ * brewery vessel to a plain domed tank because `tank` had no way to carry
+ * one.
+ */
+export function tankPlacementShape(
+  placement: Pick<IsoPlacement, 'height' | 'params'>,
+  tankParams?: Partial<TankParams>,
+): { radius: number; height: number; params: Partial<TankParams>; layout: ReturnType<typeof tankLayout> } {
+  const preset = presetOf(placement.params);
+  const params: Partial<TankParams> = { ...preset?.params, ...tunable(tankParams) };
+  const height = tunedVesselHeight(placement.height ?? preset?.height ?? 3.05, tankParams);
+  // Placement param (scene file / inspector), then the TankTuner's Radius slider, then the preset.
+  // Review of #228: the tuner's radius was skipped, and TankPart's explicit `radius` prop then beat it.
+  const radius =
+    num(placement.params?.radius) ?? num(tankParams?.radius) ?? preset?.radius ?? DEFAULT_TANK_PARAMS.radius;
+  return { radius, height, params, layout: tankLayout(height, radius, mergeTankParams(params)) };
+}
+
 function TankPart({ placement, params, style, tuning }: IsoPartProps) {
   const [wx, , wz] = gridToWorld(placement.x, placement.y);
-  const height = tunedVesselHeight(placement.height ?? 3.05, tuning?.tankParams);
+  const shape = tankPlacementShape({ height: placement.height, params }, tuning?.tankParams);
   return (
     <Tank
-      position={[wx, height / 2, wz]}
+      // Floor point on the ground (a plain tank: its wall bottom, as before; a preset on legs / a skirt: its stand).
+      position={[wx, -shape.layout.floorY, wz]}
       fill={levelOf(params)}
       fillColor={params.alarm ? style.colors.alarm : placement.fillColor}
-      height={height}
+      height={shape.height}
+      radius={shape.radius}
       alarm={Boolean(params.alarm)}
-      params={tuning?.tankParams}
+      params={shape.params}
     />
   );
 }
@@ -106,7 +134,7 @@ function MixerPart({ placement, params, style, tuning }: IsoPartProps) {
       fillColor={alarm ? style.colors.alarm : placement.fillColor}
       height={height}
       alarm={alarm}
-      params={{ ...mixerDefaults(style), ...tuning?.tankParams }}
+      params={{ ...mixerDefaults(style), ...tunable(tuning?.tankParams) }}
     />
   );
 }
@@ -253,11 +281,29 @@ export const BUILTIN_ISO_PARTS: readonly IsoPartDefinition[] = [
     // Cut-away window (TankPart renders the default Tank window). The east port
     // sits inside this arc: pipes there are clipped at the wall (routing/vessel-ports.ts).
     cutout: DEFAULT_TANK_CUTOUT,
+    // A preset's window / stand (mash tun = mixer.glb's wider window; whirlpool on a skirt) for pipe clipping.
+    cutoutOf: (placement) => {
+      const preset = presetOf(placement.params);
+      if (!preset) return undefined;
+      const p = mergeTankParams(preset.params);
+      return { windowYawDeg: p.windowYawDeg, windowDeg: p.windowDeg };
+    },
+    wallSpan: (placement) => tankWallSpan(tankPlacementShape(placement).layout),
+    // The radius it is drawn with (a preset's own radius when the placement sets none), so pipes clip at the wall.
+    radiusOf: (placement) => tankPlacementShape(placement).radius,
+    // Same radius for the halo / occupancy box (a plain tank stays 2x2; a whirlpool preset, R 1.1, is 3x3).
+    footprintOf: (placement) => vesselFootprint(tankPlacementShape(placement).radius),
+    // Ports on that footprint's edge (vesselPorts, as core's brewery vessels): a radius-2 tank at +-2, not +-1
+    // inside its own blocked box (second review of #228). Radius 1 gives the static VESSEL_SIDE_PORTS.
+    portsOf: (placement) => vesselPorts(tankPlacementShape(placement).radius),
     params: {
       // 0..1 fraction. The host maps REAL percent (0..100) to this range.
       level: LEVEL,
       temp: { type: 'number', label: 'Temperature', default: 20, min: 0, max: 150, step: 0.5, unit: '°C' },
       alarm: { type: 'boolean', label: 'Alarm', default: false },
+      preset: { type: 'enum', label: 'Shape', default: TANK_SHAPE_PLAIN, options: [...TANK_SHAPES] },
+      // Scene-file only (the footprint stays 2x2): absent = the preset's radius, 1 for a plain tank.
+      radius: { type: 'number', label: 'Radius', default: undefined, min: 0.3, max: 3, step: 0.05, unit: 'm', hidden: true },
     },
     defaults: { height: 3.05 },
     component: TankPart,

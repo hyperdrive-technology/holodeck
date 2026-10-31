@@ -1,5 +1,5 @@
-import { Color } from 'three';
-import { HOLODECK_STYLE } from './style';
+import { Color, Quaternion, Vector3 } from 'three';
+import { HOLODECK_STYLE, LIQUID_FINISH } from './style';
 
 /** Legacy cap prop on `<Tank cap>`; maps onto `TankTop` ('flat' = flat lid with a hatch). */
 export type TankCap = 'dome' | 'flat';
@@ -17,9 +17,10 @@ export const TANK_TOPS: readonly TankTop[] = ['dome', 'flat', 'cone'];
 export const TANK_BOTTOMS: readonly TankBottom[] = ['flat', 'dish', 'cone'];
 export const TANK_SUPPORTS: readonly TankSupport[] = ['none', 'legs', 'skirt'];
 
-/** Holding / ingredient flask. 0.9 filled the silo like a pie vs r-holdbody's inset U.
- *  0.8 / 0.76 were still a tad wide in o-holdbody after the lathe flask. */
-export const TANK_INNER_RATIO = 0.74;
+/** Holding / ingredient flask radius / tank radius. 0.9 filled the silo like a pie vs r-holdbody's inset U
+ *  when the flask was a window-sliced pie; 0.8 / 0.76 / 0.74 followed. Round 2 (translucent closed flask with
+ *  bowl lines): 0.9 again -- reference.jpg's liquid spans the window, and fidelity 0.1960 -> 0.2022. */
+export const TANK_INNER_RATIO = 0.9;
 
 /** Holding flask U sits on the floor. −0.2 put the hemisphere equator at the
  *  tank bottom so fill 0.21 read as a ball vs r-holdbody's bottle. */
@@ -28,8 +29,47 @@ export const TANK_BOWL_Y_OFFSET = 0;
 /** 4 dome stacks drew a latitude cage vs r-holdbody's sparse cap. */
 export const TANK_DOME_HEIGHT_SEGMENTS = 3;
 
-/** 1 extra hoop dualled vs r-holdbody's quieter silo. */
-export const TANK_BODY_RINGS = 0;
+/*
+ * Body hoops (`bodyRings`, TANK_BODY_RINGS / MIXER_BODY_RINGS, both 0 since round 1) were removed in
+ * round 5 (Des 2026-10-30: "remove the horizontal rings on the inside of the tank"). The only
+ * horizontal wall lines are the structural rims where the wall meets the floor / dish / dome.
+ */
+
+/*
+ * Interior hoops (TANK_INTERIOR_HOOPS / `interiorHoops`) on the inner back wall: removed in round 5.
+ * History: 2026-10-29 Des reversed the "no lines inside the window" rule and the back wall got its
+ * rims plus hoops (round 2: 1 mid hoop). 2026-10-30 Des: "remove the horizontal rings on the inside
+ * of the tank". The inner back wall keeps only its structural rims (wall meets floor / dish, wall
+ * meets dome / lid / shoulder) and the facet seams that end on them (`interiorRimHeights`).
+ */
+
+/** The interior rings sit just inside the liner so they never z-fight it. */
+export const INTERIOR_RING_INSET = 0.995;
+
+/**
+ * Vertical liner seams on the inner back wall: every Nth liner vertex on the
+ * back arc. reference.jpg's interiors show two or three seams; step 1 (every
+ * facet, ~6 with the margin) read as a bird cage in the demo scene. 0 = rings only.
+ */
+export const TANK_INTERIOR_MERIDIAN_STEP = 2;
+
+/**
+ * Width (CSS px) of the cage, rim, interior and liquid lines (Line2). The
+ * creases (Edges) use `edges.wireWidth` 1.5; these are the reference's
+ * thinner panel lines. 1-device-px lineBasic (before round 2) was ~0.5 CSS px
+ * at DPR 2 and read faint.
+ */
+export const TANK_LINE_WIDTH = 1;
+
+/**
+ * Liner (inner wall) iso shade, seen from inside with the inward normal:
+ * lighter than the outer wall (vessel 0.22..0.95) like reference.jpg's
+ * interiors -- near-white panels greying slightly toward the right.
+ */
+export const LINER_SHADE = { shadeMin: 0.75, shadeMax: 0.85, hubWhite: 1 } as const;
+
+/** Extra arc (radians) either side of the visible back arc so the hoops meet the jamb silhouettes without a gap. */
+export const INTERIOR_RING_MARGIN = 0.08;
 
 /** Alias of `HOLODECK_STYLE.finishes.vessel.shadeMin` (style.ts has the why). */
 export const TANK_SHADE_MIN = HOLODECK_STYLE.finishes.vessel.shadeMin;
@@ -43,11 +83,21 @@ export const TANK_SHADE_MAX = HOLODECK_STYLE.finishes.vessel.shadeMax;
 /** Alias of `HOLODECK_STYLE.finishes.flask.shadeMin`. */
 export const MIXER_SHADE_MIN = HOLODECK_STYLE.finishes.flask.shadeMin;
 
-/** 0.69 let flask meridians print through the cyan vs r-mixer solid fill. Tanks keep TANK_LIQUID_OPACITY. */
-export const MIXER_LIQUID_OPACITY = 0.84;
+/**
+ * 0.69 let flask meridians print through the cyan (depthWrite off then) vs
+ * r-mixer's fill; 0.84 hid the shaft and impeller below the waterline (Des
+ * 2026-10-29). With depthWrite on only the flask's front surface blends,
+ * so 0.72 shows the agitator and the back-wall hoops through the liquid
+ * like reference.jpg's mixer without any mesh lines printing through.
+ */
+export const MIXER_LIQUID_OPACITY = LIQUID_FINISH.opacity; // one liquid look since round 2: the `liquid` finish token
 
 /** Tanks inherited liquidOpacity 0.69 so meridians printed through the fill vs r-holdbody solid U. Mixer stays 0.84. */
-export const TANK_LIQUID_OPACITY = 1; // was 0.88 with depthWrite off: back-wall lines and the liner printed through the cutout. Solid now.
+// History: 0.88 with depthWrite off printed the flask's own back faces and meridians through the cutout;
+// 1 (solid) hid the interior back-wall rings that Des asked for on 2026-10-29 (reference.jpg shows the
+// inner rim / hoop lines through the liquid). 0.8 with depthWrite ON: only the flask's front surface
+// blends, so the back-wall hoops read as darker liquid-tinted lines and nothing else prints through.
+export const TANK_LIQUID_OPACITY = LIQUID_FINISH.opacity; // alias of the `liquid` finish token (style.ts), shared with GLB hd.liquid
 
 /** Aliases of `HOLODECK_STYLE.edges.thresholds.tankWall` / `.mixerWall`. */
 export const TANK_WALL_THRESHOLD = HOLODECK_STYLE.edges.thresholds.tankWall;
@@ -89,7 +139,14 @@ export type TankParams = {
   windowYawDeg: number;
   radialSegments: number;
   bodyHeightSegments: number;
+  /**
+   * @deprecated Ignored since #228 (Des 2026-10-30: "remove the horizontal
+   * rings on the inside of the tank"): body hoops are no longer drawn. Kept,
+   * with its old default (0), so code written against earlier releases still
+   * compiles both ways (building a TankParams and reading one).
+   */
   bodyRings: number;
+  /** @deprecated Ignored since #228, with `bodyRings` (default 0.004). */
   bodyRingWidth: number;
   cageThreshold: number;
   wallThreshold: number;
@@ -120,11 +177,21 @@ export type TankParams = {
   showWall: boolean;
   showLiner: boolean;
   showDome: boolean;
-  /** Flask (liquid) meridian lines, drawn all round. Off: they printed through the cutout as "mesh lines". */
+  /**
+   * Liquid bowl lines (meridians + latitude rings on the flask bowl), seen through the liquid like
+   * reference.jpg's liquid bottom. Off before round 2: with depthWrite on they printed through as "mesh lines".
+   */
   showBowl: boolean;
   /** Inner ullage cage (meridians at the inner radius above the liquid). Off for the same reason. */
   showInnerCage: boolean;
   showLiquid: boolean;
+  /**
+   * Inner back wall lines seen through the window: the structural rims (wall meets floor / dish and
+   * dome / lid) and the facet seams between them. No body hoops since round 5 (`interiorRimHeights`).
+   */
+  showInteriorRings?: boolean;
+  /** Liner facet seams on the back wall: every Nth vertex, 0 = none (`TANK_INTERIOR_MERIDIAN_STEP`). */
+  interiorMeridianStep?: number;
   shaftRadius: number;
   shaftLength: number;
   impellerSpan: number;
@@ -142,8 +209,20 @@ export type TankParams = {
   bottom: TankBottom;
   /** Stand below the bottom closure (lifts the vessel by `standHeight`). */
   support: TankSupport;
-  /** Draw the agitator (drive hat on the top, shaft + 3-blade impeller in the window). */
+  /**
+   * Draw the agitator. On a vessel's own body that is the procedural
+   * `TankAgitator` (drive hat, shaft, 3-blade impeller); on `mixerModel`
+   * vessels it shows / hides mixer.glb's own `anim.agitator`.
+   */
   agitator: boolean;
+  /**
+   * Draw the whole vessel as the Blender mixer (mixer.glb, `AgitatedVessel`)
+   * instead of the parametric body. A preset-level choice (the Mixer part and
+   * the mash tun preset), NOT implied by `agitator`: core exposes `agitator`
+   * on every brewery vessel, and a fermenter with an agitator must keep its
+   * cone, legs and window (review of #228).
+   */
+  mixerModel?: boolean;
   /** Side nozzle on the kept arc. */
   nozzle: TankNozzle;
   /** Cone lid height (world units) for `top: 'cone'`. */
@@ -164,7 +243,19 @@ export type TankParams = {
   legCount: number;
 };
 
-export const DEFAULT_TANK_PARAMS: TankParams = {
+/**
+ * `TankParams` with the fields added after the first release filled in.
+ * Those fields are OPTIONAL on `TankParams` (a complete params object written
+ * against an earlier release must still compile: second / third review of
+ * #228); `mergeTankParams` / `DEFAULT_TANK_PARAMS` always supply them.
+ */
+export type ResolvedTankParams = TankParams & {
+  showInteriorRings: boolean;
+  interiorMeridianStep: number;
+  mixerModel: boolean;
+};
+
+export const DEFAULT_TANK_PARAMS: ResolvedTankParams = {
   height: 3.05,
   radius: 1,
   fill: 0.21,
@@ -177,7 +268,7 @@ export const DEFAULT_TANK_PARAMS: TankParams = {
   windowYawDeg: TANK_WINDOW_YAW,
   radialSegments: 15,
   bodyHeightSegments: 1,
-  bodyRings: TANK_BODY_RINGS,
+  bodyRings: 0,
   bodyRingWidth: 0.004,
   cageThreshold: 1,
   wallThreshold: TANK_WALL_THRESHOLD,
@@ -204,9 +295,11 @@ export const DEFAULT_TANK_PARAMS: TankParams = {
   showWall: true,
   showLiner: true,
   showDome: true,
-  showBowl: false,
+  showBowl: true,
   showInnerCage: false,
   showLiquid: true,
+  showInteriorRings: true,
+  interiorMeridianStep: TANK_INTERIOR_MERIDIAN_STEP,
   shaftRadius: 0.04,
   shaftLength: 0.88,
   impellerSpan: 1.3,
@@ -218,6 +311,7 @@ export const DEFAULT_TANK_PARAMS: TankParams = {
   bottom: 'flat',
   support: 'none',
   agitator: false,
+  mixerModel: false,
   nozzle: 'none',
   coneTopHeight: 0.3,
   coneTopRatio: 0.3,
@@ -359,10 +453,19 @@ export function dishProfile(radius: number, yRim: number, depth: number, stacks 
   return pts;
 }
 
-/** Leg positions around the vessel, inset from the wall so legs sit under the floor rim. */
-export function legPositions(radius: number, count: number, yawOffset = Math.PI / 4): Array<[number, number]> {
+/** Legs sit at this fraction of the tank radius (under the floor rim, inside the wall). */
+export const LEG_RADIUS_RATIO = 0.78;
+
+/**
+ * Leg positions around the vessel, inset from the wall so legs sit under
+ * the floor rim. Default yaw 0: legs at theta 0 / 90 / 180 / 270 put the two
+ * front legs either side of the iso camera axis (theta 45). The old pi/4
+ * offset stood one leg dead centre under the cutaway, where it read as a
+ * stray front leg (Des 2026-10-29, mash tun).
+ */
+export function legPositions(radius: number, count: number, yawOffset = 0): Array<[number, number]> {
   const n = Math.max(1, Math.round(count));
-  const r = radius * 0.78;
+  const r = radius * LEG_RADIUS_RATIO;
   return Array.from({ length: n }, (_, i) => {
     const a = yawOffset + (i * Math.PI * 2) / n;
     return [r * Math.sin(a), r * Math.cos(a)];
@@ -387,8 +490,31 @@ export function segmentsInsideWindow(positions: Float32Array, windowStart: numbe
   return n;
 }
 
-export function mergeTankParams(partial?: Partial<TankParams>): TankParams {
-  return { ...DEFAULT_TANK_PARAMS, ...partial };
+/**
+ * The keys of a full `params` object that differ from `base` (default: the
+ * Tank defaults). The TankTuner hands parts only these: its state is a FULL
+ * TankParams, and passing all of it overrode every preset with the defaults --
+ * an open tuner pulled the Mixer / mash tun out of mixer.glb (window 91 vs the
+ * GLB's 100, holodeck#235) and replaced every preset's closures.
+ */
+export function changedTankParams(params: Partial<TankParams>, base: TankParams = DEFAULT_TANK_PARAMS): Partial<TankParams> {
+  const out: Record<string, unknown> = {};
+  const b = base as unknown as Record<string, unknown>;
+  for (const [k, v] of Object.entries(params)) {
+    const d = b[k];
+    const same = typeof v === 'number' && typeof d === 'number' ? Math.abs(v - d) < 1e-9 : v === d;
+    if (!same && v !== undefined) out[k] = v;
+  }
+  return out as Partial<TankParams>;
+}
+
+export function mergeTankParams(partial?: Partial<TankParams>): ResolvedTankParams {
+  // `undefined` in `partial` (an optional field left unset) must not erase a default.
+  const out = { ...DEFAULT_TANK_PARAMS } as ResolvedTankParams;
+  if (partial) {
+    for (const [k, v] of Object.entries(partial)) if (v !== undefined) (out as Record<string, unknown>)[k] = v;
+  }
+  return out;
 }
 
 /**
@@ -404,56 +530,90 @@ export function tunedVesselHeight(sceneHeight: number, params?: Partial<TankPara
 }
 
 /**
- * Mixer hat on the dome apex. `capLidThickness` used to be a paper-thin
- * ring so the slider did nothing; lidH is a real cylinder now.
- * Arcentry’s agitator hat is a squat 8-gon, not a chimney — capHeightRatio
- * was sized for a flat tank lid, so only a slice of it becomes neck height.
+ * Agitator drive hat on the top apex, after reference.jpg's central mixer:
+ * a short neck sunk into the dome, a round drum (the motor housing) and a
+ * thin cover plate. Batch 3/4 drew a squat 8-gon puck; Des (2026-10-29)
+ * called it "an octagonal flat disc". `apexY` overrides the dome apex for
+ * flat / cone lids (the base Tank passes `tankLayout().apexY`).
+ *
+ * `capHeightRatio` sizes the neck, `capRadiusRatio` the drum radius (of the
+ * tank radius), `capLidThickness` the cover plate; the drum height is
+ * `MIXER_HAT_ASPECT` x its radius.
  */
-export function mixerHatLayout(tankH: number, p: TankParams) {
+export function mixerHatLayout(tankH: number, p: TankParams, apexY?: number) {
   const bodyTop = tankH / 2;
-  const domeApex = bodyTop + p.domeYOffset + p.domeHeight;
+  const domeApex = apexY ?? bodyTop + p.domeYOffset + p.domeHeight;
   const neckH = Math.max(tankH * p.capHeightRatio * 0.22, 0.03);
   const lidH = Math.max(p.capLidThickness, 0.004);
   const capR = p.radius * p.capRadiusRatio;
+  const neckR = capR * MIXER_NECK_RATIO;
+  const drumH = capR * MIXER_HAT_ASPECT;
+  // The neck starts a little below the apex so it never floats over a faceted dome.
+  const neckBot = domeApex - MIXER_NECK_SINK;
+  const neckTop = domeApex + neckH;
+  const drumTop = neckTop + drumH;
   return {
     domeApex,
-    neckH,
+    neckH: neckTop - neckBot,
+    neckR,
+    drumH,
     lidH,
     capR,
-    neckMidY: domeApex + neckH / 2,
-    lidMidY: domeApex + neckH + lidH / 2,
-    lidTop: domeApex + neckH + lidH,
+    neckMidY: (neckBot + neckTop) / 2,
+    drumMidY: neckTop + drumH / 2,
+    lidMidY: drumTop + lidH / 2,
+    lidTop: drumTop + lidH,
   };
 }
 
-/**
- * 0.72 sat the star mid-flask; 0.50 was still above r-mixer heel sit.
- * Fraction of fill height from the heel; not MIXER_INNER_RATIO.
- */
-export const MIXER_IMPELLER_Y_FACTOR = 0.38;
+/** Neck radius as a fraction of the drum radius (reference: a short collar under the motor). */
+export const MIXER_NECK_RATIO = 0.45;
+
+/** How far the neck sinks below the dome apex (world units). */
+export const MIXER_NECK_SINK = 0.03;
 
 /**
- * `shaftLength` is a fraction of tank height. Mixer used to size the
- * shaft from lid→liquid and the tuner slider did nothing.
- *
- * Blades sit at fill × MIXER_IMPELLER_Y_FACTOR. Lowering that without
- * growing the shaft leaves a lid-blade gap, so visual shaftH is
- * max(slider, lid→blades). MIXER_SHAFT_LENGTH stays 0.77; the tuner
- * still lengthens past the blades (`long.shaftH === tankH * shaftLength`).
+ * Drum height / drum radius. 0.25 (the old lid-only puck) read as a flat
+ * disc; reference.jpg's motor hat is about half as tall as it is wide, so
+ * height ~ 0.7x radius. 0.9 sat tall over the shoulder at 2x zoom.
  */
-export function mixerShaftLayout(tankH: number, fill: number, p: TankParams) {
-  const hat = mixerHatLayout(tankH, p);
-  const level = Math.min(1, Math.max(0.02, fill));
-  const liquidY = -tankH / 2 + tankH * level * MIXER_IMPELLER_Y_FACTOR;
-  const shaftHSlider = Math.max(0.2, tankH * p.shaftLength);
-  const shaftTop = hat.lidTop;
-  // More negative Y is lower. min() grows the shaft down to the blades
-  // when the slider would stop short; a longer slider still wins.
-  const shaftBot = Math.min(shaftTop - shaftHSlider, liquidY);
+export const MIXER_HAT_ASPECT = 0.72;
+
+/** Round drum: the 8-gon hat read as an octagonal disc vs the reference's cylinder. */
+export const MIXER_HAT_SIDES = 24;
+
+/**
+ * Lowest the impeller hub may sit, as a fraction of the tank height above
+ * the shell floor. Keeps the blades inside the flask's U when `shaftLength`
+ * would run the shaft through the heel (Batch 3 rejected "through-heel").
+ */
+export const MIXER_IMPELLER_FLOOR_CLEARANCE = 0.16;
+
+/**
+ * Shaft + impeller. `shaftLength` is the drop from the dome apex to the
+ * impeller hub, as a fraction of tank height (the tuner slider), clamped so
+ * the hub stays MIXER_IMPELLER_FLOOR_CLEARANCE above the floor.
+ *
+ * The shaft ends INSIDE the hub (shaftBot = hub centre), so the impeller is
+ * always attached. Before 2026-10-29 the blades sat at a fill-dependent
+ * height (fill x 0.38) and the shaft was sized separately, so the impeller
+ * floated off the shaft and moved with the liquid level. The impeller now
+ * ignores the fill: a real agitator does not ride the waterline.
+ */
+export function mixerShaftLayout(tankH: number, p: TankParams, apexY?: number) {
+  const hat = mixerHatLayout(tankH, p, apexY);
+  const y0 = -tankH / 2;
+  const floorY = y0 + tankH * MIXER_IMPELLER_FLOOR_CLEARANCE;
+  const shaftTop = hat.neckMidY;
+  const impellerY = Math.min(shaftTop - 0.1, Math.max(hat.domeApex - tankH * p.shaftLength, floorY));
+  const hub = mixerImpellerBladeLayout(p.impellerSpan, p.shaftRadius, p.impellerRadius);
+  const shaftBot = impellerY;
   const shaftH = shaftTop - shaftBot;
   return {
     ...hat,
-    liquidY,
+    impellerY,
+    hubR: hub.hubR,
+    hubH: hub.hubH,
     shaftH,
     shaftTop,
     shaftBot,
@@ -489,6 +649,171 @@ export function tankWindow(windowDeg: number, windowYawDeg: number): {
   };
 }
 
+/**
+ * The part of the inner wall the camera sees through the window: the
+ * window's arc turned half a revolution (the back wall opposite the
+ * opening), plus `margin` radians either side. Ring segments outside this
+ * arc would sit behind the outer wall anyway; keeping them to the back arc
+ * means no ring can poke through a jamb's cut face.
+ */
+export function interiorRingArc(
+  windowDeg: number,
+  windowYawDeg: number,
+  margin = INTERIOR_RING_MARGIN,
+): { start: number; len: number } {
+  const { windowStart, windowRad } = tankWindow(windowDeg, windowYawDeg);
+  const len = Math.min(Math.PI * 2, windowRad + 2 * margin);
+  return { start: windowStart + Math.PI - margin, len };
+}
+
+/**
+ * Heights of the inner back wall's horizontal lines: only the structural
+ * rims, where the wall meets the floor / dish (`yBottom`) and the dome / lid
+ * / shoulder (`yTop`). The facet seams run between them, so every seam ends
+ * on a rim. Empty when the wall has no height (no rims, so no seams either).
+ * Round 5 (Des 2026-10-30) removed the body hoops between them.
+ */
+export function interiorRimHeights(yBottom: number, yTop: number): number[] {
+  if (!(yTop - yBottom > 1e-4)) return [];
+  return [yBottom, yTop];
+}
+
+/**
+ * Distance from the axis to a faceted wall (a `CylinderGeometry` /
+ * `LatheGeometry` with vertices every `facetStep` radians from `facetStart`)
+ * along the ray at `theta`. A smooth circle of the wall's radius bulges
+ * outside every flat facet between its vertices, so a line drawn on the
+ * circle hides behind the facet and reads as a dashed ring.
+ */
+export function facetedRadiusAt(radius: number, theta: number, facetStart: number, facetStep: number): number {
+  if (!(facetStep > 1e-6)) return radius;
+  const k = Math.floor((theta - facetStart) / facetStep);
+  const mid = facetStart + (k + 0.5) * facetStep;
+  return (radius * Math.cos(facetStep / 2)) / Math.cos(theta - mid);
+}
+
+/**
+ * LineSegments positions for the interior rings: one polyline per height
+ * on `arc`, following the faceted liner (vertices every `facetStep` from
+ * `facetStart`) at `radius`, so each ring lies flat on the facets instead of
+ * dipping behind them.
+ */
+export function interiorRingSegments(
+  radius: number,
+  heights: readonly number[],
+  arc: { start: number; len: number },
+  facetStart: number,
+  facetStep: number,
+): Float32Array {
+  // Break points: the arc ends plus every facet vertex strictly inside the arc.
+  const thetas = [arc.start];
+  if (facetStep > 1e-6) {
+    const first = Math.floor((arc.start - facetStart) / facetStep) + 1;
+    for (let k = first; ; k++) {
+      const th = facetStart + k * facetStep;
+      if (th >= arc.start + arc.len - 1e-9) break;
+      thetas.push(th);
+    }
+  } else {
+    for (let i = 1; i < 32; i++) thetas.push(arc.start + (arc.len * i) / 32);
+  }
+  thetas.push(arc.start + arc.len);
+  const pts: number[] = [];
+  const at = (th: number, y: number): [number, number, number] => {
+    const r = facetedRadiusAt(radius, th, facetStart, facetStep);
+    return [r * Math.sin(th), y, r * Math.cos(th)];
+  };
+  for (const y of heights) {
+    for (let i = 0; i < thetas.length - 1; i++) {
+      pts.push(...at(thetas[i], y), ...at(thetas[i + 1], y));
+    }
+  }
+  return new Float32Array(pts);
+}
+
+/**
+ * Vertical facet lines on the inner back wall (reference.jpg's interiors
+ * show the liner's panel seams through the window): one line per `step`-th
+ * liner vertex strictly inside `arc`, from `y0` to `y1`. Vertices sit on
+ * the facet corners, so the lines lie on the liner (radius = `radius`).
+ */
+export function interiorMeridianSegments(
+  radius: number,
+  y0: number,
+  y1: number,
+  arc: { start: number; len: number },
+  facetStart: number,
+  facetStep: number,
+  step = 1,
+): Float32Array {
+  if (!(facetStep > 1e-6) || !(y1 - y0 > 1e-6)) return new Float32Array(0);
+  const pts: number[] = [];
+  const first = Math.floor((arc.start - facetStart) / facetStep) + 1;
+  const every = Math.max(1, Math.round(step));
+  for (let k = first; ; k++) {
+    const th = facetStart + k * facetStep;
+    if (th >= arc.start + arc.len - 1e-9) break;
+    if ((k - first) % every !== 0) continue;
+    const x = radius * Math.sin(th);
+    const z = radius * Math.cos(th);
+    pts.push(x, y0, z, x, y1, z);
+  }
+  return new Float32Array(pts);
+}
+
+/** Interior rims / hoops plus the facet seams between the first and last height, as one line set. */
+export function interiorLineSegments(
+  radius: number,
+  heights: number[],
+  arc: { start: number; len: number },
+  facetStart: number,
+  facetStep: number,
+  meridianStep: number,
+): Float32Array {
+  const rings = interiorRingSegments(radius, heights, arc, facetStart, facetStep);
+  const seams =
+    meridianStep > 0 && heights.length >= 2
+      ? interiorMeridianSegments(radius, heights[0], heights[heights.length - 1], arc, facetStart, facetStep, meridianStep)
+      : new Float32Array(0);
+  const out = new Float32Array(rings.length + seams.length);
+  out.set(rings, 0);
+  out.set(seams, rings.length);
+  return out;
+}
+
+/**
+ * Latitude rings on the liquid flask's bowl: a full circle at each interior
+ * lathe-profile point below `yMax` (the bowl equator or the waterline,
+ * whichever is lower), every `step`-th point. With the flask meridians these
+ * are the radial + ring lines reference.jpg shows on the liquid bottom.
+ */
+export function bowlLatitudeRings(
+  profile: Array<[number, number]>,
+  yMax: number,
+  step = 1,
+  segments = 48,
+): Float32Array {
+  const parts: Float32Array[] = [];
+  const every = Math.max(1, Math.round(step));
+  // Skip the pole (radius 0) and the closing waterline point (also radius 0).
+  const inner = profile.filter(([r, y]) => r > 1e-4 && y < yMax - 1e-6);
+  inner.forEach(([r, y], i) => {
+    if (i % every === every - 1) parts.push(cylinderArcSegments(r, y, 0, Math.PI * 2, segments));
+  });
+  const out = new Float32Array(parts.reduce((n, a) => n + a.length, 0));
+  let o = 0;
+  for (const a of parts) {
+    out.set(a, o);
+    o += a.length;
+  }
+  return out;
+}
+
+/** The bowl part of a flask lathe profile (pole up to `yMax`), for the bowl meridians. */
+export function bowlProfile(profile: Array<[number, number]>, yMax: number): Array<[number, number]> {
+  return profile.filter(([r, y], i) => y <= yMax + 1e-6 && !(i > 0 && r < 1e-6));
+}
+
 /** Inner flask is a closed body of revolution (Arcentry bottle), not a
  * window pie. Window-sliced fill read as a cyan cutaway face. Waterline
  * is a flat disc — a bowl-height hemispherical cap (tick 96) ate holding
@@ -501,33 +826,58 @@ export function liquidCylinderHeight(liquidTop: number, bowlOriginY: number): nu
   return Math.max(0, liquidTop - bowlOriginY);
 }
 
-/** Mixer flask sits inset in the vessel; tanks use TANK_INNER_RATIO. */
-export const MIXER_INNER_RATIO = 0.72;
+/**
+ * Mixer flask radius / vessel radius. 0.72 left white margins either side
+ * of the liquid; reference.jpg's mixer liquid fills the window. 0.9 since
+ * round 2 (fidelity 0.2022 -> 0.2047). Tanks use TANK_INNER_RATIO.
+ */
+export const MIXER_INNER_RATIO = 0.9;
 
-/** Plus (2 crossed cylinders) dualled vs r-mixer's three blades in the window. */
+/** Three pitched blades, like the reference propeller (two read as a plus, four as a star). */
 export const MIXER_IMPELLER_BLADES = 3;
 
 /** 0 yaw put a blade along +X. r-mixer shows a blade across the window (~30°). */
 export const MIXER_IMPELLER_YAW = Math.PI / 6;
 
-/** 0.042 read as a fat star vs r-mixer's thin blades. */
+/**
+ * Blade size knob (`impellerRadius`): the blade chord is 3.5x and the blade
+ * thickness 0.4x this. 0.042 read as a fat star when blades were round bars.
+ */
 export const MIXER_IMPELLER_RADIUS = 0.03;
 
-/** 6-gon bars still read as sausages vs r-mixer thin agitator (radius stays 0.03). */
-export const MIXER_IMPELLER_SIDES = 4;
-
-/** 0.45 still large vs r-mixer compact propeller; 0.55/0.70/1.0/1.5 were worse. Not MIXER_IMPELLER_Y_FACTOR. */
-export const MIXER_IMPELLER_SPAN = 0.36;
+/**
+ * Blade pitch about the blade's own long axis (radians). Flat (0) blades read
+ * as a stray horizontal star; reference.jpg's blades are tilted paddles.
+ */
+export const MIXER_BLADE_PITCH = Math.PI / 5;
 
 /**
- * Through-center bars are one cylinder per blade, so 3 bars = 6 rays (a
- * star) vs r-mixer 3-blade propeller sitting on the shaft. Tip-to-tip
- * stays `span`; each bar starts at the shaft.
+ * Tip-to-tip impeller span (world units) for the radius-1 mixer: about half
+ * the flask diameter (inner 0.72 -> 1.44), like reference.jpg. Batch 3's
+ * 0.36 read as a tiny star once the bars became blades; 0.45..1.5 were for
+ * the old through-centre bars.
  */
-export function mixerImpellerBladeLayout(span: number, shaftRadius: number) {
-  const hub = Math.max(0.01, shaftRadius);
-  const bladeLen = Math.max(0.04, span / 2 - hub);
-  return { hub, bladeLen, radial: hub + bladeLen / 2 };
+export const MIXER_IMPELLER_SPAN = 0.7;
+
+/**
+ * Hub + blade sizes. The hub is a short cylinder ~2.2x the shaft radius;
+ * each blade starts inside the hub (overlap) so blades, hub and shaft read
+ * as one connected part, and the tip-to-tip span stays `span`.
+ */
+export function mixerImpellerBladeLayout(span: number, shaftRadius: number, bladeSize = MIXER_IMPELLER_RADIUS) {
+  const hubR = Math.max(0.035, shaftRadius * 2.2);
+  const hubH = Math.max(0.05, hubR * 1.4);
+  const inner = hubR * 0.6;
+  const bladeLen = Math.max(0.04, span / 2 - inner);
+  return {
+    hubR,
+    hubH,
+    bladeLen,
+    /** Blade centre distance from the shaft axis. */
+    radial: inner + bladeLen / 2,
+    chord: bladeSize * 3.5,
+    thickness: Math.max(0.006, bladeSize * 0.4),
+  };
 }
 
 /** 0.055 was fatter than the blades vs r-mixer's needle shaft. */
@@ -539,40 +889,44 @@ export const MIXER_SHAFT_SIDES = 16;
 /** 0.18 neck read as a chimney vs r-mixer's squat 8-gon on the dome apex. */
 export const MIXER_CAP_HEIGHT_RATIO = 0.1;
 
-/** 3 extra hoops dualled vs r-mixer's quieter bottle (lathe meridians stay). */
-export const MIXER_BODY_RINGS = 0;
-
 /** 0.5 hat read wide vs r-mixer's smaller 8-gon on the dome. */
 export const MIXER_CAP_RADIUS_RATIO = 0.4;
 
 /** MIXER_DEFAULTS 0.025 sat taller than the r-mixer squat puck (tank default is 0.02). */
 export const MIXER_CAP_LID_THICKNESS = 0.02;
 
-/** 0.95 ran the shaft through the impeller into the heel vs r-mixer lid-to-blade. */
-export const MIXER_SHAFT_LENGTH = 0.77;
+/**
+ * Dome apex -> impeller hub, as a fraction of tank height. 0.77 measured
+ * lid -> blades under the old fill-dependent impeller; with the hub now
+ * fixed near the floor, 0.9 puts it ~0.2 H above the floor in the radius-1
+ * mixer (2.7) and mash tun, i.e. low in the flask like reference.jpg.
+ * MIXER_IMPELLER_FLOOR_CLEARANCE stops longer values from reaching the heel.
+ */
+export const MIXER_SHAFT_LENGTH = 0.9;
 
 /** 24 segs made flask/wall meridians denser than r-mixer even at step 3. */
 export const MIXER_RADIAL_SEGMENTS = 15;
 
-/** Lid-top ring read as a dark washer vs r-mixer's solid 8-gon. Edges already stroke the lid. */
-export const MIXER_HAT_LID_RING = false;
-
-/** Identity 8-gon put a face toward the camera vs r-mixer's vertex-on. Half a facet. */
-export const MIXER_HAT_YAW = Math.PI / 8;
-
 /** depthTest false punched the 3-blade star through the bottle wall vs the r-mixer in-window agitator. */
 export const MIXER_AGITATOR_DEPTH_TEST = true;
 
-/** #5a5e62 punched a dark star vs the r-mixer needle sitting with the flask cage. */
-export const MIXER_AGITATOR_COLOR = '#666666';
+/**
+ * Shaft colour. #5a5e62 punched a dark needle; #666 vanished under the
+ * 0.84 liquid (Des 2026-10-29: "shaft stops short of the impeller"). A mid
+ * grey reads both against the white liner and through the liquid.
+ */
+export const MIXER_AGITATOR_COLOR = '#8c9196';
+
+/** Hub + blades: light grey with outline edges, like the reference propeller. */
+export const MIXER_IMPELLER_COLOR = '#c9cdd1';
 
 /** Mixer keep-arc must show a right-hand bottle wall. Tank window 91° ate
  *  the +X silhouette so s-mixer read as a cutaway cylinder vs r-mixer's bottle. */
-export const MIXER_WINDOW_DEG = 70;
+export const MIXER_WINDOW_DEG = 100; // = MIXER_GLB.windowDeg: agitated vessels are mixer.glb since 2026-10-30 (was 70 procedural)
 
 /** Inherited 45 opened the cut a tad toward +X vs r-mixer keep-arc on the
  *  right-hand bottle wall. Tanks stay TANK_WINDOW_YAW 45. */
-export const MIXER_WINDOW_YAW = 40;
+export const MIXER_WINDOW_YAW = 45; // = MIXER_GLB.windowYawDeg (was 40 procedural); routing clips pipes on this cutout
 
 /** Mixer body tapers into the dome. A silo (ratio 0) read as cylinder+hemisphere
  *  vs r-mixer's bottle shoulders. */
@@ -762,6 +1116,17 @@ export function bodyShoulder(
   return { shoulderH, cylH: Math.max(0, bodyH - shoulderH), topR };
 }
 
+/**
+ * Height of a rounded outer heel (half-ellipsoid, radius `radius`, depth
+ * `bowlH`, pole at `y0`) at distance `r` from the axis: where a leg under the
+ * heel has to stop so it meets the shell instead of floating below it.
+ */
+export function heelSurfaceY(y0: number, radius: number, bowlH: number, r: number): number {
+  if (!(bowlH > 1e-6) || !(radius > 1e-6)) return y0;
+  const t = Math.min(1, Math.max(0, r / radius));
+  return y0 + bowlH * (1 - Math.sqrt(1 - t * t));
+}
+
 /** Lift the straight wall by `bowlH` so an outer hemisphere can sit under it. */
 export function bodyOuterBowl(
   straightCylH: number,
@@ -793,7 +1158,35 @@ export function innerCageSpan(
 }
 
 /** Mixer outer wall meridians. Step 2 on 24 segs read dense vs r-mixer. */
-export const MIXER_WALL_MERIDIAN_STEP = 3;
+// Round 2 (2026-10-29): 1. Step 3 left at most one meridian on each visible jamb strip, so the bottle read as
+// a smooth grey blob vs reference.jpg's faceted panels (4-5 seams per side).
+export const MIXER_WALL_MERIDIAN_STEP = 1;
+
+/**
+ * Tank outer-wall meridians (the cage on the kept arc): every facet, like
+ * reference.jpg's panelled walls. Was FLASK_MERIDIAN_STEP (3).
+ */
+export const TANK_WALL_MERIDIAN_STEP = 1;
+
+/**
+ * Dome meridians: every facet. Round 3 used every 2nd; reference.jpg's
+ * domes show a meridian per facet converging on the apex (holding / A / B).
+ */
+export const TANK_DOME_MERIDIAN_STEP = 1;
+
+/**
+ * Liquid bowl radial lines: every 4th vertex of the liquid lathe
+ * (`windowFillSegments`, 32 on a 15-facet tank -> 8 radials), like the
+ * reference's liquid bottom (radials + rings). Seen through the liquid, so
+ * they read tinted, not as a cage.
+ *
+ * Round 5 (2026-10-30): was 1 on the 15-facet SHELL grid (clamped to every
+ * 2nd by `everyNthMeridian`), so the radials sat between the liquid
+ * lathe's vertices (32-gon) and ran off its facets. They are on the lathe
+ * grid now, and `tank-lines.ts` drops the ones that would run into a window
+ * jamb (`bowlWindow`).
+ */
+export const TANK_BOWL_MERIDIAN_STEP = 4;
 
 /** Inner flask meridians. Step 2 (every second of 15) read dense vs r-holdbody. */
 export const FLASK_MERIDIAN_STEP = 3;
@@ -860,6 +1253,40 @@ export function cylinderThetasEven(
  * Jambs plus even meridians inset from the window. Even meridians within
  * half a step of a jamb still read as being in the cutout in iso.
  */
+/**
+ * Thetas of the kept-arc FACET corners: keepStart + k * keepLen / segs (the
+ * vertices of a `CylinderGeometry` / `LatheGeometry` cut on that arc), every
+ * `step`-th, always including both jambs. Lines on these sit on the mesh's
+ * facet edges and meet the kept-arc rims at their vertices.
+ * `cylinderThetasKept` uses the world 2 pi / segs grid instead, which is not
+ * the windowed mesh's grid: its meridians crossed facets mid-face and missed
+ * the rim vertices (line-termination.test.ts, 2026-10-30).
+ */
+export function facetThetasKept(segs: number, keepStart: number, keepLen: number, step = 1): number[] {
+  const n = Math.max(1, Math.round(segs));
+  const every = Math.max(1, Math.round(step));
+  const out: number[] = [];
+  for (let k = 0; k <= n; k++) {
+    if (k === 0 || k === n || k % every === 0) out.push(keepStart + (k * keepLen) / n);
+  }
+  return out;
+}
+
+/** Meridians along a full lathe profile (e.g. a dish rim -> pole), keeping the axis point (unlike flaskMeridianSegments). */
+export function profileMeridianSegments(profile: Array<[number, number]>, thetas: number[]): Float32Array {
+  const pts: number[] = [];
+  for (const th of thetas) {
+    const s = Math.sin(th);
+    const c = Math.cos(th);
+    for (let i = 0; i < profile.length - 1; i++) {
+      const [r0, y0] = profile[i];
+      const [r1, y1] = profile[i + 1];
+      pts.push(r0 * s, y0, r0 * c, r1 * s, y1, r1 * c);
+    }
+  }
+  return new Float32Array(pts);
+}
+
 export function cylinderThetasKept(
   segs: number,
   keepStart: number,
@@ -1128,4 +1555,75 @@ export function waterlineRing(radius: number, y: number, segments: number): Floa
     out.set([radius * Math.sin(a0), y, radius * Math.cos(a0), radius * Math.sin(a1), y, radius * Math.cos(a1)], i * 6);
   }
   return out;
+}
+
+/**
+ * Where the inlet nozzle leaves the shell, in radians along the kept wall
+ * from the window's camera-left jamb, and how far it leans from the wall
+ * normal toward the tangent (away from the window). Round 2 (Des
+ * 2026-10-29): "the diagonal stick reads worse than before" -- the long
+ * grid-aligned tangent chord (offset 0.32, lean pi/2, buried 1 r) grazed the
+ * wall as a thin sliver. A short stub, 0.6 rad onto the left wall (its
+ * normal ~80° off the camera ray, so the stub points screen-left and its
+ * flange ring is seen nearly edge-on) leaning 0.45 rad toward the tangent so
+ * it still reads as a tangential inlet.
+ * Earlier: 0.38 / +tangent / hex flange = round face on a long pipe that
+ * read as a twisted flange.
+ */
+export const TANK_NOZZLE_JAMB_OFFSET = 0.6;
+export const TANK_NOZZLE_LEAN = 0.45;
+/** Visible stub length / tank radius (round 1 stick was 0.4 R). */
+export const TANK_NOZZLE_LENGTH = 0.26;
+/** Stub radius / tank radius. */
+export const TANK_NOZZLE_RADIUS = 0.085;
+
+/**
+ * Pose of the inlet nozzle stub in the tank's local frame. The stub
+ * geometry (`nozzleStubGeometry`, flange.ts) runs along local +Y from its
+ * origin (the shell end) to the flanged free end; `quaternion` turns +Y onto
+ * `axis`, so the flange ring is perpendicular to the stub by construction
+ * (flange-orientation.test.ts). `position` is the shell end, buried inside
+ * the faceted wall so no open end shows; `length` is the whole stub
+ * (buried part + `visibleLength`).
+ *
+ * Why a quaternion instead of the old Euler pair (group yaw theta + mesh
+ * roll pi/2 on X-axis cylinders): one rotation derived from the axis, with
+ * nothing to get out of order. `Quaternion.setFromUnitVectors` is three.js'
+ * shortest-arc rotation between two directions.
+ */
+export function tankNozzlePose(
+  radius: number,
+  theta: number,
+  y: number,
+  visibleLength: number,
+  nozzleR: number,
+  lean = TANK_NOZZLE_LEAN,
+): {
+  axis: [number, number, number];
+  /** Shell end of the stub (the geometry's origin). */
+  position: [number, number, number];
+  quaternion: [number, number, number, number];
+  /** Whole stub length: the buried part plus `visibleLength`. */
+  length: number;
+} {
+  // Cylinder theta convention: point on the wall = (r sin θ, y, r cos θ); the outward normal is
+  // (sin θ, 0, cos θ) and d/dθ (cos θ, 0, -sin θ) the tangent. Lean toward -tangent (away from the window).
+  const normal = new Vector3(Math.sin(theta), 0, Math.cos(theta));
+  const away = new Vector3(-Math.cos(theta), 0, Math.sin(theta));
+  const axis = normal.clone().multiplyScalar(Math.cos(lean)).addScaledVector(away, Math.sin(lean)).normalize();
+  // The shell is a polygon whose flat faces sit up to R (1 - cos(pi / n)) inside the circle (0.03 R covers
+  // n >= 13); the tilted end disc reaches r sin(lean) further out. Start inside both.
+  const startR = Math.max(0, radius * 0.97 - nozzleR * Math.sin(lean) - 0.01);
+  const start = normal.clone().multiplyScalar(startR).setY(y);
+  // Distance along the axis from the start to the circle of radius R (where the stub leaves the shell).
+  const b = start.x * axis.x + start.z * axis.z;
+  const c = start.x * start.x + start.z * start.z - radius * radius;
+  const inside = -b + Math.sqrt(Math.max(0, b * b - c));
+  const q = new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), axis);
+  return {
+    axis: [axis.x, axis.y, axis.z],
+    position: [start.x, start.y, start.z],
+    quaternion: [q.x, q.y, q.z, q.w],
+    length: inside + Math.max(0, visibleLength),
+  };
 }

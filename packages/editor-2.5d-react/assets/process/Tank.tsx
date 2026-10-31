@@ -1,8 +1,17 @@
 import { Edges } from './Edges';
 import { useMemo } from 'react';
+import { InteriorLines } from './InteriorLines';
+import { LineSet } from './LineSet';
+import { LiquidVolume } from './LiquidVolume';
+import { NozzleStub } from './NozzleStub';
+import { Supports } from './Supports';
+import { bowlMeridianThetas, bowlWindow, flatLidHatch, tankLinePlan } from './tank-lines';
 import { BackSide, BufferAttribute, BufferGeometry, Vector2, type Vector3Tuple } from 'three';
 import { ShadedMesh, WhiteFill } from './Shell';
 import { useHolodeckStyle } from './style-context';
+import { liquidFinish, type HolodeckStyle } from './style';
+import { AgitatedVessel } from './AgitatedVessel';
+import { mixerGlbProps, usesMixerModel } from './agitated-vessel';
 import { TankAgitator } from './TankAgitator';
 import {
   mergeTankParams,
@@ -22,6 +31,10 @@ import {
   LIQUID_THETA_LENGTH,
   windowFillSegments,
   innerCageSpan,
+  interiorRingArc,
+  interiorRimHeights,
+  interiorRingSegments,
+  INTERIOR_RING_INSET,
   bodyShoulder,
   bodyOuterBowl,
   heelOverlap,
@@ -34,6 +47,16 @@ import {
   frustumProfile,
   dishProfile,
   legPositions,
+  heelSurfaceY,
+  tankNozzlePose,
+  TANK_NOZZLE_JAMB_OFFSET,
+  TANK_NOZZLE_LENGTH,
+  TANK_NOZZLE_RADIUS,
+  TANK_LINE_WIDTH,
+  LINER_SHADE,
+  TANK_DOME_MERIDIAN_STEP,
+  TANK_WALL_MERIDIAN_STEP,
+  LEG_RADIUS_RATIO,
   type TankCap,
   type TankParams,
 } from './tank-params';
@@ -61,28 +84,27 @@ import {
  * gives the floor point so a part can seat the vessel on the ground.
  */
 
+/** Cage / rim lines: fat Line2 at TANK_LINE_WIDTH (was 1-device-px lineBasic, too faint vs reference.jpg). */
 function LineBag({ positions, color }: { positions: Float32Array; color: string }) {
-  const geometry = useMemo(() => {
-    const g = new BufferGeometry();
-    g.setAttribute('position', new BufferAttribute(positions, 3));
-    return g;
-  }, [positions]);
-  return (
-    <lineSegments geometry={geometry}>
-      <lineBasicMaterial color={color} toneMapped={false} />
-    </lineSegments>
-  );
+  return <LineSet positions={positions} color={color} width={TANK_LINE_WIDTH} />;
 }
 
-function LiquidFill({ color, opacity }: { color: string; opacity: number }) {
-  // Opaque with depth writes so nothing behind the flask (back-wall lines,
-  // the liner, pipes) prints through the cutout. A sub-1 opacity (the mixer
-  // keeps 0.84 so its shaft reads through the flask) still writes depth, so
-  // only the first surface blends.
-  const solid = opacity >= 0.999;
-  return (
-    <meshBasicMaterial color={color} transparent={!solid} opacity={opacity} depthWrite toneMapped={false} />
-  );
+/**
+ * The theme's share of a Tank's params: edge / liquid colours, the vessel
+ * shade and the liquid finish's opacity. Explicit params (presets, tuner,
+ * `liquidOpacity`) are spread over it. holodeck#239: the liquid opacity used to
+ * come from DEFAULT_TANK_PARAMS (0.78) and beat the theme's
+ * `finishes.liquid.opacity` every time.
+ */
+export function tankParamsFromStyle(style: HolodeckStyle): Partial<TankParams> {
+  return {
+    edgeColor: style.colors.edge,
+    fillColor: style.colors.liquid,
+    shadeMin: style.finishes.vessel.shadeMin,
+    shadeMax: style.finishes.vessel.shadeMax,
+    hubWhite: style.finishes.vessel.hubWhite,
+    liquidOpacity: liquidFinish(style).opacity,
+  };
 }
 
 export function Tank({
@@ -107,18 +129,16 @@ export function Tank({
 }) {
   const style = useHolodeckStyle();
   // Theme tokens are the base; explicit params (tuner sliders, presets) win.
-  const p = mergeTankParams({
-    edgeColor: style.colors.edge,
-    fillColor: style.colors.liquid,
-    shadeMin: style.finishes.vessel.shadeMin,
-    shadeMax: style.finishes.vessel.shadeMax,
-    hubWhite: style.finishes.vessel.hubWhite,
-    ...params,
-  });
+  const p = mergeTankParams({ ...tankParamsFromStyle(style), ...params });
   const top = cap ?? p.top;
   const tankH = height ?? p.height;
   const tankR = radius ?? p.radius;
-  const level = Math.min(1, Math.max(0.02, fill ?? p.fill));
+  // fill <= 0 (or not a number) is an EMPTY vessel: no liquid, no waterline, no bowl lines. Round 5
+  // (2026-10-30): the 2% floor used to apply to 0 too, so an empty whirlpool showed a small floating disc.
+  // Any positive fill keeps that floor so a nearly empty vessel still shows a film.
+  const requested = fill ?? p.fill;
+  const empty = !(requested > 0);
+  const level = Math.min(1, Math.max(0.02, empty ? 0 : requested));
   const color = alarm ? style.colors.alarm : (fillColor ?? p.fillColor);
   const liquidTones = liquidShades(color);
   const inner = tankR * p.innerRatio;
@@ -136,13 +156,20 @@ export function Tank({
   const fillSegs = windowFillSegments(segs);
   const bodySegs = Math.max(1, Math.round(p.bodyHeightSegments));
   const domeSegs = Math.max(1, Math.round(p.domeHeightSegments));
-  // Round 3 trial: the cap is denser than the wall (reference dome ~ every 2nd of 15 facets + 3 latitude rings).
-  const domeThetas = cylinderThetasKept(segs, keepStart, keepLen, 2);
+  const domeThetas = cylinderThetasKept(segs, keepStart, keepLen, TANK_DOME_MERIDIAN_STEP);
   const mixerWallThetas = cylinderThetasKept(segs, keepStart, keepLen, MIXER_WALL_MERIDIAN_STEP);
   const flaskThetas = cylinderThetasEven(segs, 0, LIQUID_THETA_LENGTH, true, FLASK_MERIDIAN_STEP);
+  // Bowl radials on the liquid lathe's vertex grid, only those seen whole through the window (tank-lines.ts).
+  const bowlThetas = useMemo(() => bowlMeridianThetas(fillSegs), [fillSegs]);
+  const bowlWin = useMemo(
+    () => bowlWindow(p, tankR),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- p is rebuilt every render; key on what bowlWindow reads.
+    [p.windowDeg, p.windowYawDeg, p.linerRatio, tankR],
+  );
   const ullageCage = innerCageSpan(y0, bodyTop, liquidTop);
   const windowArgs = [segs, bodySegs, true, keepStart, keepLen] as const;
   const shade = { shadeMin: p.shadeMin, shadeMax: p.shadeMax, hubWhite: p.hubWhite };
+  const linerShade = LINER_SHADE;
   const shoulder = bodyShoulder(bodyH, tankR, p);
   const outer = bodyOuterBowl(shoulder.cylH, p.outerBowlHeight);
   const heelOl = heelOverlap(outer.bowlH);
@@ -229,28 +256,57 @@ export function Tank({
           : [];
     return pts.map(([x, y]) => new Vector2(x, y));
   }, [p.bottom, tankR, y0, layout.bottomDepth, layout.bottomR, layout.bottomY]);
+  // Interior rim + hoop lines on the inner back wall (seen through the window). The straight wall runs
+  // y0..bodyTop on a plain tank; on a shouldered body (mixer) it runs from the heel join to the shoulder.
+  // Interior rim + hoop lines (and facet seams) on the inner back wall, seen through the window. The straight
+  // wall runs y0..bodyTop on a plain tank; on a shouldered body (mixer) from the heel join to the shoulder.
+  const interiorLines = useMemo(() => {
+    if (!p.showInteriorRings || !p.showLiner) return null;
+    const yBottom = useShoulder ? y0 + outer.bowlH : y0 + 0.004;
+    const yTop = useShoulder ? y0 + shoulder.cylH : bodyTop - 0.004;
+    const heights = interiorRimHeights(yBottom, yTop);
+    if (heights.length === 0) return null;
+    return { radius: liner * INTERIOR_RING_INSET, heights, arc: interiorRingArc(p.windowDeg, p.windowYawDeg) };
+  }, [p.showInteriorRings, p.showLiner, p.windowDeg, p.windowYawDeg, useShoulder, y0, outer.bowlH, shoulder.cylH, bodyTop, liner]);
+  // Every line set (except the retired shoulder path's) comes from tank-lines.ts, where the
+  // line-termination rule is tested.
+  const linePlan = useMemo(
+    () => tankLinePlan(p, top, tankH, tankR, empty ? 0 : level),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- p is rebuilt every render; key on what the plan reads.
+    [JSON.stringify(p), top, tankH, tankR, level, empty],
+  );
   const meshKey = `${segs}-${bodySegs}-${domeSegs}-${p.windowDeg}-${p.windowYawDeg}-${tankH}-${tankR}-${top}-${p.bottom}-${p.support}-${p.domeHeight}-${p.bowlHeight}-${level}-${p.shoulderRatio}-${p.shoulderTopRatio}-${p.outerBowlHeight}-${layout.bottomDepth}-${layout.topHeight}`;
-  const bodyRingFs = Array.from({ length: Math.max(0, Math.round(p.bodyRings)) }, (_, i) => {
-    const n = Math.max(1, Math.round(p.bodyRings));
-    return (i + 1) / (n + 1);
-  });
-  const skirtR = tankR * 0.9;
   const skirtTop = p.bottom === 'flat' ? y0 : y0 - layout.bottomDepth * 0.5;
-  const skirtH = Math.max(0.01, skirtTop - layout.floorY);
-  const legTop = p.bottom === 'flat' ? y0 : layout.bottomY + layout.bottomDepth * 0.6;
-  const legH = Math.max(0.01, legTop - layout.floorY);
-  // Tangential inlet: on the kept arc just past the camera-left jamb (keepStart + keepLen is the
-  // window's start, so subtracting walks onto the wall) so it reads against the shell.
-  const nozzleTheta = keepStart + keepLen - 0.38;
-  const nozzleLen = Math.max(0.3, tankR * 0.45);
-  const nozzleR = Math.max(0.04, tankR * 0.06);
-  const nozzleY = y0 + bodyH * 0.3;
-  const nozzleTangent = [Math.cos(nozzleTheta), 0, -Math.sin(nozzleTheta)] as const;
-  const nozzleCenter: Vector3Tuple = [
-    tankR * Math.sin(nozzleTheta) + nozzleTangent[0] * (nozzleLen / 2 - nozzleR),
-    nozzleY,
-    tankR * Math.cos(nozzleTheta) + nozzleTangent[2] * (nozzleLen / 2 - nozzleR),
-  ];
+  // A rounded heel (mixer bottle) curves up away from the floor point: run each leg up to the heel
+  // surface at the leg's INNER edge (the lowest point of the shell over the leg). Any higher and the leg
+  // top pokes through the shell into the cutaway (it showed through the liquid as a hex outline).
+  const legTop =
+    useShoulder && outer.bowlH > 1e-4
+      ? heelSurfaceY(y0, tankR, outer.bowlH, Math.max(0, tankR * LEG_RADIUS_RATIO - p.legRadius))
+      : p.bottom === 'flat'
+        ? y0
+        : layout.bottomY + layout.bottomDepth * 0.6;
+  // Inlet nozzle stub on the camera-left wall (tankNozzlePose has the placement history).
+  const nozzleR = Math.max(0.05, tankR * TANK_NOZZLE_RADIUS);
+  const nozzle = tankNozzlePose(
+    tankR,
+    keepStart + keepLen - TANK_NOZZLE_JAMB_OFFSET,
+    y0 + bodyH * 0.3,
+    Math.max(0.2, tankR * TANK_NOZZLE_LENGTH),
+    nozzleR,
+  );
+  if (usesMixerModel({ ...p, top })) {
+    // The Mixer part and the mash tun preset are the Blender mixer (AgitatedVessel / mixer.glb) since
+    // 2026-10-30. Only an explicit `mixerModel` picks it: `agitator` alone keeps the vessel's own body
+    // plus the procedural TankAgitator below (review of #228). Floor = the layout floor (mixer.glb has no stand).
+    return (
+      <group position={position}>
+        <AgitatedVessel
+          {...mixerGlbProps(p, params ?? {}, { tankR, tankH, floorY: layout.floorY, level, empty, color })}
+        />
+      </group>
+    );
+  }
   return (
     <group position={position}>
       <group key={meshKey}>
@@ -269,12 +325,11 @@ export function Tank({
                   </ShadedMesh>
                 ) : null}
                 {p.showLiner ? (
-                  <mesh>
+                  <ShadedMesh radius={liner} {...linerShade} inside>
                     <sphereGeometry
                       args={[liner, segs, Math.max(4, domeSegs), 0, Math.PI * 2, Math.PI / 2, Math.PI / 2]}
                     />
-                    <meshBasicMaterial color={p.linerColor} side={BackSide} toneMapped={false} />
-                  </mesh>
+                  </ShadedMesh>
                 ) : null}
                 {p.showCage ? (
                   <LineBag
@@ -291,18 +346,6 @@ export function Tank({
                 ) : null}
               </group>
             ) : null}
-            <group position={[0, y0 + outer.bowlH - heelOl + wallH / 2, 0]}>
-              {bodyRingFs.map((f) => (
-                <mesh
-                  key={`br-${f}`}
-                  position={[0, -wallH / 2 + heelOl + outer.cylH * f, 0]}
-                  rotation={[-Math.PI / 2, 0, 0]}
-                >
-                  <ringGeometry args={[tankR - p.bodyRingWidth, tankR, 48, 1, keepStart - Math.PI / 2, keepLen]} />
-                  <meshBasicMaterial color={p.edgeColor} />
-                </mesh>
-              ))}
-            </group>
             {p.showCage && shoulderLathes.wall.length > 2 ? (
               <LineBag
                 color={p.edgeColor}
@@ -318,34 +361,18 @@ export function Tank({
               </ShadedMesh>
             ) : null}
             {p.showLiner && shoulderLathes.liner.length > 2 ? (
-              <mesh>
+              <ShadedMesh radius={liner} {...linerShade} inside>
                 <latheGeometry args={[shoulderLathes.liner, segs, keepStart, keepLen]} />
-                <meshBasicMaterial color={p.linerColor} side={BackSide} toneMapped={false} />
-              </mesh>
+              </ShadedMesh>
             ) : null}
           </>
         ) : (
           <group position={[0, bodyMid, 0]}>
-            {p.showCage ? (
-              <>
-                <LineBag
-                  color={p.edgeColor}
-                  // Step 2 on 15 segs read dense vs r-holdbody outer cage.
-                  positions={cylinderMeridianSegments(tankR, -bodyH / 2, bodyH / 2, keepStart, keepLen, segs, false, FLASK_MERIDIAN_STEP)}
-                />
-                {/* Bottom rim all the way round: the window has no wall at the front, so a kept-arc
-                    rim left the base without a ground-contact line there (the liner floor disc is
-                    what you see through the cutout, and this is its outline). */}
-                <LineBag
-                  color={p.edgeColor}
-                  positions={cylinderArcSegments(tankR, -bodyH / 2, 0, Math.PI * 2, Math.max(segs, 32))}
-                />
-                <LineBag
-                  color={p.edgeColor}
-                  positions={cylinderArcSegments(tankR, bodyH / 2, keepStart, keepLen, segs)}
-                />
-              </>
-            ) : null}
+            {/* Wall meridians end on the bottom rim (full circle: it also outlines the liner floor seen through
+                the window) and the kept-arc top rim (tank-lines.ts). Positions are in the Tank frame (bodyMid = 0). */}
+            <LineBag color={p.edgeColor} positions={linePlan.wallMeridians} />
+            <LineBag color={p.edgeColor} positions={linePlan.bottomRim} />
+            <LineBag color={p.edgeColor} positions={linePlan.topRim} />
             {p.showWall ? (
               <ShadedMesh radius={tankR} {...shade}>
                 <cylinderGeometry args={[tankR, tankR, bodyH, ...windowArgs]} />
@@ -355,10 +382,9 @@ export function Tank({
               </ShadedMesh>
             ) : null}
             {p.showLiner ? (
-              <mesh>
+              <ShadedMesh radius={liner} {...linerShade} inside>
                 <cylinderGeometry args={[liner, liner, bodyH, ...windowArgs]} />
-                <meshBasicMaterial color={p.linerColor} side={BackSide} toneMapped={false} />
-              </mesh>
+              </ShadedMesh>
             ) : null}
             {/* Floor disc closes the open cylinder so the ground grid / a dish bottom never shows through the window. */}
             {p.showLiner ? (
@@ -367,13 +393,6 @@ export function Tank({
                 <meshBasicMaterial color={p.linerColor} toneMapped={false} />
               </mesh>
             ) : null}
-            {bodyRingFs.map((f) => (
-              <mesh key={`br-${f}`} position={[0, -bodyH / 2 + bodyH * f, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-                {/* Ring theta is not cylinder theta; −π/2 lines the arc up with the back wall. */}
-                <ringGeometry args={[tankR - p.bodyRingWidth, tankR, 48, 1, keepStart - Math.PI / 2, keepLen]} />
-                <meshBasicMaterial color={p.edgeColor} />
-              </mesh>
-            ))}
           </group>
         )}
         {top === 'dome' && p.showDome && !useShoulder ? (
@@ -384,30 +403,24 @@ export function Tank({
               />
               <WhiteFill />
             </mesh>
-            <LineBag
-              color={p.edgeColor}
-              positions={sphereMeridiansFromCylinderThetas(
-                domeR,
-                // Default step 2 on the cap vs r-holdbody sparse dome (wall is already step 3).
-                domeThetas,
-                0,
-                Math.max(0.05, domePhi - (useShoulder ? 0.12 : 0)),
-                domeSegs,
-              )}
-            />
-            <LineBag
-              color={p.edgeColor}
-              positions={sphereLatitudeArcs(
-                domeR,
-                domePhiStart,
-                keepLen,
-                Array.from({ length: domeSegs + 1 }, (_, i) => (domePhi * i) / domeSegs).filter(
-                  (_p, i, arr) => !useShoulder || (i > 0 && i < arr.length - 1),
-                ),
-                segs,
-              )}
-            />
+            {p.showLiner ? (
+              // Dome liner: hides the far side's outer meridians, which used to show through the window as
+              // lines running past the interior top rim into nowhere (Des 2026-10-30 line-termination rule).
+              <ShadedMesh radius={liner} {...linerShade} inside>
+                <sphereGeometry args={[domeR * p.linerRatio, segs, domeSegs, domePhiStart, keepLen, 0, domePhi]} />
+              </ShadedMesh>
+            ) : null}
           </group>
+        ) : null}
+        {top === 'dome' && p.showDome && !useShoulder ? (
+          <>
+            {/* Meridians from the apex down to the equator ring (domeRings includes it). */}
+            <LineBag color={p.edgeColor} positions={linePlan.domeMeridians} />
+            <LineBag color={p.edgeColor} positions={linePlan.domeRings} />
+          </>
+        ) : null}
+        {top === 'flat' ? (
+          <LineBag color={p.edgeColor} positions={linePlan.hatchBase} />
         ) : null}
         {top === 'flat' ? (
           <TankFlatLid tankR={tankR} bodyTop={bodyTop} segs={segs} fillSegs={fillSegs} params={p} />
@@ -417,17 +430,12 @@ export function Tank({
             <ShadedMesh radius={tankR} {...shade}>
               <latheGeometry args={[coneTop, segs, keepStart, keepLen]} />
             </ShadedMesh>
-            <mesh>
+            <ShadedMesh radius={liner} {...linerShade} inside>
               <latheGeometry
                 args={[coneTop.map((v) => new Vector2(v.x * p.linerRatio, v.y)), segs, keepStart, keepLen]}
               />
-              <meshBasicMaterial color={p.linerColor} side={BackSide} toneMapped={false} />
-            </mesh>
-            <LineBag
-              color={p.edgeColor}
-              positions={frustumMeridianSegments(tankR, layout.topR, bodyTop, layout.apexY, keepStart, keepLen, segs, false)}
-            />
-            <LineBag color={p.edgeColor} positions={cylinderArcSegments(layout.topR, layout.apexY, keepStart, keepLen, segs)} />
+            </ShadedMesh>
+            <LineBag color={p.edgeColor} positions={linePlan.coneTop} />
             <mesh position={[0, layout.apexY, 0]} rotation={[-Math.PI / 2, 0, 0]}>
               <circleGeometry args={[layout.topR, segs]} />
               <WhiteFill />
@@ -441,71 +449,63 @@ export function Tank({
             <ShadedMesh radius={tankR} {...shade}>
               <latheGeometry args={[bottomProfile, segs]} />
             </ShadedMesh>
-            {p.bottom === 'cone' ? (
-              <>
-                <LineBag
-                  color={p.edgeColor}
-                  positions={cylinderMeridianSegmentsFrustum(tankR, layout.bottomR, y0, layout.bottomY, segs)}
-                />
-                <LineBag color={p.edgeColor} positions={cylinderArcSegments(layout.bottomR, layout.bottomY, 0, Math.PI * 2, segs)} />
-              </>
-            ) : (
-              <LineBag
-                color={p.edgeColor}
-                positions={sphereLikeDishLines(bottomProfile, cylinderThetasEven(segs, 0, Math.PI * 2, true, FLASK_MERIDIAN_STEP))}
-              />
-            )}
+            <LineBag color={p.edgeColor} positions={linePlan.bottom} />
           </>
         ) : null}
-        {p.support === 'legs'
-          ? legPositions(tankR, p.legCount).map(([lx, lz], i) => (
-              <mesh key={`leg-${i}`} position={[lx, layout.floorY + legH / 2, lz]}>
-                <cylinderGeometry args={[p.legRadius, p.legRadius, legH, 6]} />
-                <WhiteFill />
-                <Edges threshold={style.edges.threshold} color={p.edgeColor} lineWidth={p.capLineWidth} />
-              </mesh>
-            ))
-          : null}
-        {p.support === 'skirt' ? (
-          <>
-            <ShadedMesh radius={skirtR} {...shade} position={[0, layout.floorY + skirtH / 2, 0]}>
-              <cylinderGeometry args={[skirtR, skirtR, skirtH, segs, 1, true]} />
-            </ShadedMesh>
-            <LineBag color={p.edgeColor} positions={cylinderArcSegments(skirtR, layout.floorY, 0, Math.PI * 2, segs)} />
-          </>
-        ) : null}
+        <Supports
+          kind={p.support}
+          tankR={tankR}
+          floorY={layout.floorY}
+          top={p.support === 'skirt' ? skirtTop : legTop}
+          legCount={p.legCount}
+          legRadius={p.legRadius}
+          segs={segs}
+          edgeColor={p.edgeColor}
+          lineWidth={p.capLineWidth}
+          edgeThreshold={style.edges.threshold}
+          shade={shade}
+        />
         {p.nozzle === 'tangential' ? (
-          <group position={nozzleCenter} rotation={[0, nozzleTheta, 0]}>
-            <mesh rotation={[0, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[nozzleR, nozzleR, nozzleLen, 8]} />
-              <WhiteFill />
-              <Edges threshold={style.edges.thresholds.pipe} color={p.edgeColor} lineWidth={p.capLineWidth} />
-            </mesh>
-            <mesh rotation={[0, 0, Math.PI / 2]} position={[nozzleLen / 2 - nozzleR * 0.6, 0, 0]}>
-              <cylinderGeometry args={[nozzleR * 1.35, nozzleR * 1.35, nozzleR * 1.2, 8]} />
-              <WhiteFill />
-              <Edges threshold={style.edges.thresholds.pipe} color={p.edgeColor} lineWidth={p.capLineWidth} />
-            </mesh>
-          </group>
+          <NozzleStub
+            position={nozzle.position}
+            quaternion={nozzle.quaternion}
+            length={nozzle.length}
+            radius={nozzleR}
+            edgeColor={p.edgeColor}
+            lineWidth={p.capLineWidth}
+            shade={shade}
+          />
         ) : null}
-        {/* One lathe — bowl+cylinder rims were an equator ring vs r-holdbody. */}
-        {p.showLiquid && lathePts.length > 2 ? (
-          <>
-            {/* Round 3: side/bowl lathe (darker) + separate waterline disc (lighter). Was one lathe with the
-                disc as its last profile segment, so a 17% fill was one flat colour. The profile ends
-                (inner, top) -> (0, top); slice(0,-1) drops that waterline radius, the disc replaces it. */}
-            <mesh>
-              <latheGeometry args={[lathePts.slice(0, -1), fillSegs]} />
-              <LiquidFill color={liquidTones.side} opacity={p.liquidOpacity} />
-            </mesh>
-            <mesh position={[0, liquidTop, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-              <circleGeometry args={[inner, fillSegs]} />
-              <LiquidFill color={liquidTones.surface} opacity={p.liquidOpacity} />
-            </mesh>
-            <LineBag color={p.edgeColor} positions={waterline} />
-          </>
+        {p.showLiquid && !empty ? (
+          <LiquidVolume
+            inner={inner}
+            bowlH={flask.bowlH}
+            originY={flask.originY}
+            liquidTop={liquidTop}
+            stacks={flaskStacks}
+            segments={fillSegs}
+            color={color}
+            opacity={p.liquidOpacity}
+            edgeColor={p.edgeColor}
+            lineWidth={TANK_LINE_WIDTH}
+            bowlLines={p.showBowl}
+            meridianThetas={bowlThetas}
+            window={bowlWin}
+          />
         ) : null}
-        {p.showBowl && flaskMeridians ? <LineBag color={p.edgeColor} positions={flaskMeridians} /> : null}
+        {/* Interior rims + seams (shouldered bodies keep InteriorLines on their heel..shoulder wall). */}
+        {useShoulder && interiorLines ? (
+          <InteriorLines
+            {...interiorLines}
+            facetStart={keepStart}
+            facetStep={keepLen / segs}
+            meridianStep={p.interiorMeridianStep}
+            color={p.edgeColor}
+            width={TANK_LINE_WIDTH}
+          />
+        ) : (
+          <LineBag color={p.edgeColor} positions={linePlan.interior} />
+        )}
         {p.showCage && p.showInnerCage && ullageCage ? (
           <LineBag
             color={p.edgeColor}
@@ -514,7 +514,8 @@ export function Tank({
           />
         ) : null}
       </group>
-      {/* Outside the keyed group so the `anim.agitator` node survives level / size changes (findAnimNodes memoises on the root). */}
+      {/* An agitator on the vessel's own body (e.g. core's fermenter with `agitator` on). Outside the keyed
+          group so the `anim.agitator` node survives level / size changes. */}
       {p.agitator ? (
         <TankAgitator tankH={tankH} fill={level} params={{ ...p, radius: tankR }} apexY={layout.apexY} />
       ) : null}
@@ -537,9 +538,8 @@ function TankFlatLid({
   params: TankParams;
 }) {
   const style = useHolodeckStyle();
-  const capH = Math.max(0.02, p.height * p.capHeightRatio * 0.35);
-  const capR = tankR * p.capRadiusRatio * 0.6;
-  const lidT = Math.max(p.capLidThickness, 0.004);
+  // Shared with tank-lines.ts (hatchBase ring sits exactly at neckY0).
+  const { capH, capR, lidT, neckY0 } = flatLidHatch(tankR, p);
   return (
     <group position={[0, bodyTop, 0]}>
       <mesh position={[0, lidT / 2, 0]}>
@@ -550,12 +550,12 @@ function TankFlatLid({
         <ringGeometry args={[tankR - 0.012, tankR, fillSegs]} />
         <meshBasicMaterial color={p.edgeColor} toneMapped={false} />
       </mesh>
-      <mesh position={[0, lidT + capH / 2, 0]}>
+      <mesh position={[0, neckY0 + capH / 2, 0]}>
         <cylinderGeometry args={[capR, capR, capH, segs, 1, true]} />
         <WhiteFill />
         <Edges threshold={style.edges.threshold} color={p.edgeColor} lineWidth={p.capLineWidth} />
       </mesh>
-      <mesh position={[0, lidT + capH + lidT / 2, 0]}>
+      <mesh position={[0, neckY0 + capH + lidT / 2, 0]}>
         <cylinderGeometry args={[capR, capR, lidT, segs]} />
         <WhiteFill />
         <Edges threshold={style.edges.threshold} color={p.edgeColor} lineWidth={p.capLineWidth} />

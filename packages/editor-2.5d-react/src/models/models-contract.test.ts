@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { finishForMaterialName } from '../../assets/process/apply-style';
+import { materialFinishForName } from '../../assets/process/apply-style';
 import { parseGlbJson, sceneBounds } from './glb-json';
 
 /**
@@ -27,7 +27,7 @@ describe('assets/models contract', () => {
     it('uses only hd.* finish materials', () => {
       expect(gltf.materials?.length ?? 0).toBeGreaterThan(0);
       for (const material of gltf.materials ?? []) {
-        expect(finishForMaterialName(material.name), material.name).not.toBeNull();
+        expect(materialFinishForName(material.name), material.name).not.toBeNull();
       }
     });
 

@@ -94,3 +94,45 @@ Parameter history moved out of `.agents/TODO.md` (2026-10-13) so the backlog sta
 - rpm 432/314
 - rpm-val 536/338
 - liquid closed flask 2π + flat waterline
+
+## Batch 5 — Interior rings, mixer agitator, flange rotation (Des review 2026-10-29)
+
+- Reverses Batch 3's "no lines inside the window": inner back-wall rings (bottom rim, `TANK_INTERIOR_HOOPS` 2 hoops, top rim) on the back arc only (`interiorRingArc` = window arc + π, margin 0.08 rad); horizontal only, no meridians / wire cage
+- rings follow the liner facets (`facetedRadiusAt`) vs smooth circle at 0.995 r (hid behind each flat facet → dashed ring)
+- tank liquidOpacity 0.8 (depthWrite on) vs solid 1 (hid the rings below the waterline) / 0.88 depthWrite off (flask back faces printed through)
+- mixer liquidOpacity 0.72 vs 0.84 (shaft + impeller vanished below the waterline)
+- mixer hat: round 24-gon drum (aspect 0.72 × radius) + neck sunk 0.03 into the dome + cover plate 1.04 r vs squat 8-gon puck; aspect 0.9 sat tall
+- impeller: hub (2.2 × shaft r) + 3 pitched paddles (π/5, chord 3.5 × impellerRadius) vs round 4-gon bars ("stray orange sticks")
+- impeller height fixed: dome apex − shaftLength × H, clamped ≥ 0.16 H above the floor, shaft ends in the hub vs fill × 0.38 (floated off the shaft, rode the waterline)
+- MIXER_SHAFT_LENGTH 0.9 (apex → hub) vs 0.77 (lid → old blades); MIXER_IMPELLER_SPAN 0.7 vs 0.36 (tiny star as blades)
+- shaft #8c9196, blades #c9cdd1 + edges vs #666 (vanished in the liquid)
+- mash tun = mixer bottle body (MIXER_BODY_PRESET) R 1.0 × H 2.5 on 0.22 legs vs squat 1.7 dish-bottom can; Mixer part and mash tun share `Tank` + `TankAgitator` (Mixer no longer draws its own agitator)
+- legs yaw 0 (pairs either side of the camera axis) vs π/4 (one leg dead centre under the cutaway); legs on a heel stop at the heel surface at their inner edge (higher poked through into the window)
+- whirlpool nozzle: shared pipe geometry (`tankNozzleGeometry`, flange = routed-pipe flange) posed by `tankNozzlePose` quaternion vs group yaw + X-cylinder roll; runs −tangent from a foot 0.32 rad past the jamb, buried 1 r + 0.03 R inside the shell; nozzle r 0.08 R vs 0.06 R
+- nozzle rejected: +tangent at 0.38 (axis 23° off camera → round face on a long pipe read as a twisted flange), +tangent at 0.2 (still a bolt end-on), −tangent tangent-outside (capped stub floating at the jamb), foot 0.04 / 0.24 (foot showed through the window), chord depth 0.5 (near end poked out)
+- steam nut Euler [π/6, 0, −π/2] XYZ vs [π/6, π/12, −π/2] (π/12 yawed the nut 15° off its +X run)
+- fidelity (system Chrome 15x, same build reproduces the darwin record 0.16487 on main): 0.18745 vs 0.16487
+
+## Batch 6 — Round 2: lines, shading, transparency, primitives, mixer.glb (Des 2026-10-29/30)
+
+- liquid = finish `liquid` (style.ts, GLB `hd.liquid`): opacity 0.78, depthWrite off, renderOrder 2 vs 0.62 (dull blue-grey over the shaded liner) / 1 solid / 0.84; Tank liquidOpacity + MIXER/TANK_LIQUID_OPACITY alias the token
+- style.colors.liquid #5cc8e6 vs #4aa3d9 (dull under a translucent fill); scene.json fills holding #6fd6ee vs #2f7eb8, ingredients #6c93f0 vs #2a6fa8 (solved from reference-canvas composites at opacity 0.78 over the liner)
+- TANK_INNER_RATIO 0.9 vs 0.74 (reference liquid spans the window; was "pie" when the flask was window-sliced), MIXER_INNER_RATIO 0.9 vs 0.72
+- liner iso shade (inward normal) 0.75..0.85 vs flat white / 0.8..1 / 0.9..1 (fidelity 0.167 white -> 0.187)
+- lines are Line2 at TANK_LINE_WIDTH 1 CSS px vs 1-device-px lineBasic (faint at DPR 2)
+- tank wall meridians every facet (TANK_WALL_MERIDIAN_STEP 1) vs step 3; dome every facet vs step 2; mixer wall step 1 vs 3
+- meridians on the kept-arc FACET grid (`facetThetasKept`) vs the world 2π/segs grid (crossed facets mid-face, missed rim vertices)
+- interior: TANK_INTERIOR_HOOPS 1 vs 2 (grid with seams), seams every 2nd liner vertex vs every facet (bird cage)
+- liquid bowl lines on (radial per facet + every 2nd stack ring) vs off; waterline at the surface radius; bowl equator ring when submerged
+- line-termination rule: every vertical ends on a ring -- dome liner hides far meridians, dish meridians reach the pole, flat-lid hatch base ring, dome equator ring
+- whirlpool inlet: short leaning stub (0.26 R, lean 0.45 rad, 0.6 rad onto the left wall, 16-gon, round 1.45x flange ring, iso shaded) vs round-1 grid-aligned chord stick (Des: "reads worse than before")
+- agitated vessels (Mixer part, mash tun) = mixer.glb (AgitatedVessel) scaled R / 0.45 x H / 1.45; MIXER_WINDOW 100° @ 45° (the GLB window) vs 70° @ 40°; mash tun support none
+- fidelity (system Chrome): 0.2054 vs batch-5 record 0.18745 (peak 0.212 before the dome liner + dense dome lines for the termination rule)
+- not fixed here (Blender lane): mixer.glb inner floor dish rim reads as a C (the window cuts through the dish in shell.band)
+
+## Batch 7 — Round 5: bowl radials, no interior hoops, preset tanks, empty vessels (Des 2026-10-30)
+
+- interior back wall: rims only (wall meets floor / dish, wall meets dome / lid), seams rim to rim vs batch-6 rims + TANK_INTERIOR_HOOPS 1 mid hoop. Des: "remove the horizontal rings on the inside of the tank" -- reverses batch 5's "show interior rings" for the hoops; `interiorHoops`, `bodyRings` / `bodyRingWidth`, TANK_BODY_RINGS, MIXER_BODY_RINGS removed (all hoops were 0 except the interior mid hoop)
+- liquid bowl radials: every 4th vertex of the liquid lathe (32-gon -> 8) vs every 2nd vertex of the 15-facet SHELL grid (sat between the lathe's vertices); radials whose rim end is past a jamb are dropped (`bowlWindow`: liner half chord sin(window/2) less 0.05 R) -- the two sideways ones on a 91° window; bowl / waterline rings on the lathe's segment count vs 48
+- empty vessel (fill <= 0): no liquid, waterline or bowl lines vs a 2% film (read as a small floating disc in the empty whirlpool); GLB `anim.liquid` hidden at 0 (fill animator + AgitatedVessel) vs scale 0.001
+- built-in `tank` `preset` param (plain | any TANK_PRESETS id) so the brewhouse render draws each vessel with its own preset vs every vessel a plain domed tank

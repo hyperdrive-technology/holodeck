@@ -44,10 +44,42 @@ export type IsoFinish = {
   offset: boolean;
 };
 
+/**
+ * Translucent liquid (tank / mixer fill, GLB `hd.liquid`). Unlit, blended,
+ * `depthWrite` off so the interior back-wall lines, the impeller and the
+ * liquid's own edges read through it like reference.jpg's light-blue fill.
+ * Drawn after the (opaque) shell: `renderOrder` is applied to the mesh so a
+ * transparent shell layer in the same part still sorts behind the liquid.
+ * Colour: `color` when set, else `style.colors.liquid` (per-instance level
+ * colours come in as an override, like the accent).
+ */
+export type LiquidFinish = {
+  kind: 'liquid';
+  /** Fill colour; absent = `style.colors.liquid`. */
+  color?: string;
+  /** 0..1 blend opacity. */
+  opacity: number;
+  /** Mesh render order (after shells at 0). */
+  renderOrder: number;
+  /** Always false: see above. Kept as a token so tests and the Blender lane can read it. */
+  depthWrite: false;
+  offset: boolean;
+};
+
+/**
+ * A shell finish token. Unchanged since the first release: the liquid is a
+ * separate token (`LiquidFinish`, `style.finishes.liquid`), so code that
+ * switches over `Finish` / indexes `style.finishes[FinishName]` still gets a
+ * shell `Finish` (third review of #228: widening these unions was a public
+ * type break).
+ */
 export type Finish = UnlitFinish | IsoFinish;
 
-/** Finish names. A GLB material named `hd.<name>` picks the matching finish. */
+/** Shell finish names. A GLB material named `hd.<name>` picks the matching finish. */
 export type FinishName = 'white' | 'shaded' | 'vessel' | 'flask' | 'accent';
+
+/** Every GLB material finish: the shell finishes plus `hd.liquid` (`MATERIAL_FINISH_NAMES`). */
+export type MaterialFinishName = FinishName | 'liquid';
 
 /**
  * Tokens for the Arcentry-parity annotation objects (connectors, area
@@ -148,6 +180,11 @@ export type HolodeckStyle = {
     vessel: IsoFinish;
     flask: IsoFinish;
     accent: UnlitFinish;
+    /**
+     * Optional so themes written before `hd.liquid` (2026-10-29) still
+     * validate; read it through `liquidFinish(style)`.
+     */
+    liquid?: LiquidFinish;
   };
 };
 
@@ -175,6 +212,22 @@ export function annotationStyle(style: HolodeckStyle): AnnotationStyle {
   return style.annotation ?? HOLODECK_ANNOTATION_STYLE;
 }
 
+/**
+ * Default liquid finish. Opacity history (Tank liquidOpacity before the
+ * token): 0.69 with depthWrite on printed flask meridians; 1 (solid) hid the
+ * interior rings; 0.84 hid the agitator. With depthWrite off: 0.62 read
+ * dull blue-grey over the shaded liner vs reference.jpg's bright cyan; 0.78
+ * keeps the colour while back-wall lines, bowl lines and blades still read
+ * through (and scores better on the Arcentry fidelity gate).
+ */
+export const LIQUID_FINISH: LiquidFinish = {
+  kind: 'liquid',
+  opacity: 0.78,
+  renderOrder: 2,
+  depthWrite: false,
+  offset: false,
+};
+
 export const HOLODECK_STYLE: HolodeckStyle = {
   annotation: HOLODECK_ANNOTATION_STYLE,
   colors: {
@@ -190,7 +243,7 @@ export const HOLODECK_STYLE: HolodeckStyle = {
     // any instanced band that falls back to it.
     bandInstanced: '#e74c3c',
     pipeWire: '#888888',
-    liquid: '#4aa3d9',
+    liquid: '#5cc8e6',
     alarm: '#e85d5d',
     bore: '#3a3a3a',
   },
@@ -264,11 +317,27 @@ export const HOLODECK_STYLE: HolodeckStyle = {
     // Unlit flat colour. On a GLB the source material's base colour wins
     // over this default; `applyHolodeckStyle(..., { accent })` wins over both.
     accent: { kind: 'unlit', color: '#c0392b', offset: false },
+    liquid: LIQUID_FINISH,
   },
 };
 
 /** Finish names in a fixed order (tests, tuners, material-name parsing). */
 export const FINISH_NAMES: readonly FinishName[] = ['white', 'shaded', 'vessel', 'flask', 'accent'];
+
+/** Every `hd.<name>` material a GLB may use: the shell finishes plus `hd.liquid`. */
+export const MATERIAL_FINISH_NAMES: readonly MaterialFinishName[] = [...FINISH_NAMES, 'liquid'];
+
+/** The liquid finish of `style`, defaulted for themes that predate it. */
+export function liquidFinish(style: HolodeckStyle): LiquidFinish {
+  return style.finishes.liquid ?? LIQUID_FINISH;
+}
+
+/** A finish token by name; `liquid` falls back to `LIQUID_FINISH` for older themes. */
+export function finishToken(style: HolodeckStyle, name: FinishName): Finish;
+export function finishToken(style: HolodeckStyle, name: MaterialFinishName): Finish | LiquidFinish;
+export function finishToken(style: HolodeckStyle, name: MaterialFinishName): Finish | LiquidFinish {
+  return name === 'liquid' ? liquidFinish(style) : style.finishes[name];
+}
 
 /**
  * Vertical gap (world units) between stacked ground layers, so a part's

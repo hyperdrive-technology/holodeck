@@ -1,3 +1,4 @@
+import { HOLODECK_STYLE } from '../../assets/process/style';
 import { describe, expect, it } from 'vitest';
 import { OrthographicCamera } from 'three';
 import { LIBRARY_OBJECTS } from '../../assets/process';
@@ -6,7 +7,7 @@ import { ISO_LABEL_SCREEN_DEG, LABEL_BASE_DEG, LABEL_FONT_FAMILY, LABEL_FONT_WEI
 import { AREA_Y } from '../../assets/process/Area';
 import { DEFAULT_FITTING_PARAMS } from '../../assets/process/fitting-params';
 import { ELBOW_RADIUS, PIPE_RADIUS, WEST_NIPPLE_ROLL, WEST_NIPPLE_SIDES, WEST_NUT_LEN, WEST_NUT_R, WEST_RING_EDGE_THRESHOLD, WEST_RING_LEN, WEST_RING_RADIAL, WEST_TANK_END } from '../../assets/process/pipe-math';
-import { DEFAULT_TANK_PARAMS, LIQUID_THETA_LENGTH, TANK_INNER_RATIO, TANK_BOWL_Y_OFFSET, TANK_DOME_HEIGHT_SEGMENTS, TANK_BODY_RINGS, TANK_SHADE_MIN, TANK_HUB_WHITE, TANK_SHADE_MAX, MIXER_SHADE_MIN, MIXER_LIQUID_OPACITY, TANK_LIQUID_OPACITY, TANK_WALL_THRESHOLD, MIXER_WALL_THRESHOLD, MIXER_HUB_WHITE, MIXER_SHADE_MAX, MIXER_LINER_RATIO, TANK_LINER_RATIO, MIXER_LINER_COLOR, TANK_LINER_COLOR, TANK_WINDOW_DEG, TANK_WINDOW_YAW, MIXER_INNER_RATIO, MIXER_IMPELLER_BLADES, MIXER_IMPELLER_YAW, MIXER_IMPELLER_RADIUS, MIXER_IMPELLER_SIDES, MIXER_IMPELLER_SPAN, MIXER_IMPELLER_Y_FACTOR, MIXER_SHAFT_RADIUS, MIXER_SHAFT_LENGTH, MIXER_SHAFT_SIDES, MIXER_CAP_HEIGHT_RATIO, MIXER_CAP_LID_THICKNESS, MIXER_BODY_RINGS, MIXER_CAP_RADIUS_RATIO, MIXER_RADIAL_SEGMENTS, MIXER_HAT_LID_RING, MIXER_HAT_YAW, MIXER_AGITATOR_DEPTH_TEST, MIXER_AGITATOR_COLOR, MIXER_WINDOW_DEG, MIXER_WINDOW_YAW, MIXER_SHOULDER_RATIO, MIXER_SHOULDER_TOP, MIXER_OUTER_BOWL, MIXER_HEEL_OVERLAP, MIXER_SHOULDER_OVERLAP, MIXER_DOME_OVERLAP, FLASK_MERIDIAN_STEP, MIXER_WALL_MERIDIAN_STEP, flaskBowl, flaskLathePoints, bottleShoulderEase, bottleShoulderPoints, mixerUpperPoints, cylinderThetasEven, cylinderThetasKept, liquidCylinderHeight, mergeTankParams, mixerShaftLayout, mixerImpellerBladeLayout } from '../../assets/process/tank-params';
+import { DEFAULT_TANK_PARAMS, LIQUID_THETA_LENGTH, TANK_INNER_RATIO, TANK_BOWL_Y_OFFSET, TANK_DOME_HEIGHT_SEGMENTS, TANK_SHADE_MIN, TANK_HUB_WHITE, TANK_SHADE_MAX, MIXER_SHADE_MIN, MIXER_LIQUID_OPACITY, TANK_LIQUID_OPACITY, TANK_WALL_THRESHOLD, MIXER_WALL_THRESHOLD, MIXER_HUB_WHITE, MIXER_SHADE_MAX, MIXER_LINER_RATIO, TANK_LINER_RATIO, MIXER_LINER_COLOR, TANK_LINER_COLOR, TANK_WINDOW_DEG, TANK_WINDOW_YAW, MIXER_INNER_RATIO, MIXER_IMPELLER_BLADES, MIXER_IMPELLER_YAW, MIXER_IMPELLER_RADIUS, MIXER_IMPELLER_SPAN, MIXER_IMPELLER_FLOOR_CLEARANCE, MIXER_HAT_ASPECT, MIXER_HAT_SIDES, MIXER_BLADE_PITCH, MIXER_IMPELLER_COLOR, MIXER_SHAFT_RADIUS, MIXER_SHAFT_LENGTH, MIXER_SHAFT_SIDES, MIXER_CAP_HEIGHT_RATIO, MIXER_CAP_LID_THICKNESS, MIXER_CAP_RADIUS_RATIO, MIXER_RADIAL_SEGMENTS, MIXER_AGITATOR_DEPTH_TEST, MIXER_AGITATOR_COLOR, MIXER_WINDOW_DEG, MIXER_WINDOW_YAW, MIXER_SHOULDER_RATIO, MIXER_SHOULDER_TOP, MIXER_OUTER_BOWL, MIXER_HEEL_OVERLAP, MIXER_SHOULDER_OVERLAP, MIXER_DOME_OVERLAP, FLASK_MERIDIAN_STEP, MIXER_WALL_MERIDIAN_STEP, flaskBowl, flaskLathePoints, bottleShoulderEase, bottleShoulderPoints, mixerUpperPoints, cylinderThetasEven, cylinderThetasKept, liquidCylinderHeight, mergeTankParams, mixerShaftLayout, mixerImpellerBladeLayout } from '../../assets/process/tank-params';
 import { REFERENCE_ZOOM } from '../editor/ProcessSceneView';
 import { PROCESS_SCENE, loadProcessScene } from './load-process-scene';
 import { PROCESS_SNAPSHOT } from './ProcessLineSketch';
@@ -69,51 +70,61 @@ describe('scene document', () => {
     expect(PROCESS_SNAPSHOT.mixerFill).toBeCloseTo(0.52);
     expect(PROCESS_SNAPSHOT.fillColor).toBe('#18BAE6');
     expect(LIQUID_THETA_LENGTH).toBeCloseTo(Math.PI * 2);
-    expect(MIXER_INNER_RATIO).toBeCloseTo(0.72);
+    // Round 2: the translucent liquid fills the window like reference.jpg (0.72 left white margins).
+    expect(MIXER_INNER_RATIO).toBeCloseTo(0.9);
     expect(MIXER_IMPELLER_BLADES).toBe(3);
     expect(MIXER_IMPELLER_YAW).toBeCloseTo(Math.PI / 6);
     expect(MIXER_IMPELLER_RADIUS).toBeCloseTo(0.03);
     expect(MIXER_IMPELLER_RADIUS).toBeLessThan(0.042);
-    expect(MIXER_IMPELLER_SIDES).toBe(4);
-    expect(MIXER_IMPELLER_SIDES).toBeLessThan(6);
+    // Blades are pitched paddles now (not round 4-gon bars); flat read as a stray star.
+    expect(MIXER_BLADE_PITCH).toBeGreaterThan(0.3);
+    expect(MIXER_BLADE_PITCH).toBeLessThan(Math.PI / 2);
     expect(MIXER_SHAFT_RADIUS).toBeCloseTo(0.032);
     expect(MIXER_SHAFT_RADIUS).toBeLessThan(0.055);
-    expect(MIXER_SHAFT_LENGTH).toBeCloseTo(0.77);
-    expect(MIXER_SHAFT_LENGTH).toBeLessThan(0.95);
-    expect(MIXER_IMPELLER_Y_FACTOR).toBeCloseTo(0.38);
-    expect(MIXER_IMPELLER_Y_FACTOR).toBeLessThan(0.5);
-    const mixShaft = mixerShaftLayout(2.7, 0.52, mergeTankParams({ shaftLength: MIXER_SHAFT_LENGTH }));
-    expect(mixShaft.shaftBot).toBeLessThanOrEqual(mixShaft.liquidY + 1e-6);
-    expect(mixShaft.liquidY).toBeLessThan(-0.7);
+    // Dome apex -> hub; 0.77 was lid -> blades under the old fill-dependent impeller.
+    expect(MIXER_SHAFT_LENGTH).toBeCloseTo(0.9);
+    expect(MIXER_IMPELLER_FLOOR_CLEARANCE).toBeGreaterThan(0.1);
+    expect(MIXER_IMPELLER_FLOOR_CLEARANCE).toBeLessThan(0.3);
+    const mixShaft = mixerShaftLayout(2.7, mergeTankParams({ shaftLength: MIXER_SHAFT_LENGTH }));
+    // The shaft ends at the hub centre: the impeller is attached, not floating.
+    expect(mixShaft.shaftBot).toBeCloseTo(mixShaft.impellerY);
+    // Low in the flask (reference.jpg), above the heel clearance.
+    expect(mixShaft.impellerY).toBeLessThan(-0.7);
+    expect(mixShaft.impellerY).toBeGreaterThanOrEqual(-1.35 + 2.7 * MIXER_IMPELLER_FLOOR_CLEARANCE - 1e-9);
     expect(MIXER_SHAFT_SIDES).toBe(16);
     expect(MIXER_SHAFT_SIDES).toBeGreaterThan(8);
-    expect(MIXER_IMPELLER_SPAN).toBeCloseTo(0.36);
-    expect(MIXER_IMPELLER_SPAN).toBeLessThan(0.45);
-    expect(MIXER_IMPELLER_SPAN).not.toBe(MIXER_IMPELLER_Y_FACTOR);
+    // About half the radius-1 flask diameter (inner 0.72 -> 1.44).
+    expect(MIXER_IMPELLER_SPAN).toBeCloseTo(0.7);
     expect(MIXER_IMPELLER_SPAN).toBeLessThan(MIXER_INNER_RATIO * 2);
     const mixBlades = mixerImpellerBladeLayout(MIXER_IMPELLER_SPAN, MIXER_SHAFT_RADIUS);
     expect(mixBlades.bladeLen).toBeLessThan(MIXER_IMPELLER_SPAN);
     expect(mixBlades.radial).toBeGreaterThan(MIXER_SHAFT_RADIUS);
+    // Blades start inside the hub, so blades + hub + shaft read as one part.
+    expect(mixBlades.radial - mixBlades.bladeLen / 2).toBeLessThan(mixBlades.hubR);
+    expect(mixBlades.hubR).toBeGreaterThan(MIXER_SHAFT_RADIUS);
     expect(MIXER_CAP_HEIGHT_RATIO).toBeCloseTo(0.1);
     expect(MIXER_CAP_HEIGHT_RATIO).toBeLessThan(0.18);
     expect(MIXER_CAP_LID_THICKNESS).toBeCloseTo(0.02);
     expect(MIXER_CAP_LID_THICKNESS).toBeLessThan(0.025);
-    expect(MIXER_BODY_RINGS).toBe(0);
-    expect(MIXER_BODY_RINGS).toBeLessThan(3);
     expect(MIXER_CAP_RADIUS_RATIO).toBeCloseTo(0.4);
     expect(MIXER_CAP_RADIUS_RATIO).toBeLessThan(0.5);
     expect(MIXER_RADIAL_SEGMENTS).toBe(15);
     expect(MIXER_RADIAL_SEGMENTS).toBeLessThan(24);
-    expect(MIXER_HAT_LID_RING).toBe(false);
-    expect(MIXER_HAT_YAW).toBeCloseTo(Math.PI / 8);
+    // Round drum hat (24-gon), about 0.7x as tall as its radius: the 8-gon puck read as a flat disc.
+    expect(MIXER_HAT_SIDES).toBeGreaterThanOrEqual(16);
+    expect(MIXER_HAT_ASPECT).toBeGreaterThan(0.5);
+    expect(MIXER_HAT_ASPECT).toBeLessThan(1.1);
     expect(MIXER_AGITATOR_DEPTH_TEST).toBe(true);
-    expect(MIXER_AGITATOR_COLOR).toBe('#666666');
-    expect(TANK_INNER_RATIO).toBeCloseTo(0.74);
+    // #666 vanished under the liquid; the shaft and blades must stay lighter than the edge lines.
+    expect(MIXER_AGITATOR_COLOR).not.toBe('#666666');
+    expect(MIXER_IMPELLER_COLOR).toMatch(/^#[0-9a-f]{6}$/);
+    expect(TANK_INNER_RATIO).toBeCloseTo(0.9);
     expect(FLASK_MERIDIAN_STEP).toBe(3);
-    expect(MIXER_WALL_MERIDIAN_STEP).toBe(3);
+    // Round 2: every facet (step 3 left the bottle a smooth grey blob vs reference.jpg's panels).
+    expect(MIXER_WALL_MERIDIAN_STEP).toBe(1);
     expect(
-      cylinderThetasKept(24, 0, Math.PI * 1.6, MIXER_WALL_MERIDIAN_STEP).length,
-    ).toBeLessThan(cylinderThetasKept(24, 0, Math.PI * 1.6).length);
+      cylinderThetasKept(24, 0, Math.PI * 1.6, 3).length,
+    ).toBeLessThan(cylinderThetasKept(24, 0, Math.PI * 1.6, MIXER_WALL_MERIDIAN_STEP).length);
     expect(
       cylinderThetasEven(15, 0, LIQUID_THETA_LENGTH, true, FLASK_MERIDIAN_STEP).length,
     ).toBeLessThan(cylinderThetasEven(15, 0, LIQUID_THETA_LENGTH, true).length);
@@ -127,8 +138,9 @@ describe('scene document', () => {
     expect(TANK_DOME_HEIGHT_SEGMENTS).toBe(3); // round 3: 2 -> 3 latitude rings, denser cap like the reference
     expect(TANK_DOME_HEIGHT_SEGMENTS).toBeLessThan(4);
     expect(DEFAULT_TANK_PARAMS.domeHeightSegments).toBe(TANK_DOME_HEIGHT_SEGMENTS);
-    expect(TANK_BODY_RINGS).toBe(0);
-    expect(DEFAULT_TANK_PARAMS.bodyRings).toBe(TANK_BODY_RINGS);
+    // Body hoops are gone (round 5, Des 2026-10-30: no horizontal rings inside the tank); the param stays
+    // as a deprecated no-op with main's default so main-era code still compiles (public-api-compat.test.tsx).
+    expect(DEFAULT_TANK_PARAMS.bodyRings).toBe(0);
     expect(TANK_SHADE_MIN).toBeCloseTo(0.22);
     expect(TANK_SHADE_MIN).toBeLessThan(0.27);
     expect(DEFAULT_TANK_PARAMS.shadeMin).toBe(TANK_SHADE_MIN);
@@ -140,8 +152,13 @@ describe('scene document', () => {
     expect(DEFAULT_TANK_PARAMS.shadeMax).toBe(TANK_SHADE_MAX);
     expect(MIXER_SHADE_MIN).toBeCloseTo(0.4);
     expect(MIXER_SHADE_MIN).toBeGreaterThan(TANK_SHADE_MIN);
-    expect(MIXER_LIQUID_OPACITY).toBeCloseTo(0.84);
-    expect(TANK_LIQUID_OPACITY).toBe(1); // solid: 0.88 with depthWrite off let back-wall lines print through the cutout
+    // 0.84 hid the shaft below the waterline; 0.69 (depthWrite off then) printed flask meridians through.
+    // One liquid look since round 2: both alias the `liquid` finish token (style.ts, GLB hd.liquid).
+    expect(MIXER_LIQUID_OPACITY).toBe(HOLODECK_STYLE.finishes.liquid!.opacity);
+    expect(MIXER_LIQUID_OPACITY).toBeGreaterThan(0.69);
+    // Translucent so the interior back-wall rings show through the liquid (Des 2026-10-29).
+    expect(TANK_LIQUID_OPACITY).toBe(HOLODECK_STYLE.finishes.liquid!.opacity);
+    expect(TANK_LIQUID_OPACITY).toBeLessThan(1);
     expect(TANK_LIQUID_OPACITY).toBeGreaterThan(0.69);
     expect(DEFAULT_TANK_PARAMS.liquidOpacity).toBe(TANK_LIQUID_OPACITY);
     // Round 3 dropped the old MIXER > TANK invariant: tank liquid now has shaded side/surface, so it can be as solid as the mixer's.
@@ -162,15 +179,14 @@ describe('scene document', () => {
     expect(DEFAULT_TANK_PARAMS.linerColor).toBe(TANK_LINER_COLOR);
     expect(DEFAULT_TANK_PARAMS.bowlYOffset).toBe(0);
     expect(DEFAULT_TANK_PARAMS.innerRatio).toBeCloseTo(TANK_INNER_RATIO);
-    expect(MIXER_INNER_RATIO).toBeLessThan(DEFAULT_TANK_PARAMS.innerRatio);
+    expect(MIXER_INNER_RATIO).toBeLessThanOrEqual(DEFAULT_TANK_PARAMS.innerRatio);
     expect(TANK_WINDOW_DEG).toBe(91);
     expect(TANK_WINDOW_YAW).toBe(45);
     expect(DEFAULT_TANK_PARAMS.windowDeg).toBe(TANK_WINDOW_DEG);
     expect(DEFAULT_TANK_PARAMS.windowYawDeg).toBe(TANK_WINDOW_YAW);
-    expect(MIXER_WINDOW_DEG).toBe(70);
-    expect(MIXER_WINDOW_DEG).toBeLessThan(TANK_WINDOW_DEG);
-    expect(MIXER_WINDOW_YAW).toBe(40);
-    expect(MIXER_WINDOW_YAW).toBeLessThan(TANK_WINDOW_YAW);
+    // Agitated vessels are mixer.glb since 2026-10-30: its 100° window centred on the camera (agitated-vessel.test.ts).
+    expect(MIXER_WINDOW_DEG).toBe(100);
+    expect(MIXER_WINDOW_YAW).toBe(45);
     expect(MIXER_SHOULDER_RATIO).toBeCloseTo(0.18);
     expect(MIXER_SHOULDER_TOP).toBeCloseTo(0.82);
     expect(bottleShoulderEase(0)).toBeCloseTo(0);
@@ -349,7 +365,8 @@ describe('scene document', () => {
     expect(STEAM_NUT_R).toBeCloseTo(0.40);
     expect(STEAM_NUT_LEN).toBeCloseTo(0.50);
     expect(STEAM_NUT_ROT[0]).toBeCloseTo(Math.PI / 6);
-    expect(STEAM_NUT_ROT[1]).toBeCloseTo(Math.PI / 12);
+    // 0 since 2026-10-29: the π/12 yaw tilted the nut 15° off its pipe (pipe-flanges.test.ts pins coaxial).
+    expect(STEAM_NUT_ROT[1]).toBe(0);
     expect(STEAM_NUT_ROT[2]).toBeCloseTo(-Math.PI / 2);
     expect(STEAM_NUT_ROT_ORDER).toBe('XYZ');
     expect(STEAM_NUT_BORE_SIDES).toBe(16);

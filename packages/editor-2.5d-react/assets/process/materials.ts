@@ -1,7 +1,7 @@
 import { Color, type ColorRepresentation, type Side } from 'three';
 import { clamp, float, length, max, min, mix, normalView, positionLocal, uniform, vec3 } from 'three/tsl';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { HOLODECK_STYLE, type Finish, type FinishName, type HolodeckStyle, type IsoFinish } from './style';
+import { HOLODECK_STYLE, finishToken, type Finish, type HolodeckStyle, type IsoFinish, type LiquidFinish, type MaterialFinishName } from './style';
 
 /**
  * Plain (non-React) material factories for the Holodeck iso look.
@@ -48,14 +48,23 @@ export type IsoShadeParams = {
  * the shade numbers are uniforms, so `setIsoShade` can retune them live.
  */
 export function createIsoShadeMaterial(
-  params: IsoShadeParams & { offset: boolean },
+  params: IsoShadeParams & {
+    offset: boolean;
+    /**
+     * Shade the surface as seen from inside (a liner drawn BackSide): use
+     * the inward normal, so the inner back wall is light where it faces the
+     * camera-left light and greys toward the right, like reference.jpg's
+     * interiors. Baked at creation, like `offset`.
+     */
+    inside?: boolean;
+  },
 ): MeshBasicNodeMaterial {
   const uRadius = uniform(params.radius);
   const uWhiteHub = uniform(params.whiteHub ? 1 : 0);
   const uShadeMin = uniform(params.shadeMin);
   const uShadeMax = uniform(params.shadeMax);
   const uHubWhite = uniform(params.hubWhite);
-  const n = normalView;
+  const n = params.inside ? normalView.negate() : normalView;
   const t = clamp(n.x.mul(0.65).add(n.y.mul(0.35)), -1, 1).mul(0.5).add(0.5);
   const rim = mix(uShadeMin, uShadeMax, t);
   const localRadial = vec3(positionLocal.x, float(0), positionLocal.z);
@@ -103,11 +112,35 @@ export function createUnlitMaterial({
   return mat;
 }
 
+/**
+ * Translucent liquid (finish `liquid`): unlit `color`, blended at `opacity`,
+ * no depth writes. The caller sets `mesh.renderOrder = finish.renderOrder`
+ * (a material cannot); `applyHolodeckStyle` and `LiquidVolume` do.
+ */
+export function createLiquidMaterial({
+  color,
+  opacity,
+}: {
+  color: ColorRepresentation | Color;
+  opacity: number;
+}): MeshBasicNodeMaterial {
+  const mat = new MeshBasicNodeMaterial();
+  if (color instanceof Color) mat.color.copy(color);
+  else mat.color.set(color);
+  mat.toneMapped = false;
+  mat.transparent = true;
+  mat.opacity = Math.min(1, Math.max(0, opacity));
+  mat.depthWrite = false;
+  return mat;
+}
+
 export type FinishMaterialOptions = {
   /** Token source when `finish` is a name. Defaults to `HOLODECK_STYLE`. */
   style?: HolodeckStyle;
-  /** Unlit finishes only: overrides the finish colour (accent per instance). */
+  /** Unlit / liquid finishes: overrides the finish colour (accent per instance, liquid level colour). */
   color?: ColorRepresentation | Color;
+  /** Liquid finish only: overrides the opacity token (tuner slider). */
+  opacity?: number;
   /** Overrides the finish's polygon offset. */
   offset?: boolean;
   /** Iso finishes only: hub radius. Defaults to 1 (unused unless `whiteHub`). */
@@ -125,14 +158,19 @@ export type FinishMaterialOptions = {
  * `applyHolodeckStyle` can tell styled materials apart.
  */
 export function createFinishMaterial(
-  finish: FinishName | Finish,
+  finish: MaterialFinishName | Finish | LiquidFinish,
   opts: FinishMaterialOptions = {},
 ): MeshBasicNodeMaterial {
   const style = opts.style ?? HOLODECK_STYLE;
-  const token = typeof finish === 'string' ? style.finishes[finish] : finish;
+  const token = typeof finish === 'string' ? finishToken(style, finish) : finish;
   const offset = opts.offset ?? token.offset;
   const mat =
-    token.kind === 'iso'
+    token.kind === 'liquid'
+      ? createLiquidMaterial({
+          color: opts.color ?? token.color ?? style.colors.liquid,
+          opacity: opts.opacity ?? token.opacity,
+        })
+      : token.kind === 'iso'
       ? createIsoShadeMaterial({
           radius: opts.radius ?? 1,
           whiteHub: opts.whiteHub ?? token.whiteHub,

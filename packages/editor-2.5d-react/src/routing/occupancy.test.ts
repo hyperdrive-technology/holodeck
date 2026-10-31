@@ -51,7 +51,8 @@ describe('buildOccupancy', () => {
     // Make a 4x2 part by registering nothing new: use the 8x6 area is a non-obstacle, so
     // exercise the swap through a custom definition instead.
     const reg = registry;
-    const def = { ...reg.get('holodeck.iso.part', 'tank')!, id: 'slab', footprint: { w: 4, h: 2 } };
+    // footprintOf: undefined -- the tank sizes itself from its radius; this fixture is about the static footprint.
+    const def = { ...reg.get('holodeck.iso.part', 'tank')!, id: 'slab', footprint: { w: 4, h: 2 }, footprintOf: undefined };
     const custom = { get: (_k: string, id: string) => (id === 'slab' ? def : reg.get('holodeck.iso.part', id)) } as typeof reg;
     const at = (rotation: number) =>
       buildOccupancy({ objects: [{ ...wide, object: 'slab', rotation }] }, custom);

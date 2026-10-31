@@ -5,9 +5,10 @@
  * The scene lives in the sibling core repo
  * (core/src/typescript/packages/hyperdrive-ui/examples/brewery/hmi). Its
  * vessels are brewery-pack parts this package does not ship, so they are
- * drawn as built-in `tank`s at the same spot (radius 1, the brewhouse HLT /
- * mash tun size) and the pumps are left out; every pipe, elbow, valve, cap and
- * label is the scene's own. Skipped when the core checkout is not there.
+ * drawn as built-in `tank`s with the same preset, size and level
+ * (test-support/brewhouse-scene.ts: mash tun = mixer.glb, whirlpool = flat
+ * lid), labels show their bound vessel's value, and the pumps are left out;
+ * every pipe, elbow, valve, cap and label is the scene's own.
  *
  * Needs local Chromium + WebGPU like the other *-render tests.
  */
@@ -18,7 +19,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
 import { launchRenderBrowser, waitForRendered } from '../test-support/render-harness';
 import { artifactsDir } from '../visual/io';
-import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
+import type { IsoSceneFile } from '../iso/scene';
+import { builtinBrewhouse } from '../test-support/brewhouse-scene';
 import { checkElbows, isAutoElbow, resolveAutoElbows } from '../routing/elbows';
 
 const pkgRoot = path.resolve(import.meta.dirname, '../..');
@@ -29,24 +31,8 @@ const shotPath = path.join(snapDir, 'brewhouse-routing.png');
 const brewhousePath = path.join(pkgRoot, 'tests/fixtures/brewery/brewhouse.iso.json');
 
 
-/** Brewery parts that are vessels (drawn as a built-in tank); other `brewery:*` parts are dropped. */
-const isBreweryVessel = (o: IsoPlacement) =>
-  o.object.startsWith('brewery:') && !['brewery:pump', 'brewery:heat-exchanger'].includes(o.object);
-
-function builtinBrewhouse(): IsoSceneFile {
-  const raw = JSON.parse(readFileSync(brewhousePath, 'utf8')) as IsoSceneFile;
-  const objects: IsoPlacement[] = [];
-  for (const o of raw.objects) {
-    if (isBreweryVessel(o)) {
-      const level = typeof o.params?.level === 'number' ? o.params.level / 100 : 0.4;
-      const height = typeof o.params?.height === 'number' ? Math.max(1.5, o.params.height) : 2.4;
-      objects.push({ id: o.id, object: 'tank', x: o.x, y: o.y, height, params: { level } });
-    } else if (!o.object.startsWith('brewery:')) {
-      const { extensions: _drop, ...rest } = o;
-      objects.push(rest);
-    }
-  }
-  return { id: raw.id, name: raw.name, gridCellSize: raw.gridCellSize, objects };
+function brewhouse(): IsoSceneFile {
+  return builtinBrewhouse(JSON.parse(readFileSync(brewhousePath, 'utf8')) as IsoSceneFile);
 }
 
 let server: ViteDevServer;
@@ -68,7 +54,7 @@ afterAll(async () => {
 
 describe.skipIf(!CHROMIUM)('brewhouse piping render', () => {
   it('draws the brewhouse with every bend joining its pipes', async () => {
-    const scene = builtinBrewhouse();
+    const scene = brewhouse();
     // The bends this snapshot is about resolve from their pipes (params.bend = "auto").
     const elbows = scene.objects.filter((o) => o.object === 'elbow');
     expect(elbows.map((e) => e.id)).toEqual(expect.arrayContaining(['e-hlt', 'e-mt-in', 'e-k-out', 'e-wp-in']));

@@ -40,7 +40,9 @@
  *   1. The placement's resolved params (`placement.params` over the part's
  *      param defaults): `windowYaw` (or `windowYawDeg`) and `windowDeg`, in
  *      degrees. This is how the parametric Tank exposes its window.
- *   2. `IsoPartDefinition.cutout`, for parts whose window is fixed in code
+ *   2. `IsoPartDefinition.cutoutOf(placement)`, for a window that follows
+ *      another param (the built-in `tank`'s `preset`).
+ *   3. `IsoPartDefinition.cutout`, for parts whose window is fixed in code
  *      (the built-in `tank` / `mixer` read it from tank-params.ts).
  * Parts with neither have no cutout: pipes into them are never clipped.
  */
@@ -119,26 +121,30 @@ const num = (v: unknown): number | undefined => (typeof v === 'number' && Number
 
 /** The cutout of `placement` (a `def` part), or null when the part has none. */
 export function vesselCutout(
-  def: Pick<IsoPartDefinition, 'params' | 'cutout'>,
+  def: Pick<IsoPartDefinition, 'params' | 'cutout' | 'cutoutOf'>,
   placement: Pick<IsoPlacement, 'id' | 'params' | 'rotation'>,
 ): VesselCutout | null {
   const params = resolveParams(def, placement);
   const yaw = num(params.windowYaw) ?? num(params.windowYawDeg);
   const width = num(params.windowDeg);
   if (yaw !== undefined && width !== undefined) return cutoutFromWindow(yaw, width, placement.rotation);
-  if (def.cutout) return cutoutFromWindow(def.cutout.windowYawDeg, def.cutout.windowDeg, placement.rotation);
+  const own = def.cutoutOf?.(placement) ?? def.cutout;
+  if (own) return cutoutFromWindow(own.windowYawDeg, own.windowDeg, placement.rotation);
   return null;
 }
 
 /**
- * Wall radius used for the pipe band. A `radius` param wins (the parametric
- * Tank); otherwise half the smaller footprint side, which is what a 2x2
- * vessel of radius 1 fills.
+ * Wall radius used for the pipe band: `def.radiusOf(placement)` when the
+ * part declares it (built-in `tank` presets), else a `radius` param (the
+ * parametric Tank), else half the smaller footprint side, which is what a
+ * 2x2 vessel of radius 1 fills.
  */
 export function vesselRadius(
-  def: Pick<IsoPartDefinition, 'params' | 'footprint' | 'footprintOf'>,
+  def: Pick<IsoPartDefinition, 'params' | 'footprint' | 'footprintOf' | 'radiusOf'>,
   placement: IsoPlacement,
 ): number {
+  const own = num(def.radiusOf?.(placement));
+  if (own !== undefined && own > 0) return own;
   const r = num(resolveParams(def, placement).radius);
   if (r !== undefined && r > 0) return r;
   const fp = def.footprintOf?.(placement) ?? def.footprint;

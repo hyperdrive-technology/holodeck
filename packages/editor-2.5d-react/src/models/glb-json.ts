@@ -26,10 +26,51 @@ export type GltfJson = {
   nodes: GltfNode[];
   meshes: { name?: string; primitives: { attributes: Record<string, number>; indices?: number; material?: number }[] }[];
   materials?: { name?: string; doubleSided?: boolean; pbrMetallicRoughness?: { baseColorFactor?: number[] } }[];
-  accessors: { count: number; min?: number[]; max?: number[]; type: string }[];
+  accessors: { count: number; min?: number[]; max?: number[]; type: string; componentType: number; bufferView?: number; byteOffset?: number }[];
+  bufferViews?: { buffer: number; byteOffset?: number; byteLength: number; byteStride?: number }[];
   cameras?: unknown[];
   extensionsUsed?: string[];
 };
+
+const CHUNK_BIN = 0x004e4942; // 'BIN\0'
+
+/** JSON plus the BIN chunk, for tests that need vertex data (edge extraction). */
+export function parseGlb(buf: Uint8Array): { json: GltfJson; bin: Uint8Array } {
+  const json = parseGlbJson(buf);
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const jsonLen = view.getUint32(12, true);
+  const binHeader = 20 + jsonLen;
+  if (binHeader + 8 > buf.byteLength) return { json, bin: new Uint8Array(0) };
+  const binLen = view.getUint32(binHeader, true);
+  if (view.getUint32(binHeader + 4, true) !== CHUNK_BIN) throw new Error('second GLB chunk is not BIN');
+  return { json, bin: buf.subarray(binHeader + 8, binHeader + 8 + binLen) };
+}
+
+const COMPONENT_BYTES: Record<number, number> = { 5121: 1, 5123: 2, 5125: 4, 5126: 4 };
+const COMPONENTS: Record<string, number> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 };
+
+/** Tightly packed copy of an accessor's data (the Blender exporter writes unstrided views). */
+export function readAccessor(glb: { json: GltfJson; bin: Uint8Array }, index: number): Float32Array | Uint16Array | Uint32Array | Uint8Array {
+  const acc = glb.json.accessors[index];
+  if (acc.bufferView === undefined) throw new Error(`accessor ${index} has no bufferView`);
+  const view = glb.json.bufferViews![acc.bufferView];
+  if (view.byteStride) throw new Error(`accessor ${index}: strided buffer views are not supported here`);
+  const size = COMPONENT_BYTES[acc.componentType];
+  const n = COMPONENTS[acc.type];
+  if (!size || !n) throw new Error(`accessor ${index}: unsupported ${acc.type} / ${acc.componentType}`);
+  const start = glb.bin.byteOffset + (view.byteOffset ?? 0) + (acc.byteOffset ?? 0);
+  const bytes = glb.bin.buffer.slice(start, start + acc.count * n * size);
+  switch (acc.componentType) {
+    case 5126:
+      return new Float32Array(bytes);
+    case 5125:
+      return new Uint32Array(bytes);
+    case 5123:
+      return new Uint16Array(bytes);
+    default:
+      return new Uint8Array(bytes);
+  }
+}
 
 const MAGIC = 0x46546c67; // 'glTF'
 const CHUNK_JSON = 0x4e4f534a; // 'JSON'

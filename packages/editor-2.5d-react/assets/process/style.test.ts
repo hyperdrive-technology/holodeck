@@ -4,7 +4,7 @@ import { DEFAULT_FITTING_PARAMS } from './fitting-params';
 import { createFinishMaterial, type IsoUniforms } from './materials';
 import { PIPE_WIRE_WIDTH, WEST_RING_EDGE_THRESHOLD } from './pipe-math';
 import { BODY, EDGE, FILL } from './Shell';
-import { FINISH_NAMES, HOLODECK_STYLE } from './style';
+import { FINISH_NAMES, HOLODECK_STYLE, LIQUID_FINISH, MATERIAL_FINISH_NAMES, finishToken, liquidFinish } from './style';
 import {
   DEFAULT_TANK_PARAMS,
   MIXER_HUB_WHITE,
@@ -33,7 +33,7 @@ describe('HOLODECK_STYLE tokens', () => {
       band: '#c0392b',
       bandInstanced: '#e74c3c',
       pipeWire: '#888888',
-      liquid: '#4aa3d9',
+      liquid: '#5cc8e6',
       alarm: '#e85d5d',
       bore: '#3a3a3a',
     });
@@ -67,14 +67,31 @@ describe('HOLODECK_STYLE tokens', () => {
       vessel: { kind: 'iso', shadeMin: 0.22, shadeMax: 0.95, hubWhite: 0.85, whiteHub: false, offset: true },
       flask: { kind: 'iso', shadeMin: 0.4, shadeMax: 0.97, hubWhite: 0.88, whiteHub: false, offset: true },
       accent: { kind: 'unlit', color: '#c0392b', offset: false },
+      // hd.liquid contract (2026-10-29): the Blender mixer lane exports a material named hd.liquid.
+      liquid: { kind: 'liquid', opacity: 0.78, renderOrder: 2, depthWrite: false, offset: false },
     });
-    expect([...FINISH_NAMES].sort()).toEqual(Object.keys(HOLODECK_STYLE.finishes).sort());
+    expect([...MATERIAL_FINISH_NAMES].sort()).toEqual(Object.keys(HOLODECK_STYLE.finishes).sort());
+    // The shell names are main's five; liquid is the separate token.
+    expect([...FINISH_NAMES]).toEqual(['white', 'shaded', 'vessel', 'flask', 'accent']);
+  });
+
+  it('liquid finish: translucent, no depth writes, drawn after shells; old themes fall back to it', () => {
+    const liquid = liquidFinish(HOLODECK_STYLE);
+    expect(liquid.opacity).toBeGreaterThan(0.3);
+    expect(liquid.opacity).toBeLessThan(1);
+    expect(liquid.depthWrite).toBe(false);
+    expect(liquid.renderOrder).toBeGreaterThan(0);
+    const { liquid: _omit, ...legacyFinishes } = HOLODECK_STYLE.finishes;
+    const legacy = { ...HOLODECK_STYLE, finishes: legacyFinishes };
+    expect(liquidFinish(legacy)).toBe(LIQUID_FINISH);
+    expect(finishToken(legacy, 'liquid')).toBe(LIQUID_FINISH);
+    expect(finishToken(HOLODECK_STYLE, 'vessel')).toBe(HOLODECK_STYLE.finishes.vessel);
   });
 
   it('keeps the legacy constant names as aliases with the old values', () => {
     expect(EDGE).toBe('#666666');
     expect(BODY).toBe('#ffffff');
-    expect(FILL).toBe('#4aa3d9');
+    expect(FILL).toBe('#5cc8e6'); // 2026-10-30: light cyan like reference.jpg (was #4aa3d9 under an opaque fill)
     expect(TANK_SHADE_MIN).toBe(0.22);
     expect(TANK_SHADE_MAX).toBe(0.95);
     expect(TANK_HUB_WHITE).toBe(0.85);
@@ -92,7 +109,7 @@ describe('HOLODECK_STYLE tokens', () => {
     expect(DEFAULT_TANK_PARAMS.edgeColor).toBe('#666666');
     expect(DEFAULT_TANK_PARAMS.lineWidth).toBe(1.5);
     expect(DEFAULT_TANK_PARAMS.capLineWidth).toBe(1.5);
-    expect(DEFAULT_TANK_PARAMS.fillColor).toBe('#4aa3d9');
+    expect(DEFAULT_TANK_PARAMS.fillColor).toBe('#5cc8e6');
     expect(DEFAULT_TANK_PARAMS.shadeMin).toBe(0.22);
     expect(DEFAULT_TANK_PARAMS.shadeMax).toBe(0.95);
     expect(DEFAULT_TANK_PARAMS.hubWhite).toBe(0.85);

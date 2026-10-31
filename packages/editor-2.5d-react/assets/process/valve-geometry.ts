@@ -1,6 +1,7 @@
 import { BoxGeometry, BufferGeometry, CylinderGeometry } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { PIPE_RADIUS } from './pipe-math';
+import { flangeRingGeometry } from './flange';
 
 /**
  * Arcentry-style in-line valve, code-built so it can be instanced: a fat
@@ -60,12 +61,14 @@ export function buildValveBodyGeometry(): BufferGeometry {
   const barrel = cyl(VALVE_BODY_R, VALVE_BODY_LEN, VALVE_SIDES);
   barrel.rotateZ(Math.PI / 2); // cylinder +Y -> pipe axis +X
   const flangeX = VALVE_BODY_LEN / 2;
-  const flangeA = cyl(VALVE_FLANGE_R, VALVE_FLANGE_LEN, VALVE_SIDES);
-  flangeA.rotateZ(Math.PI / 2);
-  flangeA.translate(-flangeX, 0, 0);
-  const flangeB = cyl(VALVE_FLANGE_R, VALVE_FLANGE_LEN, VALVE_SIDES);
-  flangeB.rotateZ(Math.PI / 2);
-  flangeB.translate(flangeX, 0, 0);
+  // Shared flange ring (flange.ts), built along +Y then laid on the barrel axis like the barrel.
+  const flange = (y: number) => {
+    const g = flangeRingGeometry({ radius: VALVE_FLANGE_R, scale: 1, length: VALVE_FLANGE_LEN, sides: VALVE_SIDES, y });
+    g.rotateZ(-Math.PI / 2); // +Y -> +X, so y = -flangeX lands at x = -flangeX
+    return g;
+  };
+  const flangeA = flange(-flangeX);
+  const flangeB = flange(flangeX);
   const bonnetH = VALVE_BONNET_TOP;
   const bonnet = cyl(VALVE_BONNET_R, bonnetH, VALVE_SIDES, bonnetH / 2);
   const stemH = VALVE_WHEEL_Y - VALVE_BONNET_TOP;
