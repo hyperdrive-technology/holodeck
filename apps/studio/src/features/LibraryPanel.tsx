@@ -76,8 +76,8 @@ export function LibraryPanel() {
                         disabled={!active}
                         aria-pressed={active?.placing === item.id}
                         onPointerDown={(e) => drag.onPointerDown(e, item.kind, item.id)}
-                        onClick={() => {
-                          if (drag.wasDrag()) return;
+                        onClick={(e) => {
+                          if (drag.wasDrag(e)) return;
                           active?.armItem(item.kind, item.id);
                         }}
                         data-library-item={item.id}

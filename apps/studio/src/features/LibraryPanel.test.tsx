@@ -91,17 +91,41 @@ describe('<LibraryPanel />', () => {
       fireEvent.pointerUp(window, { clientX: 300, clientY: 200 });
       expect(elementFromPoint).toHaveBeenCalledWith(300, 200);
       expect(dropItem).toHaveBeenCalledWith('holodeck.iso.part', 'tank', target);
-      // A click right after the drag (released over the item itself) does not arm it again.
-      fireEvent.click(tank);
+      // The pointer click dispatched with the release (released over the item itself) does not arm it again.
+      fireEvent.click(tank, { detail: 1 });
       expect(armItem).not.toHaveBeenCalled();
       // A plain press + release without moving stays a click.
       fireEvent.pointerDown(tank, { button: 0, clientX: 10, clientY: 10, pointerId: 1 });
       fireEvent.pointerUp(window, { clientX: 10, clientY: 10 });
-      fireEvent.click(tank);
+      fireEvent.click(tank, { detail: 1 });
       expect(armItem).toHaveBeenCalledWith('holodeck.iso.part', 'tank');
       expect(dropItem).toHaveBeenCalledTimes(1);
     } finally {
       target.remove();
+      Reflect.deleteProperty(document, 'elementFromPoint');
+    }
+  });
+
+  // holodeck#244: a drag released on the canvas leaves no click on the item to
+  // consume the suppression; the next keyboard or pointer click must still work.
+  it('after a drag released over the canvas, the next keyboard activation and the next pointer click arm the item', async () => {
+    renderPanel();
+    const armItem = vi.fn();
+    act(() => activeDocumentStore.setState(() => ({ ...activeDoc(), armItem })));
+    const tank = screen.getByRole('button', { name: /^Tank/ });
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => null });
+    try {
+      fireEvent.pointerDown(tank, { button: 0, clientX: 0, clientY: 0, pointerId: 1 });
+      fireEvent.pointerMove(window, { clientX: 300, clientY: 200 });
+      fireEvent.pointerUp(window, { clientX: 300, clientY: 200 });
+      // Enter / Space on the focused item: a click with detail 0, right away.
+      fireEvent.click(tank, { detail: 0 });
+      expect(armItem).toHaveBeenCalledTimes(1);
+      // A later pointer click (next task) arms it too.
+      await act(() => new Promise((r) => setTimeout(r, 0)));
+      fireEvent.click(tank, { detail: 1 });
+      expect(armItem).toHaveBeenCalledTimes(2);
+    } finally {
       Reflect.deleteProperty(document, 'elementFromPoint');
     }
   });

@@ -30,11 +30,18 @@ export interface LibraryDragHandlers {
  * Returns the `onPointerDown` handler for a library item. After a real drag
  * the click that follows the release is swallowed (`wasDrag`), so the item is
  * not armed again by the click.
+ *
+ * That suppression is for the release's own click only (holodeck#244). A drag
+ * released over the canvas produces no click on the item, and a flag left set
+ * swallowed the next keyboard activation (Enter / Space). So: the flag is
+ * cleared in the next task after the release (the browser dispatches the
+ * release's click in the same task as pointerup / mouseup), and a keyboard
+ * click (`detail === 0`) never counts as a drag's click.
  */
 export function useLibraryDrag(handlers: LibraryDragHandlers | null): {
   onPointerDown: (event: ReactPointerEvent<HTMLElement>, kind: string, itemId: string) => void;
-  /** True right after a drag ended: the trailing click must not count as a click. */
-  wasDrag: () => boolean;
+  /** True for the pointer click that ends a drag: it must not count as a click. Pass the click event. */
+  wasDrag: (click: { detail: number }) => boolean;
 } {
   const cleanup = useRef<(() => void) | null>(null);
   const dragged = useRef(false);
@@ -57,14 +64,19 @@ export function useLibraryDrag(handlers: LibraryDragHandlers | null): {
       dragged.current = true;
       latest.current?.onStart(kind, itemId);
     };
+    // Only the click dispatched with this release may be swallowed.
+    const expire = () => setTimeout(() => (dragged.current = false), 0);
     const up = (e: PointerEvent) => {
       cleanup.current?.();
       if (!active) return;
+      expire();
       latest.current?.onDrop(kind, itemId, document.elementFromPoint(e.clientX, e.clientY));
     };
     const cancel = () => {
       cleanup.current?.();
-      if (active) latest.current?.onDrop(kind, itemId, null);
+      if (!active) return;
+      expire();
+      latest.current?.onDrop(kind, itemId, null);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -77,7 +89,9 @@ export function useLibraryDrag(handlers: LibraryDragHandlers | null): {
     };
   };
 
-  const wasDrag = () => {
+  const wasDrag = (click: { detail: number }) => {
+    // Keyboard activation (Enter / Space) has detail 0: always a real click.
+    if (click.detail === 0) return false;
     const was = dragged.current;
     dragged.current = false;
     return was;
