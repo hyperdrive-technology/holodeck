@@ -11,6 +11,8 @@ function activeDoc(overrides: Partial<ActiveDocument> = {}): ActiveDocument {
     placing: null,
     armItem: vi.fn(),
     addItem: vi.fn(),
+    startDragItem: vi.fn(),
+    dropItem: vi.fn(),
     exportFile: vi.fn(),
     exportComponents: vi.fn(),
     exportImage: vi.fn(async (scale: number) => ({ width: 640 * scale, height: 400 * scale, tiles: 1, blob: new Blob(), name: `plant@${scale}x.png` })),

@@ -28,6 +28,15 @@ export interface StoredDocument {
    * (DocumentStore.save). Not part of the exported envelope.
    */
   revision: number;
+  /**
+   * Which life of this id the record is (a random token set on create, kept
+   * by every update). Revisions restart at 1 when an id is deleted and
+   * created again (the playground rebuilds its starter under a fixed id), so
+   * a writer still holding the old life could match a revision of the new
+   * one; a save that names a generation is a conflict on any other. Records
+   * from before this field have none and get one on their next write.
+   */
+  generation?: string;
   /** ms since epoch. */
   createdAt: number;
   /** ms since epoch; the document list sorts by it, newest first. */

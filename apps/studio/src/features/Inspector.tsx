@@ -7,7 +7,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, Di
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { useStudio } from '../studio-context';
-import { withBinding } from '../connections/bindings';
+import { withBinding, type ParamRange } from '../connections/bindings';
 import { BindingDialog } from './connections/BindingDialog';
 import { StatusBadge } from './connections/StatusBadge';
 import { DraftField, ReadonlyField } from './fields';
@@ -46,7 +46,8 @@ export interface InspectorProps {
   onEdit: (id: string, edit: InspectorEdit) => void;
   /** Delete through the editor (connector anchors detach, hosted parts follow: holodeck#124). */
   onDeleteObject: (id: string) => void;
-  onDeleteDocument: () => void;
+  /** Omit to hide "Delete document" (the playground's one document is reset, not deleted). */
+  onDeleteDocument?: () => void;
   live?: InspectorLive;
 }
 
@@ -115,11 +116,13 @@ function DocumentInspector({ doc, onRename, onDeleteDocument }: InspectorProps) 
         ))}
       </ul>
       <p className="px-4 pt-4 text-xs text-muted-foreground">Select an object on the canvas to edit it.</p>
-      <div className="mt-auto p-4">
-        <Button variant="outline" size="sm" className="w-full text-destructive" onClick={() => setConfirming(true)}>
-          <Trash2Icon /> Delete document
-        </Button>
-      </div>
+      {onDeleteDocument ? (
+        <div className="mt-auto p-4">
+          <Button variant="outline" size="sm" className="w-full text-destructive" onClick={() => setConfirming(true)}>
+            <Trash2Icon /> Delete document
+          </Button>
+        </div>
+      ) : null}
       <Dialog open={confirming} onOpenChange={setConfirming}>
         <DialogContent>
           <DialogHeader>
@@ -134,7 +137,7 @@ function DocumentInspector({ doc, onRename, onDeleteDocument }: InspectorProps) 
               variant="destructive"
               onClick={() => {
                 setConfirming(false);
-                onDeleteDocument();
+                onDeleteDocument?.();
               }}
             >
               Delete
@@ -195,6 +198,7 @@ function ObjectInspector({ doc, placement, onEdit, onDeleteObject, live }: Inspe
                     placement={placement}
                     param={name}
                     paramLabel={spec.label || name}
+                    paramRange={spec.type === 'number' && spec.min !== undefined && spec.max !== undefined ? { min: spec.min, max: spec.max } : undefined}
                     doc={doc}
                     live={live}
                     onChange={(bindings) => edit({ kind: 'bindings', bindings })}
@@ -281,6 +285,7 @@ function BindingRow({
   placement,
   param,
   paramLabel,
+  paramRange,
   doc,
   live,
   onChange,
@@ -288,6 +293,7 @@ function BindingRow({
   placement: IsoPlacement;
   param: string;
   paramLabel: string;
+  paramRange?: ParamRange;
   doc: HolodeckDocument<IsoSceneFile>;
   live: InspectorLive;
   onChange: (bindings: IsoPlacement['bindings'] | undefined) => void;
@@ -320,13 +326,14 @@ function BindingRow({
           </>
         ) : (
           <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs" aria-label={`Bind ${paramLabel}`} onClick={() => setOpen(true)}>
-            <LinkIcon className="size-3" /> Bind
+            <LinkIcon className="size-3" /> Bind to signal
           </Button>
         )}
       </div>
       {open ? (
         <BindingDialog
           paramLabel={paramLabel}
+          paramRange={paramRange}
           connections={connections}
           current={binding}
           hub={live.hub}

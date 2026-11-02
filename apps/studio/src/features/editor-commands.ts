@@ -6,7 +6,7 @@
  */
 
 import { HOLODECK_KINDS, type ContributionRegistry } from '@holodeck/sdk';
-import type { EditorAction, IsoPartDefinition } from '@holodeck/editor-2.5d-react';
+import type { EditorAction, EditorState, IsoPartDefinition } from '@holodeck/editor-2.5d-react';
 import type { InspectorEdit } from './Inspector';
 
 /** Length, in cells, of a run part (pipe) added from the library: what the palette stamp used to give. */
@@ -30,6 +30,30 @@ export function libraryAddActions(registry: ContributionRegistry, partId: string
         ]
       : [{ type: 'floor-click', x: at.x, y: at.y }];
   return [{ type: 'place-mode', object: partId }, ...clicks, { type: 'select-mode' }];
+}
+
+/**
+ * Release of a library drag (features/library-drag.ts), given the editor's
+ * state at that moment. Mirrors the engine palette's own drop
+ * (ProcessEditor `dropFromPalette`):
+ *  - a run part (pipe) only arms its tool: a pipe is drawn click-click, so
+ *    the tool stays armed and nothing is dispatched;
+ *  - the place tool no longer holds this part (Escape, another tool): nothing;
+ *  - released over this canvas with a ghost cell: one `palette-drop` (place +
+ *    select, one undo step, the host's `onPlaced` fires);
+ *  - released anywhere else (or cancelled): back to the select tool.
+ */
+export function libraryDropActions(
+  registry: ContributionRegistry,
+  state: Pick<EditorState, 'mode' | 'placing' | 'cursor'>,
+  partId: string,
+  overCanvas: boolean,
+): EditorAction[] {
+  const def = registry.get<IsoPartDefinition>(HOLODECK_KINDS.isoPart, partId);
+  if (def?.draw === 'run' || state.mode === 'draw-pipe') return [];
+  if (state.mode !== 'place' || state.placing !== partId) return [];
+  if (overCanvas && state.cursor) return [{ type: 'palette-drop', object: partId, x: state.cursor.x, y: state.cursor.y }];
+  return [{ type: 'select-mode' }];
 }
 
 /**

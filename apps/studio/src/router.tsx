@@ -5,6 +5,8 @@
  *   (shell)          AppShell: header, sidebar, hotkeys (pathless layout)
  *     /              Welcome (no document open)
  *     /d/$docId      DocumentRoute (canvas + inspector)
+ *   /playground      PlaygroundRoute: one persistent document, Edit / Viewer
+ *                    tabs (`?tab=edit|viewer`), no document list or welcome
  *   /embed/$docId    EmbedRoute: read-only live view for iframes, no studio chrome
  */
 
@@ -14,6 +16,8 @@ import { AppShell } from './features/AppShell';
 import { DocumentRoute } from './features/DocumentWorkspace';
 import { FrameGuard } from './features/FrameGuard';
 import { Welcome } from './features/Welcome';
+import { parsePlaygroundSearch, type PlaygroundTab } from './playground/playground-state';
+import { PlaygroundRoute } from './playground/PlaygroundRoute';
 
 const rootRoute = createRootRoute({ component: Outlet });
 
@@ -45,6 +49,26 @@ const documentRoute = createRoute({
   },
 });
 
+/** Outside the shell: the playground has its own header and no document list. */
+const playgroundRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/playground',
+  validateSearch: parsePlaygroundSearch,
+  component: function PlaygroundPage() {
+    const { tab } = playgroundRoute.useSearch();
+    const navigate = playgroundRoute.useNavigate();
+    // A tab is a search param, so it is linkable and survives a reload. Each
+    // switch is a history entry (Back returns to the previous tab); the
+    // document stays open (same route, same component).
+    const onTabChange = (next: PlaygroundTab) => void navigate({ search: { tab: next } });
+    return (
+      <FrameGuard>
+        <PlaygroundRoute tab={tab} onTabChange={onTabChange} />
+      </FrameGuard>
+    );
+  },
+});
+
 const embedRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/embed/$docId',
@@ -54,7 +78,7 @@ const embedRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([shellRoute.addChildren([indexRoute, documentRoute]), embedRoute]);
+const routeTree = rootRoute.addChildren([shellRoute.addChildren([indexRoute, documentRoute]), playgroundRoute, embedRoute]);
 
 export function createStudioRouter(history?: RouterHistory) {
   return createRouter({ routeTree, history, defaultPreload: false });
