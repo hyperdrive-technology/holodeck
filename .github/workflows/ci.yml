@@ -10,24 +10,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Sandbox starts are the scarce resource on boat ($20 plan: 12/minute and 60/hour,
+  # shared by every repo's CI). A push used to start 12 sandboxes here (8-package
+  # matrix, scripts, studio, Blender gate + rebuild); it now starts 6:
+  #   package (3 legs) — the three packages that are required checks on main, by name
+  #   small-packages   — the five ~1-minute packages + the scripts tests, in one sandbox
+  #   studio, and blender-drift.yml's single rebuild job.
+  # Every package runs the same gate, scripts/ci-package.sh; each job skips the
+  # packages a PR cannot affect (scripts/ci-scope.mjs) and still reports.
   package:
     name: ${{ matrix.package }}
-    runs-on: ubuntu-latest
+    # editor-2.5d-react's render tests (SwiftShader in headless Chrome, files run one at a
+    # time) are the critical path of every PR at ~13 min. boat-large does NOT help: the
+    # same commit took 17 min on 8 vCPU vs 13.4 min on 4 vCPU (2026-11-03), so all legs
+    # stay on the default size.
+    runs-on: boat
     strategy:
       fail-fast: false
       matrix:
-        # packages/cli is not built here: it has an empty package-lock.json, no
-        # src/index.ts (its build entry), and depends on @holodeck/sdk from the npm
-        # registry, which is not published. Add it once it is revived.
-        # library-cloud follows provider-http's type/test/build/package smoke
-        # path; its shipped GLBs are checked without requiring Blender here.
-        # The byte-for-byte Blender rebuild runs in blender-drift.yml
-        # (path-filtered + weekly, holodeck#136).
-        # assets-aws checks its icons (sanitised SVG), vendored archetype models and the
-        # provider-aws part hints from source; it needs no network or AWS credentials.
-        # provider-aws runs the real AWS SDK against an in-process fake backend
-        # (ProviderContext.fetch); no AWS credentials and no network.
-        package: [editor-2.5d-react, editor-2d-react, viewer-3d-react, flow-runtime, provider-http, library-cloud, provider-aws, assets-aws]
+        # Required checks on main (ruleset): keep these job names. packages/cli is not
+        # built anywhere: it has an empty package-lock.json, no src/index.ts (its build
+        # entry), and depends on @holodeck/sdk from the npm registry, which is not
+        # published. Add it once it is revived.
+        #
+        # scope: the paths whose change can affect the leg (scripts/ci-scope.mjs). It must
+        # list every directory the package's tests read, not just its own:
+        # editor-2.5d-react's models-contract test needs one GLB per blender/parts/*.py
+        # and its logo/objects tests load packages/library-cloud/assets/models. The other
+        # two read only their own package (checked 2026-11-03 with rg for ../../ reads).
+        # scripts/ci-scope.test.mjs parses these patterns and pins the cross-reads.
+        include:
+          - package: editor-2.5d-react
+            scope: '^(packages/(editor-2\.5d-react|library-cloud)|blender)/'
+          - package: editor-2d-react
+            scope: '^packages/editor-2d-react/'
+          - package: viewer-3d-react
+            scope: '^packages/viewer-3d-react/'
     timeout-minutes: 30
     steps:
       # The packages depend on the SDK via `file:../../../holodeck-sdk/ts`, so the
@@ -62,20 +80,38 @@ jobs:
           echo "Using holodeck-sdk ref: $ref"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
+      # Skip the rest of this job when the PR cannot affect this package (docs, other
+      # packages). The job still reports, so the required check passes; see
+      # scripts/ci-scope.mjs. Every later step is gated on steps.scope.outputs.run.
+      - name: Does this change touch ${{ matrix.package }}?
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          SDK_REF: ${{ steps.sdk.outputs.ref }}
+        # Runs before setup-node on the image's own Node (boat ships one); without one, run.
+        run: |
+          if ! command -v node >/dev/null; then echo "no node on the image yet: run"; echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          node holodeck/scripts/ci-scope.mjs --cwd holodeck --event "$EVENT" --base "$BASE_SHA" --sdk-ref "$SDK_REF" \
+            --paths '${{ matrix.scope }}'
+
       - name: Checkout holodeck-sdk (${{ steps.sdk.outputs.ref }})
+        if: steps.scope.outputs.run == 'true'
         uses: actions/checkout@v4
         with:
           repository: hyperdrive-technology/holodeck-sdk
           ref: ${{ steps.sdk.outputs.ref }}
           path: holodeck-sdk
 
-      # pnpm 10.26+ understands the SDK's pnpm-workspace.yaml (`allowBuilds`).
+      # pnpm 12 (every package pins it in packageManager; lockfiles are pnpm 12 format).
       - uses: pnpm/action-setup@v4
+        if: steps.scope.outputs.run == 'true'
         with:
-          version: 10.33.2
+          version: 12.16.1
 
-      # Node 26 only (repo .node-version; every engines field is >=26).
+      # Node 26.13.0 (repo .node-version; every engines field is >=26.13.0).
       - uses: actions/setup-node@v4
+        if: steps.scope.outputs.run == 'true'
         with:
           node-version-file: holodeck/.node-version
           cache: pnpm
@@ -86,119 +122,169 @@ jobs:
       # The SDK's package.json points at dist/, so it has to be built before the
       # `file:` dependency is installed (pnpm copies the folder at install time).
       - name: Build holodeck-sdk
+        if: steps.scope.outputs.run == 'true'
         working-directory: holodeck-sdk/ts
         run: |
           pnpm install --frozen-lockfile
           pnpm build
 
-      - name: Install
-        working-directory: holodeck/packages/${{ matrix.package }}
-        run: pnpm install --frozen-lockfile
-
-      - name: Type check
-        working-directory: holodeck/packages/${{ matrix.package }}
-        run: pnpm type-check
-
       # Render (*-render) tests drive a real WebGPU canvas in headless Chrome.
-      # editor-2.5d-react runs them on the runner's PREINSTALLED Google Chrome
-      # (HOLODECK_CHROMIUM) with the SwiftShader software-Vulkan flags in
-      # src/test-support/chromium.ts. Do NOT `playwright install` here: it hangs
-      # while unpacking its browser archive on GitHub-hosted runners (holodeck#29).
-      # Other packages have no render tests; they skip explicitly. Without this
-      # step (or with a HOLODECK_CHROMIUM that does not exist) the guard test in
-      # src/test-support/render-harness.test.ts fails the job instead of every
+      # editor-2.5d-react runs them (and its Vite consumer check) on the runner's
+      # PREINSTALLED Google Chrome (HOLODECK_CHROMIUM) with the SwiftShader
+      # software-Vulkan flags in src/test-support/chromium.ts. Do NOT `playwright
+      # install` here: it hangs while unpacking its browser archive on hosted runners
+      # (holodeck#29). Other packages have no render tests; they skip explicitly.
+      # Without this step (or with a HOLODECK_CHROMIUM that does not exist) the guard
+      # test in src/test-support/render-harness.test.ts fails the job instead of every
       # render test skipping quietly (holodeck#78).
       - name: Select browser for render tests
+        if: steps.scope.outputs.run == 'true'
         run: |
           if [ "${{ matrix.package }}" = "editor-2.5d-react" ]; then
-            chrome=$(command -v google-chrome || command -v google-chrome-stable)
+            chrome=$(command -v google-chrome || command -v google-chrome-stable || true)
+            test -n "$chrome" || { echo "No preinstalled Chrome found on the runner" >&2; exit 1; }
             "$chrome" --version
             echo "HOLODECK_CHROMIUM=$chrome" >> "$GITHUB_ENV"
           else
             echo "HOLODECK_SKIP_RENDER_TESTS=1" >> "$GITHUB_ENV"
           fi
 
-      - name: Test
-        timeout-minutes: 15
-        working-directory: holodeck/packages/${{ matrix.package }}
-        run: pnpm exec vitest run
+      # Install, type check, test, build and the package's smoke checks.
+      - name: Check ${{ matrix.package }}
+        if: steps.scope.outputs.run == 'true'
+        working-directory: holodeck
+        run: scripts/ci-package.sh "${{ matrix.package }}"
 
       # Render output (Arcentry fidelity metrics/diff/heatmap, review shots) for
       # inspecting a CI run: artifacts/visual + artifacts/render (gitignored).
       - name: Upload render artifacts
-        if: always() && matrix.package == 'editor-2.5d-react'
+        if: always() && steps.scope.outputs.run == 'true' && matrix.package == 'editor-2.5d-react'
         uses: actions/upload-artifact@v4
         with:
           name: render-artifacts
           path: holodeck/packages/editor-2.5d-react/artifacts/
           if-no-files-found: ignore
 
-      - name: Build
-        working-directory: holodeck/packages/${{ matrix.package }}
-        run: pnpm build
-
-      # Load the built dist/ by package name in plain Node, as both ESM and CJS
-      # (ESM-only packages such as flow-runtime: require(esm) of the import target),
-      # and (editor-2.5d-react) check every bundled GLB URL points at a real,
-      # published file. Catches holodeck#7-style "builds fine, crashes on import".
-      - name: Smoke-test built package
-        working-directory: holodeck/packages/${{ matrix.package }}
-        run: node ../../scripts/smoke-dist.mjs .
-
-      # Packages that ship a holodeck.package.json: install the built entry into a
-      # HolodeckHost through the manifest path (SDK packaging contract, holodeck#15).
-      # flow-runtime's script also deploys a small flow through holodeck.flow.local;
-      # provider-http's reads a value through holodeck.http from a local server.
-      # library-cloud's checks its 26 models, logo assets and two theme installs.
-      # assets-aws's installs 54 AWS parts after a stand-in holodeck.cloud and checks npm contents.
-      # provider-aws's reads a metric and an alarm through aws.cloudwatch from an
-      # in-process fake CloudWatch endpoint.
-      - name: Smoke-test the Holodeck package entry
-        if: matrix.package == 'editor-2.5d-react' || matrix.package == 'flow-runtime' || matrix.package == 'provider-http' || matrix.package == 'library-cloud' || matrix.package == 'provider-aws' || matrix.package == 'assets-aws'
-        working-directory: holodeck/packages/${{ matrix.package }}
-        run: node --no-deprecation scripts/smoke-holodeck-package.mjs
-
-      # provider-aws must stay browser-compatible: bundle dist/ for the browser
-      # with esbuild and fail on any Node built-in (the AWS SDK swaps in its
-      # browser runtime config through package.json `browser` fields).
-      - name: Browser bundle check
-        if: matrix.package == 'provider-aws'
-        working-directory: holodeck/packages/${{ matrix.package }}
-        run: node scripts/browser-bundle-check.mjs
-
-      # editor-2.5d-react only: consume the built package from a throwaway Vite app
-      # in real Chromium and fetch every GLB URL (holodeck#28: Vite dev pre-bundling
-      # rewrites them to 404s unless optimizeDeps.exclude is set). No GPU needed.
-      - name: Use the runner's preinstalled Chrome for the Vite consumer check
-        if: matrix.package == 'editor-2.5d-react'
-        # `playwright install chromium` downloads in ~1 s but then hangs while unpacking on the hosted
-        # runner (twice with --with-deps, once without; 2026-10-14). GitHub's ubuntu images ship
-        # Google Chrome, so point the check at it via HOLODECK_CHROMIUM (scripts/vite-consumer-check.mjs).
-        timeout-minutes: 2
-        run: |
-          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
-          test -n "$CHROME" || { echo "No preinstalled Chrome found on the runner" >&2; exit 1; }
-          "$CHROME" --version
-          echo "HOLODECK_CHROMIUM=$CHROME" >> "$GITHUB_ENV"
-      - name: Vite consumer check (GLB URLs resolve)
-        if: matrix.package == 'editor-2.5d-react'
-        working-directory: holodeck/packages/${{ matrix.package }}
-        timeout-minutes: 15
-        run: pnpm check:vite-consumer
-
-  # Tests for the repo-level scripts the package jobs run (smoke-dist.mjs,
-  # vite-consumer-check helpers): node:test, no install, no build.
-  scripts:
-    name: scripts
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+  # The five packages that are not required checks and take about a minute each, plus
+  # the node:test suites of the repo scripts, in ONE sandbox (was six): one checkout,
+  # one SDK build, one pnpm store restore. Each package is still scoped on its own and
+  # every package runs even after another fails, so one red package does not hide
+  # another; the job fails at the end listing them.
+  #   library-cloud: shipped GLBs checked without Blender (the byte-for-byte rebuild is
+  #     blender-drift.yml, holodeck#136). assets-aws: sanitised SVG icons, vendored
+  #     archetype models, provider-aws part hints; no network. provider-aws: the real
+  #     AWS SDK against an in-process fake backend; no credentials, no network.
+  small-packages:
+    name: flow-runtime, provider-http, library-cloud, provider-aws, assets-aws, scripts
+    runs-on: boat
+    timeout-minutes: 30
+    env:
+      PACKAGES: flow-runtime provider-http library-cloud provider-aws assets-aws
+      # None of these packages has render tests.
+      HOLODECK_SKIP_RENDER_TESTS: '1'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout holodeck
+        uses: actions/checkout@v4
         with:
-          node-version-file: .node-version
-      - name: node --test
+          path: holodeck
+
+      # Same SDK ref rule as the package matrix above.
+      - name: Pick holodeck-sdk ref
+        id: sdk
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          remote=https://github.com/hyperdrive-technology/holodeck-sdk.git
+          pinned=$(tr -d '[:space:]' < holodeck/.github/holodeck-sdk-ref 2>/dev/null || true)
+          ref=main
+          for candidate in "$BRANCH" "$pinned"; do
+            if [ -n "$candidate" ] && git ls-remote --exit-code --heads "$remote" "$candidate" >/dev/null; then
+              ref=$candidate
+              break
+            fi
+          done
+          echo "Using holodeck-sdk ref: $ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      # All five packages run, or none. They have hidden test-time links that
+      # package.json does not show: assets-aws tests import provider-aws
+      # DEFAULT_PART_HINTS, and library-cloud/assets-aws conformance tests consume the
+      # editor-2.5d-react contracts. Choosing per package skipped those tests, so any
+      # change to one of them or to editor-2.5d-react selects the whole set. Shared
+      # inputs and unowned root files select it too (scripts/ci-scope.mjs).
+      - name: Does this change touch the small packages?
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          SDK_REF: ${{ steps.sdk.outputs.ref }}
+        run: |
+          if ! command -v node >/dev/null; then
+            echo "no node on the image yet: run all"
+            echo "packages=$PACKAGES" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          out=$(mktemp)
+          GITHUB_OUTPUT="$out" node holodeck/scripts/ci-scope.mjs --cwd holodeck --event "$EVENT" --base "$BASE_SHA" \
+            --sdk-ref "$SDK_REF" --paths "^packages/(${PACKAGES// /|}|editor-2\.5d-react)/"
+          if grep -qx 'run=true' "$out"; then selected=$PACKAGES; else selected=""; fi
+          echo "Selected: ${selected:-none}"
+          echo "packages=$selected" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout holodeck-sdk (${{ steps.sdk.outputs.ref }})
+        if: steps.scope.outputs.packages != ''
+        uses: actions/checkout@v4
+        with:
+          repository: hyperdrive-technology/holodeck-sdk
+          ref: ${{ steps.sdk.outputs.ref }}
+          path: holodeck-sdk
+
+      - uses: pnpm/action-setup@v4
+        if: steps.scope.outputs.packages != ''
+        with:
+          version: 12.16.1
+
+      - uses: actions/setup-node@v4
+        if: steps.scope.outputs.packages != ''
+        with:
+          node-version-file: holodeck/.node-version
+          cache: pnpm
+          cache-dependency-path: |
+            holodeck-sdk/ts/pnpm-lock.yaml
+            holodeck/packages/flow-runtime/pnpm-lock.yaml
+            holodeck/packages/provider-http/pnpm-lock.yaml
+            holodeck/packages/library-cloud/pnpm-lock.yaml
+            holodeck/packages/provider-aws/pnpm-lock.yaml
+            holodeck/packages/assets-aws/pnpm-lock.yaml
+
+      # Repo-level scripts (smoke-dist, vite-consumer-check helpers, ci-scope):
+      # node:test, no install. Any change under scripts/ selects every package, so
+      # these run whenever the scripts can have changed.
+      - name: Scripts (node --test)
+        if: steps.scope.outputs.packages != ''
+        working-directory: holodeck
         run: node --test "scripts/**/*.test.mjs"
+
+      - name: Build holodeck-sdk
+        if: steps.scope.outputs.packages != ''
+        working-directory: holodeck-sdk/ts
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Check ${{ steps.scope.outputs.packages }}
+        if: steps.scope.outputs.packages != ''
+        working-directory: holodeck
+        env:
+          SELECTED: ${{ steps.scope.outputs.packages }}
+        run: |
+          failed=""
+          for p in $SELECTED; do
+            scripts/ci-package.sh "$p" || failed="$failed $p"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::Failed:$failed"
+            exit 1
+          fi
 
   # Holodeck Studio (apps/studio): a Vite app that consumes the BUILT
   # editor-2.5d-react package (file: dependency, copied at install time), so
@@ -208,7 +294,10 @@ jobs:
   # hangs on hosted runners, holodeck#29).
   studio:
     name: studio
-    runs-on: ubuntu-latest
+    # Builds five packages, then Playwright (incl. two WebGPU/SwiftShader specs). 3-5 min
+    # on boat-large vs ~4-6 min on boat in the 2026-11-03 runs: noise next to the ~13-min
+    # editor-2.5d-react leg that sets the PR's wall clock, so the default size.
+    runs-on: boat
     timeout-minutes: 30
     steps:
       - name: Checkout holodeck
@@ -235,7 +324,21 @@ jobs:
           echo "Using holodeck-sdk ref: $ref"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
+      # The studio consumes editor-2.5d-react and the provider/library packages (file:
+      # deps), so a change to any of them, or to the studio, runs it (scripts/ci-scope.mjs).
+      - name: Does this change touch the studio or a package it consumes?
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          SDK_REF: ${{ steps.sdk.outputs.ref }}
+        run: |
+          if ! command -v node >/dev/null; then echo "no node on the image yet: run"; echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          node holodeck/scripts/ci-scope.mjs --cwd holodeck --event "$EVENT" --base "$BASE_SHA" --sdk-ref "$SDK_REF" \
+            --paths '^apps/studio/' --paths '^packages/(editor-2\.5d-react|provider-http|provider-aws|library-cloud)/'
+
       - name: Checkout holodeck-sdk (${{ steps.sdk.outputs.ref }})
+        if: steps.scope.outputs.run == 'true'
         uses: actions/checkout@v4
         with:
           repository: hyperdrive-technology/holodeck-sdk
@@ -243,10 +346,12 @@ jobs:
           path: holodeck-sdk
 
       - uses: pnpm/action-setup@v4
+        if: steps.scope.outputs.run == 'true'
         with:
-          version: 10.33.2
+          version: 12.16.1
 
       - uses: actions/setup-node@v4
+        if: steps.scope.outputs.run == 'true'
         with:
           node-version-file: holodeck/.node-version
           cache: pnpm
@@ -259,12 +364,14 @@ jobs:
             holodeck/apps/studio/pnpm-lock.yaml
 
       - name: Build holodeck-sdk
+        if: steps.scope.outputs.run == 'true'
         working-directory: holodeck-sdk/ts
         run: |
           pnpm install --frozen-lockfile
           pnpm build
 
       - name: Build editor-2.5d-react
+        if: steps.scope.outputs.run == 'true'
         working-directory: holodeck/packages/editor-2.5d-react
         run: |
           pnpm install --frozen-lockfile
@@ -272,40 +379,47 @@ jobs:
 
       # Provider packages the studio installs (holodeck#101); file: deps, copied at install.
       - name: Build provider-http, provider-aws and library-cloud
+        if: steps.scope.outputs.run == 'true'
         run: |
           for p in provider-http provider-aws library-cloud; do
             (cd holodeck/packages/$p && pnpm install --frozen-lockfile && pnpm build)
           done
 
       - name: Install
+        if: steps.scope.outputs.run == 'true'
         working-directory: holodeck/apps/studio
         run: pnpm install --frozen-lockfile
 
       - name: Type check
+        if: steps.scope.outputs.run == 'true'
         working-directory: holodeck/apps/studio
         run: pnpm type-check
 
       - name: Unit tests
+        if: steps.scope.outputs.run == 'true'
         working-directory: holodeck/apps/studio
         run: pnpm exec vitest run
 
       - name: Build
+        if: steps.scope.outputs.run == 'true'
         working-directory: holodeck/apps/studio
         run: pnpm build
 
       - name: Use the runner's preinstalled Chrome for e2e
+        if: steps.scope.outputs.run == 'true'
         run: |
           chrome=$(command -v google-chrome || command -v google-chrome-stable)
           "$chrome" --version
           echo "HOLODECK_CHROMIUM=$chrome" >> "$GITHUB_ENV"
 
       - name: E2E (Playwright over the production build)
+        if: steps.scope.outputs.run == 'true'
         working-directory: holodeck/apps/studio
         timeout-minutes: 15
         run: pnpm exec playwright test
 
       - name: Upload e2e report
-        if: failure()
+        if: failure() && steps.scope.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: studio-e2e

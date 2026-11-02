@@ -4,7 +4,7 @@ Start with the [organization contribution guide](https://github.com/hyperdrive-t
 
 ## Local setup
 
-Use Node 26 and pnpm 10.33.2, as in [CI](.github/workflows/ci.yml). Follow the [README quick start](README.md#quick-start) to clone sibling `holodeck-sdk` and `holodeck` directories and build `holodeck-sdk/ts` first. Each React package has its own manifest and pnpm lockfile. Run commands inside the package you are changing.
+Use Node 26.13.0 and pnpm 12.16.1, as in [CI](.github/workflows/ci.yml). Follow the [README quick start](README.md#quick-start) to clone sibling `holodeck-sdk` and `holodeck` directories and build `holodeck-sdk/ts` first. Each React package has its own manifest and pnpm lockfile. Run commands inside the package you are changing.
 
 After SDK changes, rebuild `holodeck-sdk/ts`, then run `pnpm install` in each affected React package to refresh the copied `file:` dependency. Check the resulting lockfile changes into the same PR when needed. For a clean checkout without dependency changes, use `pnpm install --frozen-lockfile`.
 

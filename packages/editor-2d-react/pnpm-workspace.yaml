@@ -1,0 +1,6 @@
+# Package-local pnpm settings (this folder is its own single-package install; the repo
+# root is not a pnpm workspace). pnpm 12 fails an install on any dependency build
+# script that is not approved here (ERR_PNPM_IGNORED_BUILDS). esbuild (vite/vitest/tsup)
+# runs a postinstall that checks its platform binary.
+allowBuilds:
+  esbuild: true

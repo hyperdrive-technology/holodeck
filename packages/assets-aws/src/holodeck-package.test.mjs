@@ -121,7 +121,7 @@ describe('aws package contract', () => {
     expect(manifest.version).toBe(npmPackage.version);
     expect(manifest.requires).toEqual({ 'holodeck.cloud': '^0.1' });
     expect(packageRoles(AWS_PACKAGE_MANIFEST)).toEqual(['library']);
-    expect(npmPackage.engines.node).toBe('>=26');
+    expect(npmPackage.engines.node).toBe('>=26.13.0');
     expect(npmPackage.exports['./holodeck-package'].import).toBe(`./${manifest.entry}`);
     expect(entry).toBe(awsPackage);
     expect(entry.manifest).toEqual(manifest);

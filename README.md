@@ -19,7 +19,7 @@ The CLI is incomplete and excluded from CI: its build entry is missing, its lock
 
 ## Quick start
 
-Use **Node 26** (see [.node-version](.node-version)) and **pnpm 10.33.2**, matching CI. Packages install independently; the repository root is not a pnpm workspace and has no working aggregate build or test command.
+Use **Node 26.13.0** (see [.node-version](.node-version)) and **pnpm 12.16.1**, matching CI (each package pins it in `packageManager`; pnpm 12 fails an install on dependency build scripts not approved in the package's `pnpm-workspace.yaml` `allowBuilds`). Packages install independently; the repository root is not a pnpm workspace and has no working aggregate build or test command.
 
 Clone the SDK and Holodeck into sibling directories named `holodeck-sdk` and `holodeck`. The React packages use `file:../../../holodeck-sdk/ts`; build the SDK before installing a package because pnpm copies its built files at install time.
 

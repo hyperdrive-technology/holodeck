@@ -91,7 +91,7 @@ E2's `logo-cloud-glb` and objects render tests pin how it is drawn.
 
 ## Build and verify
 
-Run from `packages/library-cloud` with Node 26 and pnpm 10.33.2. Build the sibling
+Run from `packages/library-cloud` with Node 26.13.0 and pnpm 12.16.1. Build the sibling
 `holodeck-sdk/ts` first, then install with `pnpm install --frozen-lockfile`.
 
 ```sh
