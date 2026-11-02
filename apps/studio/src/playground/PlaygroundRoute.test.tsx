@@ -23,6 +23,7 @@ import { withRequires } from '../features/use-document-session';
 import { createStudioHost, hostDocumentProblems } from '../host/studio-host';
 import { createStudioRouter } from '../router';
 import { StudioProvider } from '../studio-context';
+import { playgroundStarter } from './playground-state';
 import { createPlaygroundDocument, PLAYGROUND_DOCUMENT_ID } from './starter';
 
 const editor = vi.hoisted(() => ({
@@ -589,6 +590,29 @@ describe('/playground', () => {
       await screen.findByTestId('process-editor');
       expect(editor.props?.scene.objects).toHaveLength(starterCount);
       expect((await store.get(PLAYGROUND_DOCUMENT_ID))?.document.engine).toBe('holodeck.iso');
+    });
+
+    // Review of #241 round 4: revisions restart at 1 for a recreated id, so Reset must name the generation.
+    it('Reset does not overwrite a playground another tab deleted and recreated at the same revision', async () => {
+      await seedForeign();
+      const router = createStudioRouter(createMemoryHistory({ initialEntries: ['/playground'] }));
+      const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+      render(
+        <StudioProvider services={{ host, store, channel, secrets }}>
+          <QueryClientProvider client={client}>
+            <RouterProvider router={router} />
+          </QueryClientProvider>
+        </StudioProvider>,
+      );
+      const foreign = await screen.findByTestId('playground-foreign');
+      // Another tab, without a change notice reaching this one yet: delete, then recreate (revision 1 again).
+      const raw = new DocumentStore(openStudioDb('playground-test'));
+      await raw.remove(PLAYGROUND_DOCUMENT_ID);
+      await raw.create({ ...playgroundStarter(host), name: 'Recreated elsewhere' });
+      expect((await store.get(PLAYGROUND_DOCUMENT_ID))?.revision).toBe(1);
+      fireEvent.click(within(foreign).getByRole('button', { name: /Reset/ }));
+      await screen.findByTestId('process-editor');
+      expect((await store.get(PLAYGROUND_DOCUMENT_ID))?.document.name).toBe('Recreated elsewhere');
     });
 
     it('a deletion in that state rebuilds the starter', async () => {

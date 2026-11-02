@@ -146,7 +146,10 @@ export function PlaygroundRoute({ tab, onTabChange }: PlaygroundRouteProps) {
     if (!opened) return;
     let next: VersionedDocument | undefined;
     try {
-      next = await store.save(playgroundStarter(host), opened.revision);
+      // Name the generation too: revisions restart at 1 when another tab deletes
+      // and recreates the id, so the revision alone would let this overwrite the
+      // new document (review of #241, round 4).
+      next = await store.save(playgroundStarter(host), opened.revision, opened.generation);
     } catch {
       // Changed or deleted meanwhile: show whatever is stored now (or a fresh starter).
       next = await ensurePlaygroundDocument(store, host).catch(() => undefined);
