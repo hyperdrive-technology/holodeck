@@ -455,22 +455,22 @@ packages:
 
   '@holodeck/editor-2.5d-react@file:../../packages/editor-2.5d-react':
     resolution: {directory: ../../packages/editor-2.5d-react, type: directory}
-    engines: {node: '>=26'}
+    engines: {node: '>=26.13.0'}
     peerDependencies:
       react: '>=19.2.0 <19.4'
       react-dom: '>=19.2.0 <19.4'
 
   '@holodeck/library-cloud@file:../../packages/library-cloud':
     resolution: {directory: ../../packages/library-cloud, type: directory}
-    engines: {node: '>=26'}
+    engines: {node: '>=26.13.0'}
 
   '@holodeck/provider-aws@file:../../packages/provider-aws':
     resolution: {directory: ../../packages/provider-aws, type: directory}
-    engines: {node: '>=26'}
+    engines: {node: '>=26.13.0'}
 
   '@holodeck/provider-http@file:../../packages/provider-http':
     resolution: {directory: ../../packages/provider-http, type: directory}
-    engines: {node: '>=26'}
+    engines: {node: '>=26.13.0'}
 
   '@holodeck/sdk@file:../../../holodeck-sdk/ts':
     resolution: {directory: ../../../holodeck-sdk/ts, type: directory}
@@ -941,6 +941,7 @@ packages:
   '@smithy/core@3.36.0':
     resolution: {integrity: sha512-3hJiwG1F5t1SoXqp/yOCmYXziyx7ZVqF63S5W6YU201e/qwVaHPex+E/3vvyY9a3ORq/b+BydeNZpP2saQ9X2g==}
     engines: {node: '>=18.0.0'}
+    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.5.2':
     resolution: {integrity: sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg==}

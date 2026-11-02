@@ -27,7 +27,7 @@ describe('cloud package contract', () => {
     expect(manifest.version).toBe(npmPackage.version);
     expect(packageRoles(CLOUD_PACKAGE_MANIFEST)).toEqual(['theme', 'library']);
     expect(npmPackage.type).toBe('module');
-    expect(npmPackage.engines.node).toBe('>=26');
+    expect(npmPackage.engines.node).toBe('>=26.13.0');
     expect(npmPackage.exports['./holodeck-package'].import).toBe(`./${manifest.entry}`);
     expect(entry).toBe(cloudPackage);
     expect(entry.manifest).toEqual(manifest);
