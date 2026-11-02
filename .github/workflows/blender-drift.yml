@@ -56,7 +56,7 @@ env:
 jobs:
   changes:
     name: Blender-relevant changes
-    runs-on: ubuntu-latest
+    runs-on: boat
     timeout-minutes: 5
     outputs:
       relevant: ${{ steps.scope.outputs.relevant }}
@@ -91,7 +91,7 @@ jobs:
     # Fail closed: skip only when `changes` succeeded and said `false`. If `changes` itself failed
     # its output is empty, so the rebuild runs anyway instead of a skip passing the required check.
     if: ${{ !cancelled() && needs.changes.outputs.relevant != 'false' }}
-    runs-on: ubuntu-latest
+    runs-on: boat
     timeout-minutes: 30
     steps:
       - name: Checkout holodeck
