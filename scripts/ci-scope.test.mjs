@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { decide, parseArgs, SHARED_PATHS } from './ci-scope.mjs';
+import { decide, INERT_PATHS, OWNED_PATHS, parseArgs, SHARED_PATHS } from './ci-scope.mjs';
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'ci-scope.mjs');
 const FLOW = ['^packages/flow-runtime/'];
@@ -49,6 +49,26 @@ test('--no-shared ignores shared inputs but still matches --paths', () => {
   const blender = ['^blender/'];
   assert.equal(decide({ event: 'pull_request', changed: ['.github/workflows/ci.yml', 'scripts/x.mjs'], paths: blender, shared: false }).run, false);
   assert.equal(decide({ event: 'pull_request', changed: ['blender/parts/valve.py'], paths: blender, shared: false }).run, true);
+});
+
+test('unowned root files fail closed: they run every job', () => {
+  for (const file of ['package.json', 'tsconfig.json', 'examples/brewery/scene.json', 'pnpm-workspace.yaml', 'newdir/x.ts', '.github/actions/x/action.yml']) {
+    const d = decide({ event: 'pull_request', changed: ['packages/provider-aws/src/a.ts', file], paths: FLOW });
+    assert.equal(d.run, true, file);
+    assert.match(d.reason, /fail closed/, file);
+  }
+});
+
+test('docs, root Markdown, LICENSE and repo metadata are inert', () => {
+  const changed = ['docs/a/b.md', 'docs/img.png', 'README.md', 'TODO.md', 'LICENSE', '.github/CODEOWNERS', '.github/dependabot.yml', '.github/actionlint.yaml'];
+  assert.equal(decide({ event: 'pull_request', changed, paths: FLOW }).run, false);
+  // Markdown inside a package is that package's file, not inert-everywhere.
+  assert.equal(decide({ event: 'pull_request', changed: ['packages/flow-runtime/README.md'], paths: FLOW }).run, true);
+  assert.equal(OWNED_PATHS.length + INERT_PATHS.length, 7);
+});
+
+test('--no-shared also ignores unowned root files (Blender does not read them)', () => {
+  assert.equal(decide({ event: 'pull_request', changed: ['package.json'], paths: ['^blender/'], shared: false }).run, false);
 });
 
 test('a paired SDK branch runs everything', () => {
@@ -123,4 +143,27 @@ test('CLI: an unknown base fails closed', () => {
   const r = cli(root, ['--event', 'pull_request', '--base', 'deadbeef'.repeat(5), '--paths', FLOW[0]]);
   assert.equal(r.status, 0);
   assert.equal(r.output, 'run=true\n');
+});
+
+test('CLI: non-ASCII and special-character file names still match (git diff -z)', () => {
+  const { root, git, write, base } = repo();
+  write('packages/flow-runtime/src/café "q".ts');
+  git('add', '-A');
+  git('commit', '-qm', 'change');
+  const run = cli(root, ['--event', 'pull_request', '--base', base, '--paths', FLOW[0]]);
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.output, 'run=true\n');
+  assert.match(run.stdout, /café "q"\.ts changed/);
+  const other = cli(root, ['--event', 'pull_request', '--base', base, '--paths', '^packages/provider-aws/']);
+  assert.equal(other.output, 'run=false\n');
+});
+
+test('CLI: the small-packages all-or-none pattern selects on a coupled package', () => {
+  const { root, git, write, base } = repo();
+  write('packages/editor-2.5d-react/src/contract.ts');
+  git('add', '-A');
+  git('commit', '-qm', 'change');
+  const packages = 'flow-runtime provider-http library-cloud provider-aws assets-aws';
+  const pattern = `^packages/(${packages.split(' ').join('|')}|editor-2\\.5d-react)/`;
+  assert.equal(cli(root, ['--event', 'pull_request', '--base', base, '--paths', pattern]).output, 'run=true\n');
 });

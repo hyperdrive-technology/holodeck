@@ -16,8 +16,14 @@
  * everything, and so does a paired SDK branch (an unmerged holodeck-sdk change
  * can affect every package, whatever this repo's diff says).
  *
- * --no-shared: match only --paths, not SHARED_PATHS (the Blender rebuild does not
- * depend on the other workflows or on scripts/).
+ * Also fail closed on unowned files: a changed file that is neither inside one
+ * package/app/blender dir (OWNED_PATHS) nor known-inert (INERT_PATHS: docs,
+ * Markdown, licence) runs everything. Root package.json, tsconfig.json,
+ * examples/, a new top-level dir — whatever we did not classify — can affect
+ * every package, so an unknown file must never be read as "touches nothing".
+ *
+ * --no-shared: match only --paths, not SHARED_PATHS or the unowned-file rule (the
+ * Blender rebuild does not depend on the other workflows, scripts/ or root config).
  *
  * --base is the PR base commit (github.event.pull_request.base.sha). On a
  * pull_request run HEAD is GitHub's merge commit, so `git diff base HEAD` is
@@ -40,6 +46,17 @@ export const SHARED_PATHS = [
   '^scripts/',
 ];
 
+/** Paths that belong to exactly one job's scope (matched by that job's --paths). */
+export const OWNED_PATHS = ['^packages/[^/]+/', '^apps/[^/]+/', '^blender/'];
+
+/** Paths no build or test reads. Anything else outside OWNED_PATHS runs every job. */
+export const INERT_PATHS = [
+  '^docs/',
+  '^[^/]+\\.md$',
+  '^LICENSE$',
+  '^\\.github/(CODEOWNERS|dependabot\\.yml|actionlint\\.yaml)$',
+];
+
 /**
  * @param {{ event: string, sdkRef?: string, changed?: string[] | null, paths: string[], shared?: boolean }} input
  *   changed: file paths changed by the PR, or null when the diff could not be read.
@@ -53,6 +70,11 @@ export function decide({ event, sdkRef = 'main', changed, paths, shared = true }
   const patterns = [...paths, ...(shared ? SHARED_PATHS : [])].map((p) => new RegExp(p));
   const hit = changed.find((file) => patterns.some((re) => re.test(file)));
   if (hit) return { run: true, reason: `${hit} changed` };
+  if (shared) {
+    const known = [...OWNED_PATHS, ...INERT_PATHS].map((p) => new RegExp(p));
+    const unowned = changed.find((file) => !known.some((re) => re.test(file)));
+    if (unowned) return { run: true, reason: `${unowned} is outside every package and not known-inert: run (fail closed)` };
+  }
   return { run: false, reason: `none of the ${changed.length} changed file(s) match ${paths.join(' | ')}: skip` };
 }
 
@@ -84,7 +106,9 @@ function changedFiles(base, cwd) {
     const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
     git('fetch', '--no-tags', '--depth=1', 'origin', base);
     // --no-renames: a file moved out of a path must still list its old path.
-    return git('diff', '--no-renames', '--name-only', base, 'HEAD').split('\n').filter(Boolean);
+    // -z: without it git C-quotes names with non-ASCII/special characters
+    // ("packages/x/caf\303\251.ts"), which then fail the ^packages/ match and skip.
+    return git('diff', '--no-renames', '--name-only', '-z', base, 'HEAD').split('\0').filter(Boolean);
   } catch (error) {
     console.error(`ci-scope: ${error.message}`);
     return null;

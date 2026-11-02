@@ -193,9 +193,13 @@ jobs:
           echo "Using holodeck-sdk ref: $ref"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
-      # Which of the five packages this change can affect (scripts/ci-scope.mjs per
-      # package; shared inputs such as scripts/ or the workflows select all of them).
-      - name: Which packages does this change touch?
+      # All five packages run, or none. They have hidden test-time links that
+      # package.json does not show: assets-aws tests import provider-aws
+      # DEFAULT_PART_HINTS, and library-cloud/assets-aws conformance tests consume the
+      # editor-2.5d-react contracts. Choosing per package skipped those tests, so any
+      # change to one of them or to editor-2.5d-react selects the whole set. Shared
+      # inputs and unowned root files select it too (scripts/ci-scope.mjs).
+      - name: Does this change touch the small packages?
         id: scope
         env:
           EVENT: ${{ github.event_name }}
@@ -206,15 +210,12 @@ jobs:
             echo "no node on the image yet: run all"
             echo "packages=$PACKAGES" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          selected=""
-          for p in $PACKAGES; do
-            out=$(mktemp)
-            GITHUB_OUTPUT="$out" node holodeck/scripts/ci-scope.mjs --cwd holodeck --event "$EVENT" --base "$BASE_SHA" \
-              --sdk-ref "$SDK_REF" --paths "^packages/$p/"
-            grep -qx 'run=true' "$out" && selected="$selected $p"
-          done
-          echo "Selected:${selected:- none}"
-          echo "packages=${selected# }" >> "$GITHUB_OUTPUT"
+          out=$(mktemp)
+          GITHUB_OUTPUT="$out" node holodeck/scripts/ci-scope.mjs --cwd holodeck --event "$EVENT" --base "$BASE_SHA" \
+            --sdk-ref "$SDK_REF" --paths "^packages/(${PACKAGES// /|}|editor-2\.5d-react)/"
+          if grep -qx 'run=true' "$out"; then selected=$PACKAGES; else selected=""; fi
+          echo "Selected: ${selected:-none}"
+          echo "packages=$selected" >> "$GITHUB_OUTPUT"
 
       - name: Checkout holodeck-sdk (${{ steps.sdk.outputs.ref }})
         if: steps.scope.outputs.packages != ''
