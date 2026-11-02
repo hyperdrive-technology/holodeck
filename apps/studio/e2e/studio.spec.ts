@@ -58,6 +58,12 @@ test('create, place, reload, export, import', async ({ page }, testInfo) => {
   await expect(editor(page)).toHaveAttribute('data-object-count', '2');
   await expect(page.getByTestId('inspector-selected-id')).toHaveText('valve-1');
 
+  // Wait for the autosave of the second placement to commit before reloading: a
+  // reload that lands first drops the write, so IndexedDB still has one object
+  // (seen once on CI's slow runner, holodeck#241; 10/10 green locally).
+  await expect(page.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved');
+  await expect(page.getByTestId('canvas')).toHaveAttribute('data-dirty', 'false');
+
   // Reload: the document, its name and both placements come back from IndexedDB.
   const url = page.url();
   await page.reload();
