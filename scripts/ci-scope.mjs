@@ -4,7 +4,7 @@
  * $GITHUB_OUTPUT (or stdout without it) and explains the decision in the log.
  *
  *   node scripts/ci-scope.mjs --event "$EVENT" --base "$BASE_SHA" \
- *     --sdk-ref "$SDK_REF" --paths '^packages/flow-runtime/' [--paths ...]
+ *     --sdk-ref "$SDK_REF" --paths '^packages/flow-runtime/' [--paths ...] [--no-shared]
  *
  * Why step-level and not `on.paths`: the package jobs are required checks on
  * main, and a required check from a path-filtered workflow never reports on PRs
@@ -15,6 +15,9 @@
  * Fail closed: anything other than a pull_request with a readable diff runs
  * everything, and so does a paired SDK branch (an unmerged holodeck-sdk change
  * can affect every package, whatever this repo's diff says).
+ *
+ * --no-shared: match only --paths, not SHARED_PATHS (the Blender rebuild does not
+ * depend on the other workflows or on scripts/).
  *
  * --base is the PR base commit (github.event.pull_request.base.sha). On a
  * pull_request run HEAD is GitHub's merge commit, so `git diff base HEAD` is
@@ -38,25 +41,30 @@ export const SHARED_PATHS = [
 ];
 
 /**
- * @param {{ event: string, sdkRef?: string, changed?: string[] | null, paths: string[] }} input
+ * @param {{ event: string, sdkRef?: string, changed?: string[] | null, paths: string[], shared?: boolean }} input
  *   changed: file paths changed by the PR, or null when the diff could not be read.
  * @returns {{ run: boolean, reason: string }}
  */
-export function decide({ event, sdkRef = 'main', changed, paths }) {
+export function decide({ event, sdkRef = 'main', changed, paths, shared = true }) {
   if (event !== 'pull_request') return { run: true, reason: `${event || 'unknown'} event: always run` };
   if (sdkRef && sdkRef !== 'main') return { run: true, reason: `paired holodeck-sdk ref ${sdkRef}: always run` };
   if (!Array.isArray(changed)) return { run: true, reason: 'could not read the PR diff: run (fail closed)' };
   if (paths.length === 0) return { run: true, reason: 'no paths given: run' };
-  const patterns = [...paths, ...SHARED_PATHS].map((p) => new RegExp(p));
+  const patterns = [...paths, ...(shared ? SHARED_PATHS : [])].map((p) => new RegExp(p));
   const hit = changed.find((file) => patterns.some((re) => re.test(file)));
   if (hit) return { run: true, reason: `${hit} changed` };
   return { run: false, reason: `none of the ${changed.length} changed file(s) match ${paths.join(' | ')}: skip` };
 }
 
-/** Parse `--name value` pairs; `--paths` may repeat. */
+/** Parse `--name value` pairs and the `--no-shared` switch; `--paths` may repeat. */
 export function parseArgs(argv) {
-  const out = { event: '', base: '', sdkRef: 'main', paths: [], cwd: '.' };
+  const out = { event: '', base: '', sdkRef: 'main', paths: [], cwd: '.', shared: true };
   for (let i = 0; i < argv.length; i += 2) {
+    if (argv[i] === '--no-shared') {
+      out.shared = false;
+      i -= 1;
+      continue;
+    }
     const [flag, value] = [argv[i], argv[i + 1]];
     if (value === undefined) throw new Error(`${flag} needs a value`);
     if (flag === '--event') out.event = value;
@@ -86,7 +94,7 @@ function changedFiles(base, cwd) {
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const changed = args.event === 'pull_request' ? changedFiles(args.base, args.cwd) : [];
-  const { run, reason } = decide({ event: args.event, sdkRef: args.sdkRef, changed, paths: args.paths });
+  const { run, reason } = decide({ event: args.event, sdkRef: args.sdkRef, changed, paths: args.paths, shared: args.shared });
   console.log(`ci-scope: run=${run} (${reason})`);
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `run=${run}\n`);
 }

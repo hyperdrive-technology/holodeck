@@ -25,8 +25,8 @@ name: Blender drift
 
 # The "GLBs rebuild from Blender scripts" job is a required check on main (holodeck#209).
 # A required check from a path-filtered workflow never reports on PRs that miss the paths and
-# would block them forever, so the workflow runs on every PR and the `changes` job decides
-# whether the rebuild is needed. A job skipped by `if` counts as passing for required checks.
+# would block them forever, so the workflow runs on every PR and the job's first steps decide
+# whether the rebuild is needed (later steps skipped by `if`; the job still passes).
 
 on:
   pull_request:
@@ -54,44 +54,8 @@ env:
   BLENDER_SHA256: 84098912789dc450e95697c4184fb8a90acbe5111c2ba4aede3fecb57806a168
 
 jobs:
-  changes:
-    name: Blender-relevant changes
-    # A 10-second git diff: the 2-vCPU size is plenty.
-    runs-on: boat-small
-    timeout-minutes: 5
-    outputs:
-      relevant: ${{ steps.scope.outputs.relevant }}
-    steps:
-      - uses: actions/checkout@v4
-      # Push, weekly and manual runs always rebuild. On a PR, rebuild only when the diff
-      # against the base touches the same paths the push trigger lists.
-      - name: Does this change touch Blender inputs?
-        id: scope
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          if [ "$EVENT" != "pull_request" ]; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git fetch --no-tags --depth=1 origin "$BASE_SHA"
-          # --no-renames: a file moved out of a Blender path must still list its old path.
-          changed=$(git diff --no-renames --name-only "$BASE_SHA" HEAD)
-          echo "$changed"
-          if echo "$changed" | grep -Eq '^(blender/|packages/library-cloud/|packages/editor-2\.5d-react/assets/models/|packages/editor-2\.5d-react/scripts/build-parts\.mjs$|packages/editor-2\.5d-react/src/models/|\.github/workflows/blender-drift\.yml$)'; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "relevant=false" >> "$GITHUB_OUTPUT"
-            echo "No Blender inputs changed; the rebuild job is skipped (and counts as passing)."
-          fi
-
   rebuild:
     name: GLBs rebuild from Blender scripts
-    needs: changes
-    # Fail closed: skip only when `changes` succeeded and said `false`. If `changes` itself failed
-    # its output is empty, so the rebuild runs anyway instead of a skip passing the required check.
-    if: ${{ !cancelled() && needs.changes.outputs.relevant != 'false' }}
     runs-on: boat
     timeout-minutes: 30
     steps:
@@ -118,7 +82,27 @@ jobs:
           echo "Using holodeck-sdk ref: $ref"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
+      # Push, weekly and manual runs always rebuild. On a PR, rebuild only when the diff
+      # touches the same paths the push trigger lists (scripts/ci-scope.mjs; --no-shared:
+      # other workflows and scripts/ do not feed the GLBs). Otherwise every later step is
+      # skipped and the job passes. This used to be a separate `changes` job; folding it in
+      # saves a sandbox start and ~15 s of serial wait per PR (boat: 12 starts/minute).
+      # Fails closed: no Node on the image, an unreadable diff or a paired SDK branch => run.
+      - name: Does this change touch Blender inputs?
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          SDK_REF: ${{ steps.sdk.outputs.ref }}
+        run: |
+          if ! command -v node >/dev/null; then echo "no node on the image yet: run"; echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          node holodeck/scripts/ci-scope.mjs --cwd holodeck --event "$EVENT" --base "$BASE_SHA" --sdk-ref "$SDK_REF" --no-shared \
+            --paths '^blender/' --paths '^packages/library-cloud/' --paths '^packages/editor-2\.5d-react/assets/models/' \
+            --paths '^packages/editor-2\.5d-react/scripts/build-parts\.mjs$' --paths '^packages/editor-2\.5d-react/src/models/' \
+            --paths '^\.github/workflows/blender-drift\.yml$' --paths '^scripts/ci-scope\.mjs$'
+
       - name: Checkout holodeck-sdk (${{ steps.sdk.outputs.ref }})
+        if: steps.scope.outputs.run == 'true'
         uses: actions/checkout@v4
         with:
           repository: hyperdrive-technology/holodeck-sdk
@@ -126,10 +110,12 @@ jobs:
           path: holodeck-sdk
 
       - uses: pnpm/action-setup@v4
+        if: steps.scope.outputs.run == 'true'
         with:
           version: 12.16.1
 
       - uses: actions/setup-node@v4
+        if: steps.scope.outputs.run == 'true'
         with:
           node-version-file: holodeck/.node-version
           cache: pnpm
@@ -145,6 +131,7 @@ jobs:
       # place: "cache hit", then "blender: No such file or directory". The `v2` key
       # drops those old entries; the next step still verifies the binary.
       - name: Cache Blender ${{ env.BLENDER_VERSION }}
+        if: steps.scope.outputs.run == 'true'
         id: blender-cache
         uses: actions/cache@v4
         with:
@@ -152,7 +139,7 @@ jobs:
           key: blender-v2-${{ env.BLENDER_VERSION }}-linux-x64-${{ env.BLENDER_SHA256 }}
 
       - name: Download Blender ${{ env.BLENDER_VERSION }}
-        if: steps.blender-cache.outputs.cache-hit != 'true' || hashFiles('.blender/blender') == ''
+        if: steps.scope.outputs.run == 'true' && (steps.blender-cache.outputs.cache-hit != 'true' || hashFiles('.blender/blender') == '')
         run: |
           file="blender-${BLENDER_VERSION}-linux-x64.tar.xz"
           curl -fsSL --retry 5 --retry-all-errors -o "/tmp/$file" \
@@ -165,6 +152,7 @@ jobs:
       # Background mode (-b) renders nothing, but the binary still links the
       # X11/GL client libraries, which the minimal runner image may lack.
       - name: Blender runtime libraries
+        if: steps.scope.outputs.run == 'true'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends \
@@ -173,23 +161,27 @@ jobs:
           echo "HOLODECK_REQUIRE_BLENDER=1" >> "$GITHUB_ENV"
 
       - name: Blender version
+        if: steps.scope.outputs.run == 'true'
         run: |
           "$BLENDER" -b --factory-startup --version | tee /tmp/blender-version
           grep -q "Blender ${BLENDER_VERSION}" /tmp/blender-version
 
       - name: Build holodeck-sdk
+        if: steps.scope.outputs.run == 'true'
         working-directory: holodeck-sdk/ts
         run: |
           pnpm install --frozen-lockfile
           pnpm build
 
       - name: library-cloud rebuild check
+        if: steps.scope.outputs.run == 'true'
         working-directory: holodeck/packages/library-cloud
         run: |
           pnpm install --frozen-lockfile
           pnpm exec vitest run src/cloud-glb.test.ts
 
       - name: editor-2.5d-react rebuild check
+        if: steps.scope.outputs.run == 'true'
         working-directory: holodeck/packages/editor-2.5d-react
         env:
           HOLODECK_SKIP_RENDER_TESTS: '1'

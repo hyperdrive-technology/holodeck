@@ -45,6 +45,12 @@ test('shared inputs run every job', () => {
   assert.equal(SHARED_PATHS.length, 4);
 });
 
+test('--no-shared ignores shared inputs but still matches --paths', () => {
+  const blender = ['^blender/'];
+  assert.equal(decide({ event: 'pull_request', changed: ['.github/workflows/ci.yml', 'scripts/x.mjs'], paths: blender, shared: false }).run, false);
+  assert.equal(decide({ event: 'pull_request', changed: ['blender/parts/valve.py'], paths: blender, shared: false }).run, true);
+});
+
 test('a paired SDK branch runs everything', () => {
   assert.equal(decide({ event: 'pull_request', sdkRef: 'feat/x', changed: ['README.md'], paths: FLOW }).run, true);
   assert.equal(decide({ event: 'pull_request', sdkRef: 'main', changed: ['README.md'], paths: FLOW }).run, false);
@@ -60,8 +66,10 @@ test('no paths means run', () => {
 
 test('parseArgs collects repeated --paths and rejects unknown or valueless flags', () => {
   assert.deepEqual(parseArgs(['--event', 'pull_request', '--base', 'abc', '--paths', 'a', '--paths', 'b']), {
-    event: 'pull_request', base: 'abc', sdkRef: 'main', paths: ['a', 'b'], cwd: '.',
+    event: 'pull_request', base: 'abc', sdkRef: 'main', paths: ['a', 'b'], cwd: '.', shared: true,
   });
+  assert.equal(parseArgs(['--paths', 'a', '--no-shared', '--event', 'push']).shared, false);
+  assert.deepEqual(parseArgs(['--no-shared', '--paths', 'a']).paths, ['a']);
   assert.throws(() => parseArgs(['--nope', 'x']), /unknown flag/);
   assert.throws(() => parseArgs(['--event']), /needs a value/);
 });
