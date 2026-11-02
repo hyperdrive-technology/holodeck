@@ -59,6 +59,17 @@ export class DocumentWriter {
   private bodyError: string | undefined;
   /** Set by `markDeleted`, cleared only by `adopt`: no write may run while set. */
   private deleted = false;
+  /** Sequence number of the latest `rename`; only that rename's commit confirms the name is stored. */
+  private renameSeq = 0;
+  /**
+   * The latest rename is not stored (queued, running, failed, or dropped by a
+   * deletion). Renames leave `dirty` alone, so this is what keeps rename-only
+   * work visible to `hasUnsavedEdits` once `markDeleted` has replaced the
+   * `error` / `saving` status with the deletion conflict (review of #241,
+   * round 5). Cleared by the rename's own commit, by a successful body save
+   * (it stores the whole working copy, name included) and by `adopt`.
+   */
+  private unconfirmedRename = false;
   /** The life of the stored record this copy is based on (DocumentStore generation). */
   private generation: string | undefined;
   private readonly listeners = new Set<() => void>();
@@ -111,7 +122,9 @@ export class DocumentWriter {
 
   /** Rename, applied by the store to the stored document inside its transaction. Leaves `dirty` alone. */
   rename(name: string): Promise<VersionedDocument | undefined> {
-    return this.enqueue((expected, generation) => this.store.rename(this.id, name, expected, generation));
+    this.renameSeq += 1;
+    this.unconfirmedRename = true;
+    return this.enqueue((expected, generation) => this.store.rename(this.id, name, expected, generation), undefined, this.renameSeq);
   }
 
   /**
@@ -130,13 +143,13 @@ export class DocumentWriter {
 
   /**
    * Edits that are not stored and would be lost by leaving: queued or
-   * unsaved writes, a failed save, a conflict. A writer frozen by
-   * `markDeleted` while it had nothing unsaved has none (its document is gone,
-   * there is nothing of the user's to keep), so the leave prompt stays quiet
-   * (holodeck#250).
+   * unsaved writes (a rename counts), a failed save, a conflict. A writer
+   * frozen by `markDeleted` while it had nothing unsaved has none (its
+   * document is gone, there is nothing of the user's to keep), so the leave
+   * prompt stays quiet (holodeck#250).
    */
   hasUnsavedEdits(): boolean {
-    if (this.busy || this.state.dirty) return true;
+    if (this.busy || this.state.dirty || this.unconfirmedRename) return true;
     const { kind } = this.state.status;
     return kind === 'error' || (kind === 'conflict' && !this.deleted);
   }
@@ -154,6 +167,7 @@ export class DocumentWriter {
   adopt(version: VersionedDocument) {
     this.bodyError = undefined;
     this.deleted = false;
+    this.unconfirmedRename = false;
     this.generation = version.generation;
     this.set({ revision: version.revision, status: { kind: 'saved' }, dirty: false });
   }
@@ -181,8 +195,12 @@ export class DocumentWriter {
     write: (expectedRevision: number, expectedGeneration: string | undefined) => Promise<VersionedDocument>,
     /** Set for body saves: the save's sequence number. */
     bodySeq?: number,
+    /** Set for renames: the rename's sequence number. */
+    renameSeq?: number,
   ): Promise<VersionedDocument | undefined> {
     this.queued += 1;
+    // A body save only stores the name of renames issued before it was queued.
+    const renamesBefore = this.renameSeq;
     if (this.state.status.kind !== 'conflict') this.set({ ...this.state, status: { kind: 'saving' } });
     const run = async (): Promise<VersionedDocument | undefined> => {
       try {
@@ -195,6 +213,10 @@ export class DocumentWriter {
         // Only the latest body save persists the whole current working copy.
         const persistedBody = bodySeq !== undefined && bodySeq === this.bodySeq;
         if (persistedBody) this.bodyError = undefined;
+        // The latest rename is stored, or the latest body save stored the whole working copy (name included).
+        if ((persistedBody && renamesBefore === this.renameSeq) || (renameSeq !== undefined && renameSeq === this.renameSeq)) {
+          this.unconfirmedRename = false;
+        }
         if (saved.generation) this.generation = saved.generation;
         this.state = { ...this.state, revision: saved.revision, dirty: this.state.dirty && !persistedBody };
         this.set({ ...this.state, status: this.settledStatus() });

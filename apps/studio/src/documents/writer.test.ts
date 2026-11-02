@@ -318,6 +318,80 @@ describe('DocumentWriter: deleted elsewhere is sticky', () => {
   });
 });
 
+// Review of #241 round 5: renames leave `dirty` alone, so rename-only work must still count after a deletion.
+describe('DocumentWriter: a rename that is not stored when the document is deleted', () => {
+  it('a FAILED rename, then a deletion: the leave prompt still has something to guard; adopt clears it', async () => {
+    const writer = new DocumentWriter(store, 'p', base.revision);
+    vi.spyOn(store, 'rename').mockRejectedValueOnce(new Error('disk full'));
+    await writer.rename('Brewhouse');
+    expect(writer.getState().status.kind).toBe('error');
+    writer.markDeleted();
+    expect(writer.hasUnsavedEdits()).toBe(true);
+    writer.adopt(base);
+    expect(writer.hasUnsavedEdits()).toBe(false);
+  });
+
+  it('a PENDING rename that settles (resolves or rejects) after the deletion is still unsaved', async () => {
+    for (const outcome of ['resolves', 'rejects'] as const) {
+      const writer = new DocumentWriter(store, 'p', base.revision);
+      let settle!: () => void;
+      const rename = vi.spyOn(store, 'rename').mockImplementationOnce(
+        () => new Promise((resolve, reject) => (settle = () => (outcome === 'resolves' ? resolve(base) : reject(new Error('gone'))))),
+      );
+      const renamed = writer.rename('Brewhouse');
+      await vi.waitFor(() => expect(rename).toHaveBeenCalledTimes(1)); // running, not yet settled
+      writer.markDeleted();
+      settle();
+      await renamed;
+      expect(writer.hasUnsavedEdits(), outcome).toBe(true);
+    }
+  });
+
+  it('a rename queued behind a running save and dropped by the deletion is still unsaved', async () => {
+    const writer = new DocumentWriter(store, 'p', base.revision);
+    let release!: () => void;
+    const save = vi.spyOn(store, 'save').mockImplementationOnce(() => new Promise((resolve) => (release = () => resolve(base))));
+    void writer.save(withObject(base.document, 'tank-1'));
+    void writer.rename('Gone');
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1)); // the save is running, the rename queued behind it
+    writer.markDeleted();
+    release();
+    await writer.flush();
+    expect(writer.hasUnsavedEdits()).toBe(true);
+  });
+
+  it('a rename that was stored before the deletion leaves nothing to guard', async () => {
+    const writer = new DocumentWriter(store, 'p', base.revision);
+    await writer.rename('Brewhouse');
+    expect(writer.hasUnsavedEdits()).toBe(false);
+    writer.markDeleted();
+    expect(writer.hasUnsavedEdits()).toBe(false);
+  });
+
+  it('a failed rename is settled by a later successful body save (it stores the name too)', async () => {
+    const writer = new DocumentWriter(store, 'p', base.revision);
+    vi.spyOn(store, 'rename').mockRejectedValueOnce(new Error('disk full'));
+    await writer.rename('Brewhouse');
+    await writer.save({ ...withObject(base.document, 'tank-1'), name: 'Brewhouse' });
+    expect(writer.hasUnsavedEdits()).toBe(false);
+    writer.markDeleted();
+    expect(writer.hasUnsavedEdits()).toBe(false);
+  });
+
+  it('a body save that was queued before a newer rename does not settle that rename', async () => {
+    const writer = new DocumentWriter(store, 'p', base.revision);
+    let release!: () => void;
+    const save = vi.spyOn(store, 'save').mockImplementationOnce(() => new Promise((resolve) => (release = () => resolve({ ...base, revision: base.revision + 1 }))));
+    void writer.save(withObject(base.document, 'tank-1'));
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    void writer.rename('Newer'); // issued while the save runs
+    writer.markDeleted();
+    release();
+    await writer.flush();
+    expect(writer.hasUnsavedEdits()).toBe(true);
+  });
+});
+
 // A deleted id created again restarts at revision 1: a writer holding the old life must not write over the new one.
 describe('DocumentWriter: another life of the same id', () => {
   it('a writer from before a delete + re-create conflicts instead of overwriting, even at the same revision', async () => {
