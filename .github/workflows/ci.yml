@@ -110,7 +110,7 @@ jobs:
           version: 12.16.1
 
       # Node 26.13.0 (repo .node-version; every engines field is >=26.13.0).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.scope.outputs.run == 'true'
         with:
           node-version-file: holodeck/.node-version
@@ -243,7 +243,7 @@ jobs:
         with:
           version: 12.16.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.scope.outputs.packages != ''
         with:
           node-version-file: holodeck/.node-version
@@ -350,7 +350,7 @@ jobs:
         with:
           version: 12.16.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.scope.outputs.run == 'true'
         with:
           node-version-file: holodeck/.node-version
