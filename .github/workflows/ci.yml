@@ -32,7 +32,20 @@ jobs:
         # built anywhere: it has an empty package-lock.json, no src/index.ts (its build
         # entry), and depends on @holodeck/sdk from the npm registry, which is not
         # published. Add it once it is revived.
-        package: [editor-2.5d-react, editor-2d-react, viewer-3d-react]
+        #
+        # scope: the paths whose change can affect the leg (scripts/ci-scope.mjs). It must
+        # list every directory the package's tests read, not just its own:
+        # editor-2.5d-react's models-contract test needs one GLB per blender/parts/*.py
+        # and its logo/objects tests load packages/library-cloud/assets/models. The other
+        # two read only their own package (checked 2026-11-03 with rg for ../../ reads).
+        # scripts/ci-scope.test.mjs parses these patterns and pins the cross-reads.
+        include:
+          - package: editor-2.5d-react
+            scope: '^(packages/(editor-2\.5d-react|library-cloud)|blender)/'
+          - package: editor-2d-react
+            scope: '^packages/editor-2d-react/'
+          - package: viewer-3d-react
+            scope: '^packages/viewer-3d-react/'
     timeout-minutes: 30
     steps:
       # The packages depend on the SDK via `file:../../../holodeck-sdk/ts`, so the
@@ -80,7 +93,7 @@ jobs:
         run: |
           if ! command -v node >/dev/null; then echo "no node on the image yet: run"; echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           node holodeck/scripts/ci-scope.mjs --cwd holodeck --event "$EVENT" --base "$BASE_SHA" --sdk-ref "$SDK_REF" \
-            --paths "^packages/${{ matrix.package }}/"
+            --paths '${{ matrix.scope }}'
 
       - name: Checkout holodeck-sdk (${{ steps.sdk.outputs.ref }})
         if: steps.scope.outputs.run == 'true'

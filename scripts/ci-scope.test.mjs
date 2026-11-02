@@ -167,3 +167,28 @@ test('CLI: the small-packages all-or-none pattern selects on a coupled package',
   const pattern = `^packages/(${packages.split(' ').join('|')}|editor-2\\.5d-react)/`;
   assert.equal(cli(root, ['--event', 'pull_request', '--base', base, '--paths', pattern]).output, 'run=true\n');
 });
+
+// --- The workflow's real scope patterns --------------------------------------
+
+/** `package:` → `scope:` from the ci.yml matrix include list (plain regex parse; no YAML dep). */
+function matrixScopes() {
+  const yml = readFileSync(join(dirname(SCRIPT), '../.github/workflows/ci.yml'), 'utf8');
+  const scopes = {};
+  for (const m of yml.matchAll(/- package: (\S+)\n\s+scope: '([^']+)'/g)) scopes[m[1]] = m[2];
+  return scopes;
+}
+
+test('ci.yml matrix scopes cover every directory each leg reads', () => {
+  const scopes = matrixScopes();
+  assert.deepEqual(Object.keys(scopes).sort(), ['editor-2.5d-react', 'editor-2d-react', 'viewer-3d-react']);
+  const runs = (pkg, file) => decide({ event: 'pull_request', changed: [file], paths: [scopes[pkg]] }).run;
+  // Own package.
+  for (const pkg of Object.keys(scopes)) assert.equal(runs(pkg, `packages/${pkg}/src/a.ts`), true, pkg);
+  // editor-2.5d-react cross-reads: models-contract (blender/parts) and logo/objects (library-cloud GLBs).
+  assert.equal(runs('editor-2.5d-react', 'blender/parts/valve.py'), true);
+  assert.equal(runs('editor-2.5d-react', 'packages/library-cloud/assets/models/billboard.glb'), true);
+  // No accidental widening.
+  assert.equal(runs('editor-2.5d-react', 'packages/provider-aws/src/a.ts'), false);
+  assert.equal(runs('editor-2d-react', 'packages/editor-2.5d-react/src/a.ts'), false);
+  assert.equal(runs('viewer-3d-react', 'blender/parts/valve.py'), false);
+});
