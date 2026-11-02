@@ -59,6 +59,11 @@ test('create, place, reload, export, import', async ({ page }, testInfo) => {
   await expect(page.getByTestId('inspector-selected-id')).toHaveText('valve-1');
 
   // Reload: the document, its name and both placements come back from IndexedDB.
+  // Wait for the debounced autosave to land first: reloading while the second
+  // placement is still unsaved drops it (seen on a 4-vCPU boat.dev runner, where
+  // the reload won the race and the document came back with 1 object).
+  await expect(page.getByTestId('canvas')).toHaveAttribute('data-dirty', 'false');
+  await expect(page.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved');
   const url = page.url();
   await page.reload();
   await expect(page).toHaveURL(url);
