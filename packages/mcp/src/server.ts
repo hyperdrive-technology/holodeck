@@ -38,6 +38,9 @@ import { createIsoDocument, createPlaygroundDocument, serializeDocument, withDoc
 import { DEFAULT_TIER, TIERS, tierAllows, type Tier } from './tiers';
 import { Workspace } from './workspace';
 
+/** Room left for an edit acknowledgement: well under MAX_RESULT_CHARS, so it can never be refused after a save. */
+const MAX_ACK_CHARS = 64 * 1024;
+
 export const HOLODECK_MCP_NAME = 'holodeck';
 export const HOLODECK_MCP_VERSION = '0.1.0';
 
@@ -198,33 +201,42 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
     return chosen;
   };
 
-  /** Load, run `fn` on a SceneEditor, validate and save. One tool call = one write. */
+  /**
+   * Load, run `fn` on a SceneEditor, validate and save. One tool call = one
+   * write. Edits of one document run one at a time (`Workspace.exclusive`), so
+   * two concurrent calls both apply instead of one overwriting the other.
+   */
   const edit = async <R,>(
     path: string | undefined,
     expected: string | undefined,
     fn: (editor: SceneEditor, doc: IsoDoc) => R,
   ): Promise<{ result: R; saved: LoadedDocument; editor: SceneEditor; before: LoadedDocument }> => {
-    const loaded = await context.store.load(pathOf(path));
-    if (expected !== undefined && expected !== loaded.etag) {
-      throw new ToolError(`${loaded.path} changed since you read it (etag ${expected}, now ${loaded.etag})`, ['read it again (scene_get) and redo the edit'], 'conflict');
-    }
-    const editor = new SceneEditor(loaded.document.body, host.registry);
-    const result = fn(editor, loaded.document);
-    if (!editor.changed) throw new ToolError('nothing changed', editor.notices, 'no_change');
-    const saved = await context.store.save(loaded.path, { ...loaded.document, body: editor.scene }, loaded.etag);
-    return { result, saved, editor, before: loaded };
+    const target = pathOf(path);
+    return workspace.exclusive(target, async () => {
+      const loaded = await context.store.load(target);
+      if (expected !== undefined && expected !== loaded.etag) {
+        throw new ToolError(`${loaded.path} changed since you read it (etag ${expected}, now ${loaded.etag})`, ['read it again (scene_get) and redo the edit'], 'conflict');
+      }
+      const editor = new SceneEditor(loaded.document.body, host.registry);
+      const result = fn(editor, loaded.document);
+      if (!editor.changed) throw new ToolError('nothing changed', editor.notices, 'no_change');
+      const saved = await context.store.save(loaded.path, { ...loaded.document, body: editor.scene }, loaded.etag);
+      return { result, saved, editor, before: loaded };
+    });
   };
 
+  /**
+   * The acknowledgement of a saved edit. It must never fail after the write
+   * (holodeck#263 review: a too_large error for a committed edit invites a
+   * duplicate retry), so when the objects' details would not fit, only their
+   * ids are returned.
+   */
   const editResult = (saved: LoadedDocument, editor: SceneEditor, ids: readonly string[], extra: Record<string, unknown> = {}) => {
     const byId = new Map(saved.document.body.objects.map((o) => [o.id, o]));
-    return {
-      path: saved.path,
-      etag: saved.etag,
-      objectCount: saved.document.body.objects.length,
-      ...extra,
-      objects: ids.flatMap((id) => (byId.has(id) ? [objectSummary(byId.get(id)!)] : [])),
-      notices: editor.notices,
-    };
+    const base = { path: saved.path, etag: saved.etag, objectCount: saved.document.body.objects.length, ...extra, notices: editor.notices.map((n) => n.slice(0, 500)) };
+    const full = { ...base, objects: ids.flatMap((id) => (byId.has(id) ? [objectSummary(byId.get(id)!)] : [])) };
+    if (JSON.stringify(full, null, 2).length <= MAX_ACK_CHARS) return full;
+    return { ...base, objectIds: ids.slice(0, MAX_IDS_PER_CALL), objectsOmitted: 'saved; the details are too large to return here: scene_get with objectIds reads them' };
   };
 
   // --- Info -----------------------------------------------------------------
@@ -392,7 +404,7 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
       let doc: IsoDoc = args.template === 'starter' ? withDocumentId(createPlaygroundDocument(), id) : createIsoDocument(args.name, id);
       if (args.name !== undefined) doc = withDocumentName(doc, args.name.trim() || doc.name);
       // `undefined` = replace whatever is there; `null` = the file must not exist.
-      const saved = await context.store.save(args.path, doc, args.overwrite ? undefined : null);
+      const saved = await workspace.exclusive(args.path, () => context.store.save(args.path, doc, args.overwrite ? undefined : null));
       context.current = saved.path;
       return documentSummary(saved);
     },

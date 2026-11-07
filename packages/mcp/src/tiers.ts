@@ -4,7 +4,9 @@
  *
  *   read    library and scene inspection; nothing is written
  *   author  also creates and edits `.holodeck.json` documents under the workspace root
- *   exec    also runs local programs (Blender part builds); needs HOLODECK_MCP_ALLOW_BLENDER=1 as well
+ *   exec    reserved for tools that run local programs (Blender part builds, a later
+ *           group). No tool needs it yet; those tools will also require
+ *           HOLODECK_MCP_ALLOW_BLENDER=1.
  *
  * A tool above the server's tier stays listed (so an agent can see what
  * exists) but refuses with a message that names the tier it needs.

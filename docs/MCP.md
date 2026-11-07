@@ -46,7 +46,7 @@ SwiftShader WebGPU.
 |---|---|
 | `read` | library and scene inspection |
 | `author` (default) | creating and editing documents under the root |
-| `exec` | running local programs: Blender part builds (also needs `HOLODECK_MCP_ALLOW_BLENDER=1`) |
+| `exec` | reserved for group 4 (Blender part builds, which will also need `HOLODECK_MCP_ALLOW_BLENDER=1`); no tool uses it yet |
 
 ## Status
 
