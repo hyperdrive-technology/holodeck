@@ -113,7 +113,7 @@ jobs:
           path: holodeck-sdk
 
       # pnpm 12 (every package pins it in packageManager; lockfiles are pnpm 12 format).
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: steps.scope.outputs.run == 'true'
         with:
           version: 12.16.1
@@ -248,7 +248,7 @@ jobs:
           ref: ${{ steps.sdk.outputs.ref }}
           path: holodeck-sdk
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: steps.scope.outputs.packages != ''
         with:
           version: 12.16.1
@@ -360,7 +360,7 @@ jobs:
           ref: ${{ steps.sdk.outputs.ref }}
           path: holodeck-sdk
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: steps.scope.outputs.run == 'true'
         with:
           version: 12.16.1
