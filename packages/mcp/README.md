@@ -33,6 +33,8 @@ To register it for a client (`.mcp.json`, project scope):
 |---|---|---|
 | `HOLODECK_MCP_ROOT` | current directory | The only folder documents are read from or written to |
 | `HOLODECK_MCP_TIER` | `author` | `read`, `author` or `exec` (see below). Any other value fails at startup |
+| `HOLODECK_CHROMIUM` | macOS Chrome, then Playwright's Chromium | Browser for `scene_render` |
+| `HOLODECK_STUDIO_DIST` | `apps/studio/dist` next to this package | Studio build that `scene_render` serves (`cd apps/studio && pnpm build`) |
 
 ## Tools
 
@@ -46,6 +48,7 @@ To register it for a client (`.mcp.json`, project scope):
 | `scene_get` | read | Summary or full JSON, optionally only some objects; returns the `etag` |
 | `scene_validate` | read | Studio import checks on a file or a JSON value |
 | `scene_export` | read (author to write `out`) | Validated document JSON or the components CSV |
+| `scene_render` | read (author to write `out`) | PNG of the document as the studio draws it (headless Chromium + WebGPU), returned as image content |
 | `scene_new` | author | Empty document or the playground starter (bound `holodeck.sim` connection) |
 | `scene_add_object` | author | Place a part (palette defaults; inline parts attach to pipes); run parts from `x,y` to `to` |
 | `scene_update_params` | author | Params (`null` = back to default) and placement fields (`fillColor`, `opacity`, `meta`...) |
@@ -81,6 +84,23 @@ tier it needs.
   to 256k characters (narrow the request with `objectIds`, `view: "summary"`,
   `limit`); every input string and list is bounded by its schema
   (`src/limits.ts`).
+
+## Rendering
+
+`scene_render` serves the built studio on a loopback-only port and opens its
+`/render` route in headless Chromium. The route takes the document from a
+global the server injects before load, never from a URL or a message. The
+server waits for the engine's `data-render-state` and screenshots the
+viewport. These cases are errors with a reason, never a blank PNG:
+
+- no WebGPU (`unsupported`)
+- the studio refuses the document
+- a timeout
+- a capture of one flat colour
+
+One browser starts on first use. Renders run one at a time. The browser
+closes after 2 idle minutes, when the client disconnects, or on SIGINT /
+SIGTERM.
 
 Design notes, the playground bridge and the Blender flow: [`docs/MCP.md`](../../docs/MCP.md).
 

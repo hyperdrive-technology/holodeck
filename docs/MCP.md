@@ -24,6 +24,22 @@ configuration, guarantees.
   documents are read or written (and `.components.csv` exports). Writes are
   atomic and guarded by etags.
 
+## Rendering
+
+`scene_render` (`src/render.ts`) drives the studio's production build, so
+the picture is exactly the studio's:
+
+1. A loopback static server serves `apps/studio/dist`.
+2. Chromium (`playwright-core`, with the studio e2e's WebGPU flags) opens
+   `/render`. That route (`apps/studio/src/render/`) reads one document from
+   `window.__HOLODECK_RENDER__`, validates it as an import, and draws it in run
+   mode with no chrome.
+3. The capture waits on `data-render-state`.
+
+`unsupported`, invalid input, a timeout and a flat image are all errors. CI
+runs the real-build test in the studio job, after the studio build, on
+SwiftShader WebGPU.
+
 ## Tiers
 
 | Tier | Allows |
@@ -37,7 +53,7 @@ configuration, guarantees.
 | Group | Tools | State |
 |---|---|---|
 | 1. Library + scenes | `parts_*`, `scene_*`, `holodeck_info` | done |
-| 2. Headless render | `scene_render` | next |
+| 2. Headless render | `scene_render` | done |
 | 3. Playground bridge | `playground_*`, `provider_*` | planned |
 | 4. Blender Phase 1 | `blender_*`, `part_validate`, `part_install` | planned |
 

@@ -8,6 +8,8 @@
  *   /playground      PlaygroundRoute: one persistent document, Edit / Viewer
  *                    tabs (`?tab=edit|viewer`), no document list or welcome
  *   /embed/$docId    EmbedRoute: read-only live view for iframes, no studio chrome
+ *   /render          RenderRoute: one injected document drawn once, for headless
+ *                    capture (@holodeck/mcp scene_render); never touches the store
  */
 
 import { createRootRoute, createRoute, createRouter, Outlet, type RouterHistory } from '@tanstack/react-router';
@@ -18,6 +20,7 @@ import { FrameGuard } from './features/FrameGuard';
 import { Welcome } from './features/Welcome';
 import { parsePlaygroundSearch, type PlaygroundTab } from './playground/playground-state';
 import { PlaygroundRoute } from './playground/PlaygroundRoute';
+import { RenderRoute } from './render/RenderRoute';
 
 const rootRoute = createRootRoute({ component: Outlet });
 
@@ -78,7 +81,19 @@ const embedRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([shellRoute.addChildren([indexRoute, documentRoute]), playgroundRoute, embedRoute]);
+const renderRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/render',
+  component: function RenderPage() {
+    return (
+      <FrameGuard>
+        <RenderRoute />
+      </FrameGuard>
+    );
+  },
+});
+
+const routeTree = rootRoute.addChildren([shellRoute.addChildren([indexRoute, documentRoute]), playgroundRoute, embedRoute, renderRoute]);
 
 export function createStudioRouter(history?: RouterHistory) {
   return createRouter({ routeTree, history, defaultPreload: false });

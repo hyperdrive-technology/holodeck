@@ -26,11 +26,11 @@ import { MAX_DOCUMENT_BYTES, MAX_PATH_LENGTH } from './limits';
 
 export const DOCUMENT_SUFFIX = '.holodeck.json';
 /** Files `scene_export` may write besides documents. */
-export const EXPORT_SUFFIXES = ['.components.csv'] as const;
+export const EXPORT_SUFFIXES = ['.components.csv', '.png'] as const;
 export type FileSuffix = typeof DOCUMENT_SUFFIX | (typeof EXPORT_SUFFIXES)[number];
 
 /** Short content hash a caller passes back to edit only the version it read (optimistic concurrency). */
-export function etagOf(text: string): string {
+export function etagOf(text: string | Uint8Array): string {
   return createHash('sha256').update(text).digest('hex').slice(0, 16);
 }
 
@@ -161,8 +161,9 @@ export class Workspace {
     try {
       const { size } = await handle.stat();
       if (size > MAX_DOCUMENT_BYTES) throw new ToolError(`${rel} is larger than ${MAX_DOCUMENT_BYTES / 1024 / 1024} MB`, [], 'too_large');
-      const text = await handle.readFile('utf8');
-      return { path: rel, text, etag: etagOf(text) };
+      // The etag hashes the bytes, so it is the same for text and binary files.
+      const bytes = await handle.readFile();
+      return { path: rel, text: bytes.toString('utf8'), etag: etagOf(bytes) };
     } finally {
       await handle.close();
     }
@@ -173,18 +174,24 @@ export class Workspace {
    * was based on (`null` = the file must not exist yet; `undefined` = no check).
    */
   async write(path: string, text: string, expect?: string | null, suffix: FileSuffix = DOCUMENT_SUFFIX): Promise<DocumentFile> {
+    const { path: rel, etag } = await this.writeData(path, text, expect, suffix);
+    return { path: rel, text, etag };
+  }
+
+  /** `write` for any bytes (PNG renders). */
+  async writeData(path: string, data: string | Uint8Array, expect?: string | null, suffix: FileSuffix = DOCUMENT_SUFFIX): Promise<{ path: string; etag: string }> {
     const { abs } = this.lexical(path, suffix);
     // Keyed by the real folder + name, so two spellings of one file share the lock.
     const key = await realpath(dirname(abs)).then(
       (dir) => join(dir, basename(abs)),
       () => abs,
     );
-    return serialised(this.writeLocks, key, () => this.writeNow(path, text, expect, suffix));
+    return serialised(this.writeLocks, key, () => this.writeNow(path, data, expect, suffix));
   }
 
-  private async writeNow(path: string, text: string, expect: string | null | undefined, suffix: FileSuffix): Promise<DocumentFile> {
+  private async writeNow(path: string, data: string | Uint8Array, expect: string | null | undefined, suffix: FileSuffix): Promise<{ path: string; etag: string }> {
     const { abs, rel, exists } = await this.resolveReal(path, suffix);
-    if (Buffer.byteLength(text, 'utf8') > MAX_DOCUMENT_BYTES) throw new ToolError(`the document would be larger than ${MAX_DOCUMENT_BYTES / 1024 / 1024} MB`, [], 'too_large');
+    if ((typeof data === 'string' ? Buffer.byteLength(data, 'utf8') : data.byteLength) > MAX_DOCUMENT_BYTES) throw new ToolError(`the document would be larger than ${MAX_DOCUMENT_BYTES / 1024 / 1024} MB`, [], 'too_large');
     const existsError = () => new ToolError(`${rel} already exists`, ['pass overwrite: true to replace it'], 'conflict');
     if (expect === null && exists) throw existsError();
     if (typeof expect === 'string') {
@@ -201,7 +208,7 @@ export class Workspace {
     try {
       const handle = await open(tmp, 'wx', 0o644);
       try {
-        await handle.writeFile(text, 'utf8');
+        await handle.writeFile(data);
         await handle.sync();
       } finally {
         await handle.close();
@@ -222,7 +229,7 @@ export class Workspace {
       await rm(tmp, { force: true });
       throw error;
     }
-    return { path: rel, text, etag: etagOf(text) };
+    return { path: rel, etag: etagOf(data) };
   }
 
   /** Every `*.holodeck.json` under the root (skipping dot folders and node_modules), at most `limit`. */

@@ -22,3 +22,10 @@ export function errorResult(error: unknown): CallToolResult {
   const text = problems.length ? `${message}\n${problems.map((p) => `- ${p}`).join('\n')}` : message;
   return { isError: true, content: [{ type: 'text', text }], structuredContent: { error: { code, message, problems } } };
 }
+
+/** An image plus its metadata (as JSON text and `structuredContent`). */
+export function imageResult(png: Uint8Array, payload: Record<string, unknown>): CallToolResult {
+  const meta = okResult(payload);
+  if (meta.isError) return meta;
+  return { content: [{ type: 'image', data: Buffer.from(png).toString('base64'), mimeType: 'image/png' }, ...meta.content], structuredContent: payload };
+}

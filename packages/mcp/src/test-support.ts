@@ -10,6 +10,7 @@ import type { HolodeckHost } from '@holodeck/sdk';
 import { createMcpHost } from './host';
 import { createHolodeckMcpServer, type HolodeckMcp } from './server';
 import type { Tier } from './tiers';
+import type { SceneRenderer } from './render';
 
 let sharedHost: Promise<HolodeckHost> | null = null;
 /** Installing every package takes a moment; tests share one host (it is never mutated by tools). */
@@ -39,10 +40,10 @@ export interface CallResult {
   data: Record<string, unknown> & { error?: { code: string; message: string; problems: string[] } };
 }
 
-export async function harness(opts: { tier?: Tier; dir?: string } = {}): Promise<Harness> {
+export async function harness(opts: { tier?: Tier; dir?: string; renderer?: SceneRenderer } = {}): Promise<Harness> {
   const temp = opts.dir ? null : await tempDir();
   const dir = opts.dir ?? temp!.dir;
-  const mcp = await createHolodeckMcpServer({ root: dir, tier: opts.tier, host: await testHost(), now: () => FIXED_NOW });
+  const mcp = await createHolodeckMcpServer({ root: dir, tier: opts.tier, host: await testHost(), now: () => FIXED_NOW, renderer: opts.renderer });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'test', version: '0.0.0' });
   await Promise.all([mcp.server.connect(serverTransport), client.connect(clientTransport)]);
@@ -58,7 +59,7 @@ export async function harness(opts: { tier?: Tier; dir?: string } = {}): Promise
     call,
     close: async () => {
       await client.close();
-      await mcp.server.close();
+      await mcp.close();
       await temp?.cleanup();
     },
   };
