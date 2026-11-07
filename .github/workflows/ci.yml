@@ -401,6 +401,14 @@ jobs:
             (cd holodeck/packages/$p && pnpm install --frozen-lockfile && pnpm build)
           done
 
+      # Install, type check, unit tests (InMemoryTransport clients), build, smoke-dist.
+      - name: MCP server (packages/mcp)
+        if: steps.scope.outputs.run == 'true'
+        working-directory: holodeck
+        env:
+          HOLODECK_SKIP_RENDER_TESTS: '1'
+        run: scripts/ci-package.sh mcp
+
       - name: Install
         if: steps.scope.outputs.run == 'true'
         working-directory: holodeck/apps/studio
