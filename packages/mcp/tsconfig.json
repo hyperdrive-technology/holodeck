@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"],
+    /*
+     * src/studio.ts bundles a few PURE modules of apps/studio (document checks,
+     * credential rules, library model, starter scene) so documents are
+     * validated exactly as the studio validates them. Those files resolve bare
+     * imports from their own folder (apps/studio/node_modules), which need not
+     * be installed: map every package they import to this package's copy.
+     * vitest.config.ts carries the same map; tsup leaves them external.
+     */
+    "paths": {
+      "@holodeck/sdk": ["./node_modules/@holodeck/sdk"],
+      "@holodeck/editor-2.5d-react": ["./node_modules/@holodeck/editor-2.5d-react"],
+      "@holodeck/provider-http": ["./node_modules/@holodeck/provider-http"],
+      "@holodeck/provider-aws": ["./node_modules/@holodeck/provider-aws"]
+    }
+  },
+  "include": ["src", "e2e", "vitest.config.ts", "tsup.config.ts"]
+}

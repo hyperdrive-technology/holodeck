@@ -9,7 +9,7 @@
 
 import { validateHolodeckDocument, type HolodeckDocument, type HolodeckHost } from '@holodeck/sdk';
 import { IsoDocumentError, loadIsoDocument } from '@holodeck/editor-2.5d-react';
-import { checkHostDocument } from '../host/studio-host';
+import { checkHostDocument } from '../host/document-checks';
 import { isEnvelope, metadataProblems } from './document-ops';
 
 /** Larger files are refused before parsing; a document this size is almost certainly not one. */

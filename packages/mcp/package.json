@@ -1,0 +1,63 @@
+{
+  "name": "@holodeck/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP server for Holodeck: browse the part library and build scenes (holodeck.document.v1) through the real document schema and host validation",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "holodeck-mcp": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "type-check": "tsc --noEmit",
+    "test": "vitest",
+    "start": "node dist/cli.js"
+  },
+  "keywords": [
+    "holodeck",
+    "mcp",
+    "model-context-protocol",
+    "agents"
+  ],
+  "author": "Hyperdrive Technology",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hyperdrive-technology/holodeck.git",
+    "directory": "packages/mcp"
+  },
+  "dependencies": {
+    "@holodeck/editor-2.5d-react": "file:../editor-2.5d-react",
+    "@holodeck/library-cloud": "file:../library-cloud",
+    "@holodeck/provider-aws": "file:../provider-aws",
+    "@holodeck/provider-http": "file:../provider-http",
+    "@holodeck/sdk": "file:../../../holodeck-sdk/ts",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.0",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": ">=26.13.0"
+  },
+  "packageManager": "pnpm@12.16.1"
+}

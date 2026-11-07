@@ -13,6 +13,19 @@ export type { ProcessEditorChrome, ProcessEditorHandle, ProcessEditorProps } fro
 // Host helpers (holodeck#100) and the editing model (lane E3, holodeck#37).
 export { nextId as nextPlacementId, stampPlacement, DEFAULT_LAYER_ID, DEFAULT_LAYER_NAME } from './editor/editor-state';
 export type { EditorAction, LinkEndName } from './editor/editor-state';
+// Headless editing: the reducer the canvas runs, for hosts that edit a scene
+// without React (`@holodeck/mcp`, packages/mcp). Same actions, same rules, same undo model.
+export {
+  committedScene,
+  createEditorState,
+  editorReducer,
+  emptyScene,
+  selectedObject,
+  EDIT_REJECTED_PREFIX,
+  NO_ROUTE_NOTICE,
+  PASTE_REJECTED_PREFIX,
+  ROUTE_FAILED_NOTICE,
+} from './editor/editor-state';
 export { CAMERA_CHANGE_DEBOUNCE_MS } from './editor/camera';
 export type { EditorCamera } from './editor/camera';
 export { expandGroups, isPlacementEditable, isPlacementHidden, layerIdOf, sceneLayers, visibleObjects } from './editor/layers';
