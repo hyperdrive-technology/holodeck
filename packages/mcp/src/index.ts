@@ -11,3 +11,5 @@ export type { Tier } from './tiers';
 export { ToolError } from './errors';
 export { DOCUMENT_SUFFIX, Workspace, etagOf } from './workspace';
 export * from './limits';
+export { SceneRenderer, findChromium, serveStatic, isUniform, RENDER_ARGS } from './render';
+export type { RendererOptions } from './render';

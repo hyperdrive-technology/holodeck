@@ -41,6 +41,7 @@ describe('tool surface', () => {
         'scene_new',
         'scene_open',
         'scene_remove',
+        'scene_render',
         'scene_update_params',
         'scene_validate',
       ].sort(),

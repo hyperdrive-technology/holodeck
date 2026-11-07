@@ -31,7 +31,8 @@ import {
   MAX_TEXT_LENGTH,
 } from './limits';
 import { listParts, partDetail } from './parts';
-import { errorResult, okResult } from './result';
+import { errorResult, imageResult, okResult } from './result';
+import { MAX_SIDE, MIN_SIDE, SceneRenderer } from './render';
 import { SceneEditor } from './scene-editor';
 import { createIsoDocument, createPlaygroundDocument, serializeDocument, withDocumentId, withDocumentName } from './studio';
 import { DEFAULT_TIER, TIERS, tierAllows, type Tier } from './tiers';
@@ -48,6 +49,8 @@ export interface HolodeckMcpOptions {
   host?: HolodeckHost;
   /** Clock for `metadata.updated`. */
   now?: () => Date;
+  /** Headless renderer for `scene_render` (default: the built studio in Chromium, started on first use). */
+  renderer?: SceneRenderer;
 }
 
 /** What the tools share. `current` is the document `scene_open` selected. */
@@ -56,12 +59,15 @@ export interface ServerContext {
   host: HolodeckHost;
   workspace: Workspace;
   store: DocumentStore;
+  renderer: SceneRenderer;
   current: string | null;
 }
 
 export interface HolodeckMcp {
   server: McpServer;
   context: ServerContext;
+  /** Close the server and everything it started (the render browser). */
+  close: () => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +148,7 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
     host,
     workspace,
     store: new DocumentStore(workspace, host, options.now),
+    renderer: options.renderer ?? new SceneRenderer(),
     current: null,
   };
   const server = new McpServer(
@@ -156,11 +163,15 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
     },
   );
 
-  /** Register one tool: tier check, then the handler; a ToolError becomes an agent-readable error result. */
+  /**
+   * Register one tool: tier check, then the handler; a ToolError becomes an
+   * agent-readable error result. A handler returns a JSON payload, or a
+   * finished CallToolResult (`raw`, e.g. an image).
+   */
   const tool = <Shape extends ZodRawShape>(
     toolName: string,
     spec: { title: string; description: string; tier: Tier; input: Shape; annotations: ToolAnnotations },
-    handler: (args: z.infer<z.ZodObject<Shape>>) => Promise<Record<string, unknown>>,
+    handler: (args: z.infer<z.ZodObject<Shape>>) => Promise<Record<string, unknown> | { raw: CallToolResult }>,
   ) => {
     server.registerTool(
       toolName,
@@ -172,7 +183,8 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
           );
         }
         try {
-          return okResult(await handler(args));
+          const out = await handler(args);
+          return 'raw' in out && typeof out.raw === 'object' && out.raw !== null && 'content' in out.raw ? (out.raw as CallToolResult) : okResult(out as Record<string, unknown>);
         } catch (error) {
           return errorResult(error);
         }
@@ -552,5 +564,40 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
     },
   );
 
-  return { server, context };
+  tool(
+    'scene_render',
+    {
+      title: 'Render a document',
+      description:
+        'A PNG of the document as the studio draws it (run mode, scene fitted, params as stored; no live data), captured in headless Chromium with WebGPU. No WebGPU, a refused document, a timeout or a flat image is an explicit error, never a blank picture. Optionally also writes the PNG to `out` (.png, needs tier author). Needs the studio build (apps/studio: pnpm build).',
+      tier: 'read',
+      input: {
+        path: optionalPath,
+        width: z.number().int().min(MIN_SIDE).max(MAX_SIDE).default(1280),
+        height: z.number().int().min(MIN_SIDE).max(MAX_SIDE).default(800),
+        out: z.string().min(1).max(MAX_PATH_LENGTH).optional(),
+        overwrite: z.boolean().default(false),
+      },
+      annotations: READ,
+    },
+    async (args) => {
+      if (args.out !== undefined && !tierAllows(context.tier, 'author')) {
+        throw new ToolError(`writing a render needs tier "author"; this server runs at "${context.tier}"`, [], 'tier');
+      }
+      if (args.out !== undefined) workspace.lexical(args.out, '.png');
+      const loaded = await context.store.load(pathOf(args.path));
+      const png = await context.renderer.render(loaded.document, { width: args.width, height: args.height });
+      const meta: Record<string, unknown> = { path: loaded.path, etag: loaded.etag, width: args.width, height: args.height, bytes: png.byteLength };
+      if (args.out !== undefined) meta.out = (await workspace.writeData(args.out, png, args.overwrite ? undefined : null, '.png')).path;
+      return { raw: imageResult(png, meta) };
+    },
+  );
+
+  // Close the render browser with the server (transport closed, client gone).
+  server.server.onclose = () => void context.renderer.close();
+  const close = async () => {
+    await server.close();
+    await context.renderer.close();
+  };
+  return { server, context, close };
 }

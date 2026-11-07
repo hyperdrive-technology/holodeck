@@ -15,7 +15,12 @@ import { tierFromEnv } from './tiers';
 async function main(): Promise<void> {
   const root = process.env.HOLODECK_MCP_ROOT?.trim() || process.cwd();
   const tier = tierFromEnv(process.env);
-  const { server, context } = await createHolodeckMcpServer({ root, tier });
+  const { server, context, close } = await createHolodeckMcpServer({ root, tier });
+  // Never leave a render browser behind: close everything on stdin EOF or a signal.
+  const shutdown = () => void close().finally(() => process.exit(0));
+  process.stdin.on('end', shutdown);
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
   await server.connect(new StdioServerTransport());
   process.stderr.write(`holodeck-mcp ${HOLODECK_MCP_VERSION}: root ${context.workspace.root}, tier ${tier}\n`);
 }

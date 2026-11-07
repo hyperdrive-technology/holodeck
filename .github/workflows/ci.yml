@@ -401,14 +401,6 @@ jobs:
             (cd holodeck/packages/$p && pnpm install --frozen-lockfile && pnpm build)
           done
 
-      # Install, type check, unit tests (InMemoryTransport clients), build, smoke-dist.
-      - name: MCP server (packages/mcp)
-        if: steps.scope.outputs.run == 'true'
-        working-directory: holodeck
-        env:
-          HOLODECK_SKIP_RENDER_TESTS: '1'
-        run: scripts/ci-package.sh mcp
-
       - name: Install
         if: steps.scope.outputs.run == 'true'
         working-directory: holodeck/apps/studio
@@ -435,6 +427,15 @@ jobs:
           chrome=$(command -v google-chrome || command -v google-chrome-stable)
           "$chrome" --version
           echo "HOLODECK_CHROMIUM=$chrome" >> "$GITHUB_ENV"
+
+      # Install, type check, unit tests (InMemoryTransport clients), build, smoke-dist.
+      # After the studio build and the Chrome step: scene_render's tests drive the real
+      # apps/studio/dist in HOLODECK_CHROMIUM with SwiftShader WebGPU (a missing adapter
+      # fails on CI instead of skipping, as in the studio's webgpu e2e).
+      - name: MCP server (packages/mcp)
+        if: steps.scope.outputs.run == 'true'
+        working-directory: holodeck
+        run: scripts/ci-package.sh mcp
 
       - name: E2E (Playwright over the production build)
         if: steps.scope.outputs.run == 'true'
