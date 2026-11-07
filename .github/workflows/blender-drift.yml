@@ -114,7 +114,7 @@ jobs:
         with:
           version: 12.16.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.scope.outputs.run == 'true'
         with:
           node-version-file: holodeck/.node-version
