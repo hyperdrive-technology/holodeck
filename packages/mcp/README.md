@@ -64,8 +64,13 @@ tier it needs.
   hidden segments and `node_modules`. It also refuses symlinks (file or folder)
   that resolve outside the root. Writes are atomic: a temp file, then a rename.
 - **Concurrency**: each result carries an `etag`. If you pass it back, the
-  edit is refused when the file changed in the meantime. Every save also
-  checks that the file is still the version the edit loaded.
+  edit is refused when the file changed in the meantime. Edits of one
+  document run one at a time in the server, so concurrent calls all apply. A
+  save re-checks the version under a per-file lock. A new file is created
+  with no-clobber semantics, so it never replaces one that appeared
+  meanwhile.
+- **Acknowledgements never fail after a write**: if an edit's details are
+  too large to return, you get the ids, and `scene_get` reads the rest.
 - **Validation**: the studio's own checks, bundled from `apps/studio/src`
   (`src/studio.ts`): envelope, engine, `requires`, body against the installed
   parts, bindings, and the credential rules (no secrets in connection configs,

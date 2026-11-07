@@ -351,6 +351,25 @@ describe('editing', () => {
     expect((await objectsOf('a.holodeck.json')).find((o) => o.id === 'tank-1')!.bindings).toBeUndefined();
   });
 
+  it('concurrent edits of one document all apply (none lost)', async () => {
+    await newDoc();
+    const results = await Promise.all([0, 4, 8, 12, 16].map((x) => h.call('scene_add_object', { part: 'tank', x, y: 0 })));
+    for (const r of results) expect(r.isError, r.text).toBe(false);
+    expect((await objectsOf('a.holodeck.json')).map((o) => o.id).sort()).toEqual(['tank-1', 'tank-2', 'tank-3', 'tank-4', 'tank-5']);
+  });
+
+  it('a saved edit is acknowledged even when its details are too large to return', async () => {
+    await newDoc();
+    const params = Object.fromEntries(Array.from({ length: 64 }, (_, i) => [`note${i}`, 'x'.repeat(4000)]));
+    const r = await h.call('scene_add_object', { part: 'tank', x: 0, y: 0, params });
+    expect(r.isError, r.text.slice(0, 300)).toBe(false);
+    expect(r.data.added).toEqual(['tank-1']);
+    expect(r.data.objectIds).toEqual(['tank-1']);
+    expect(r.data.objectsOmitted).toContain('scene_get');
+    expect(r.text.length).toBeLessThan(MAX_RESULT_CHARS);
+    expect((await objectsOf('a.holodeck.json')).length).toBe(1);
+  });
+
   it('an etag from an older read is a conflict; the current one edits', async () => {
     const created = await newDoc();
     await h.call('scene_add_object', { part: 'tank', x: 0, y: 0 });

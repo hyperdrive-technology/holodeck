@@ -130,6 +130,50 @@ describe('Workspace reads and writes', () => {
     expect((await refusal(ws.write('parts.csv', 'a,b', undefined, '.components.csv'))).problems.join()).toContain('.components.csv');
   });
 
+  it('concurrent create-only writes: exactly one wins, the others get conflict (no clobbering)', async () => {
+    const results = await Promise.allSettled(['a', 'b', 'c', 'd'].map((t) => ws.write('new.holodeck.json', t, null)));
+    const ok = results.filter((r) => r.status === 'fulfilled');
+    expect(ok.length).toBe(1);
+    for (const r of results) if (r.status === 'rejected') expect((r.reason as ToolError).code).toBe('conflict');
+    expect((await ws.read('new.holodeck.json')).text).toBe((ok[0] as PromiseFulfilledResult<{ text: string }>).value.text);
+    expect((await readdir(dir)).filter((n) => n.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('a create-only write never replaces a file another writer made first', async () => {
+    await writeFile(join(dir, 'raced.holodeck.json'), 'theirs');
+    expect((await refusal(ws.write('raced.holodeck.json', 'mine', null))).code).toBe('conflict');
+    expect(await readFile(join(dir, 'raced.holodeck.json'), 'utf8')).toBe('theirs');
+  });
+
+  it('concurrent writes guarded by the same etag: one wins, the rest conflict', async () => {
+    const base = await ws.write('a.holodeck.json', 'v0');
+    const results = await Promise.allSettled(['v1', 'v2', 'v3'].map((t) => ws.write('a.holodeck.json', t, base.etag)));
+    expect(results.filter((r) => r.status === 'fulfilled').length).toBe(1);
+    expect(results.filter((r) => r.status === 'rejected').map((r) => ((r as PromiseRejectedResult).reason as ToolError).code)).toEqual(['conflict', 'conflict']);
+  });
+
+  it('a dangling symlink or a file used as a folder reads as not_found', async () => {
+    await symlink(join(dir, 'gone.holodeck.json'), join(dir, 'dangling.holodeck.json'));
+    expect((await refusal(ws.read('dangling.holodeck.json'))).code).toBe('not_found');
+    await writeFile(join(dir, 'file'), 'x');
+    expect((await refusal(ws.read('file/inner.holodeck.json'))).code).toBe('not_found');
+  });
+
+  it('exclusive runs calls for one path one at a time, other paths in parallel', async () => {
+    const order: string[] = [];
+    const step = (tag: string, ms: number) => async () => {
+      order.push(`${tag}+`);
+      await new Promise((r) => setTimeout(r, ms));
+      order.push(`${tag}-`);
+    };
+    await Promise.all([ws.exclusive('a.holodeck.json', step('a1', 30)), ws.exclusive('./a.holodeck.json', step('a2', 1)), ws.exclusive('b.holodeck.json', step('b', 1))]);
+    expect(order.indexOf('a1-')).toBeLessThan(order.indexOf('a2+'));
+    expect(order.indexOf('b-')).toBeLessThan(order.indexOf('a1-'));
+    // A failing call does not wedge the queue.
+    await expect(ws.exclusive('a.holodeck.json', async () => Promise.reject(new Error('x')))).rejects.toThrow('x');
+    await expect(ws.exclusive('a.holodeck.json', async () => 'ok')).resolves.toBe('ok');
+  });
+
   it('lists documents, skipping hidden folders and node_modules', async () => {
     await ws.write('b.holodeck.json', '{}');
     await ws.write('screens/a.holodeck.json', '{}');

@@ -5,13 +5,22 @@
  * must end in `.holodeck.json`. A path is refused when it is absolute, climbs
  * out with `..`, contains a NUL, or resolves (through a symlink in the file
  * or any parent folder) to somewhere outside the root's real path. Writes go
- * to a temp file in the same folder and are renamed into place, so a reader
+ * to a temp file in the same folder and are moved into place, so a reader
  * never sees half a document.
+ *
+ * Concurrency (holodeck#263 review): writes to one file are serialised in this
+ * process, so the etag check and the replace cannot interleave with another
+ * call's. A create-only write (`expect === null`) hard-links the temp file
+ * into place, which fails if the name exists, so it can never clobber a file,
+ * even one another process created a moment ago. An etag-guarded replace
+ * re-reads under the lock; another *process* replacing the file between that
+ * read and the rename is the one remaining window (no portable
+ * compare-and-swap rename exists).
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, mkdir, open, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { link, lstat, mkdir, open, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { ToolError } from './errors';
 import { MAX_DOCUMENT_BYTES, MAX_PATH_LENGTH } from './limits';
 
@@ -33,10 +42,41 @@ export interface DocumentFile {
 }
 
 const within = (root: string, abs: string) => abs === root || abs.startsWith(root.endsWith(sep) ? root : root + sep);
-const isMissing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === 'ENOENT';
+const errno = (error: unknown) => (error as NodeJS.ErrnoException)?.code;
+/** ENOENT, or ENOTDIR (a path component is a file): either way, nothing is there. */
+const isMissing = (error: unknown) => errno(error) === 'ENOENT' || errno(error) === 'ENOTDIR';
+
+/** Run `fn` after every earlier call with the same key has settled. */
+function serialised<T>(locks: Map<string, Promise<unknown>>, key: string, fn: () => Promise<T>): Promise<T> {
+  const previous = locks.get(key) ?? Promise.resolve();
+  const run = previous.then(fn, fn);
+  const settled = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  locks.set(key, settled);
+  void settled.then(() => {
+    if (locks.get(key) === settled) locks.delete(key);
+  });
+  return run;
+}
 
 export class Workspace {
+  /** File-level: check + replace of one file. */
+  private readonly writeLocks = new Map<string, Promise<unknown>>();
+  /** Caller-level: a whole load-edit-save of one document (`exclusive`). */
+  private readonly editLocks = new Map<string, Promise<unknown>>();
+
   private constructor(public readonly root: string) {}
+
+  /**
+   * Run `fn` with no other `exclusive` call for the same document path
+   * running, so concurrent edits to one scene apply one after another
+   * instead of the later one failing on a changed etag.
+   */
+  exclusive<T>(path: string, fn: () => Promise<T>): Promise<T> {
+    return serialised(this.editLocks, this.lexical(path).abs, fn);
+  }
 
   /** `root` must be an existing folder; it is resolved to its real path once. */
   static async open(root: string): Promise<Workspace> {
@@ -110,7 +150,14 @@ export class Workspace {
   async read(path: string, suffix: FileSuffix = DOCUMENT_SUFFIX): Promise<DocumentFile> {
     const { abs, rel, exists } = await this.resolveReal(path, suffix);
     if (!exists) throw new ToolError(`no document at ${rel}`, [], 'not_found');
-    const handle = await open(abs, 'r');
+    let handle;
+    try {
+      handle = await open(abs, 'r');
+    } catch (error) {
+      // A dangling symlink, or the file removed since the check.
+      if (isMissing(error)) throw new ToolError(`no document at ${rel}`, [], 'not_found');
+      throw error;
+    }
     try {
       const { size } = await handle.stat();
       if (size > MAX_DOCUMENT_BYTES) throw new ToolError(`${rel} is larger than ${MAX_DOCUMENT_BYTES / 1024 / 1024} MB`, [], 'too_large');
@@ -126,9 +173,20 @@ export class Workspace {
    * was based on (`null` = the file must not exist yet; `undefined` = no check).
    */
   async write(path: string, text: string, expect?: string | null, suffix: FileSuffix = DOCUMENT_SUFFIX): Promise<DocumentFile> {
+    const { abs } = this.lexical(path, suffix);
+    // Keyed by the real folder + name, so two spellings of one file share the lock.
+    const key = await realpath(dirname(abs)).then(
+      (dir) => join(dir, basename(abs)),
+      () => abs,
+    );
+    return serialised(this.writeLocks, key, () => this.writeNow(path, text, expect, suffix));
+  }
+
+  private async writeNow(path: string, text: string, expect: string | null | undefined, suffix: FileSuffix): Promise<DocumentFile> {
     const { abs, rel, exists } = await this.resolveReal(path, suffix);
     if (Buffer.byteLength(text, 'utf8') > MAX_DOCUMENT_BYTES) throw new ToolError(`the document would be larger than ${MAX_DOCUMENT_BYTES / 1024 / 1024} MB`, [], 'too_large');
-    if (expect === null && exists) throw new ToolError(`${rel} already exists`, ['pass overwrite: true to replace it'], 'conflict');
+    const existsError = () => new ToolError(`${rel} already exists`, ['pass overwrite: true to replace it'], 'conflict');
+    if (expect === null && exists) throw existsError();
     if (typeof expect === 'string') {
       if (!exists) throw new ToolError(`${rel} no longer exists`, [], 'conflict');
       const current = await this.read(rel, suffix);
@@ -148,7 +206,18 @@ export class Workspace {
       } finally {
         await handle.close();
       }
-      await rename(tmp, abs);
+      if (expect === null) {
+        // No-clobber create: link() fails with EEXIST if anything took the name meanwhile.
+        try {
+          await link(tmp, abs);
+        } catch (error) {
+          if (errno(error) === 'EEXIST') throw existsError();
+          throw error;
+        }
+        await rm(tmp, { force: true });
+      } else {
+        await rename(tmp, abs);
+      }
     } catch (error) {
       await rm(tmp, { force: true });
       throw error;
