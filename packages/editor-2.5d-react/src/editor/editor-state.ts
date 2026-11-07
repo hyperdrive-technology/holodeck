@@ -26,6 +26,8 @@ export type ResizeHandle = 'radius' | 'height';
 /** Shown when A* finds no clear route and the manhattan L was drawn instead. */
 export const NO_ROUTE_NOTICE = 'No clear route — drew a straight L';
 export const ROUTE_FAILED_NOTICE = 'No route drawn — no replacement geometry';
+/** Prefix of the notice an edit the reducer refused leaves (the scene, history and revision are unchanged). */
+export const EDIT_REJECTED_PREFIX = 'Edit rejected';
 export {
   INLINE_PARTS_NO_ROUTE_NOTICE,
   REROUTE_FAILED_NOTICE,
@@ -756,7 +758,7 @@ function reduceChecked(state: EditorState, action: EditorAction): EditorState {
   try {
     next = reduce(state, action);
   } catch (error) {
-    return { ...state, notice: `Edit rejected: ${error instanceof Error ? error.message : String(error)}` };
+    return { ...state, notice: `${EDIT_REJECTED_PREFIX}: ${error instanceof Error ? error.message : String(error)}` };
   }
   // Reject the whole edit, preserving scene, selection, history and revision.
   // Pointer previews only change one placement's geometry, never its id/type.
@@ -785,7 +787,7 @@ function reduceChecked(state: EditorState, action: EditorAction): EditorState {
         }
       }
     } catch (error) {
-      return { ...state, notice: `Edit rejected: ${error instanceof Error ? error.message : String(error)}` };
+      return { ...state, notice: `${EDIT_REJECTED_PREFIX}: ${error instanceof Error ? error.message : String(error)}` };
     }
   }
   if (next.pipeStart === null && next.pipeStartHeading !== null) {
@@ -948,7 +950,7 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
         return state;
       }
       if (!Number.isFinite(action.value)) {
-        return { ...state, notice: 'Edit rejected: resize value must be finite' };
+        return { ...state, notice: `${EDIT_REJECTED_PREFIX}: resize value must be finite` };
       }
       const objects = state.scene.objects.map((o) => {
         if (o.id !== resize.id) {

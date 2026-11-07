@@ -14,7 +14,7 @@
  * another tab, the playground's reset).
  */
 
-import { HOLODECK_KINDS, type HolodeckDocument, type HolodeckHost, type ProviderConnection } from '@holodeck/sdk';
+import { HOLODECK_KINDS, type HolodeckDocument, type ProviderConnection } from '@holodeck/sdk';
 import type { IsoSceneFile, ProcessEditorHandle, ProcessEditorProps } from '@holodeck/editor-2.5d-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useBlocker } from '@tanstack/react-router';
@@ -23,10 +23,10 @@ import type { StudioCamera } from '../documents/db';
 import { withDocumentName } from '../documents/document-ops';
 import { imageFileName } from '../documents/io';
 import { libraryDropPoint } from '../documents/iso-scene';
+import { withRequires } from '../host/document-checks';
 import { documentKeys, useSaveCamera } from '../documents/queries';
 import type { VersionedDocument } from '../documents/store';
 import { DocumentWriter, type WriterState } from '../documents/writer';
-import { documentRequires, mergeRequires } from '../host/studio-host';
 import { notify } from '../layout/ui-state';
 import { useStudio } from '../studio-context';
 import { reconcileConnections } from '../connections/bindings';
@@ -41,12 +41,8 @@ import { describeSaveStatus } from './save-status';
 
 export type IsoDoc = HolodeckDocument<IsoSceneFile>;
 
-/** Recompute `requires` (parts + connection providers, holodeck#172) on a draft document, in place. */
-export function withRequires(doc: IsoDoc, host: HolodeckHost): void {
-  const requires = mergeRequires(host, doc.requires, documentRequires(host, doc.body, doc.connections));
-  if (Object.keys(requires).length) doc.requires = requires;
-  else delete doc.requires;
-}
+// Moved to host/document-checks.ts (shared with the MCP server); re-exported for existing importers.
+export { withRequires };
 
 export interface DocumentSessionOptions {
   initial: VersionedDocument;

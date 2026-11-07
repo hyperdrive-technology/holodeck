@@ -9,7 +9,7 @@
 import { createSimProvider, defineHolodeckPackage, HOLODECK_KINDS, parseHolodeckPackageManifest, SIM_PROVIDER_ID } from '@holodeck/sdk';
 import { HTTP_PACKAGE_MANIFEST, httpProviderPackage } from '@holodeck/provider-http';
 import { AWS_PACKAGE_MANIFEST, awsProviderPackage } from '@holodeck/provider-aws';
-import type { StudioPackage } from './studio-host';
+import type { StudioPackage } from './document-checks';
 
 /**
  * The SDK ships `createSimProvider` but no package for it; the studio wraps

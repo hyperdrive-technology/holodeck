@@ -192,3 +192,21 @@ test('ci.yml matrix scopes cover every directory each leg reads', () => {
   assert.equal(runs('editor-2d-react', 'packages/editor-2.5d-react/src/a.ts'), false);
   assert.equal(runs('viewer-3d-react', 'blender/parts/valve.py'), false);
 });
+
+test('ci.yml studio job (studio + MCP server) runs for the studio, the MCP server and what they consume', () => {
+  const yml = readFileSync(join(dirname(SCRIPT), '../.github/workflows/ci.yml'), 'utf8');
+  const job = yml.slice(yml.indexOf('\n  studio:'));
+  const paths = [...job.slice(0, job.indexOf('Checkout holodeck-sdk')).matchAll(/--paths '([^']+)'/g)].map((m) => m[1]);
+  assert.ok(job.includes('scripts/ci-package.sh mcp'), 'the studio job runs the MCP package gate');
+  const runs = (file) => decide({ event: 'pull_request', changed: [file], paths }).run;
+  for (const file of [
+    'apps/studio/src/host/document-checks.ts',
+    'packages/mcp/src/server.ts',
+    'packages/editor-2.5d-react/src/index.ts',
+    'packages/provider-http/src/a.ts',
+    'packages/provider-aws/src/a.ts',
+    'packages/library-cloud/src/a.ts',
+  ]) assert.equal(runs(file), true, file);
+  assert.equal(runs('packages/flow-runtime/src/a.ts'), false);
+  assert.equal(runs('packages/mcp-extra/src/a.ts'), false);
+});

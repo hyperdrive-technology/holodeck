@@ -1,6 +1,6 @@
 /** Vite emits the installed cloud package assets with hashed URLs in dev and production. */
 import { cloudPackage, CLOUD_PACKAGE_MANIFEST } from '@holodeck/library-cloud/holodeck-package';
-import type { StudioPackage } from './studio-host';
+import type { StudioPackage } from './document-checks';
 import asset0 from '@holodeck/library-cloud/assets/logos/cloud.svg?url';
 import asset1 from '@holodeck/library-cloud/assets/models/billboard.glb?url';
 import asset2 from '@holodeck/library-cloud/assets/models/broker.glb?url';

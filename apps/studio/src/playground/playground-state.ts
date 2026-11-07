@@ -6,7 +6,7 @@
 import type { HolodeckDocument, HolodeckHost } from '@holodeck/sdk';
 import type { IsoSceneFile } from '@holodeck/editor-2.5d-react';
 import { DocumentExistsError, type DocumentStore, type VersionedDocument } from '../documents/store';
-import { withRequires } from '../features/use-document-session';
+import { withRequires } from '../host/document-checks';
 import { createPlaygroundDocument, PLAYGROUND_DOCUMENT_ID } from './starter';
 
 /** Tabs are the playground's primary navigation: `/playground?tab=viewer` is linkable and survives a reload. */

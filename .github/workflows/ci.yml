@@ -302,6 +302,10 @@ jobs:
   # fake-indexeddb), production build, then Playwright e2e over `vite preview`
   # on the runner's preinstalled Google Chrome (no `playwright install`: it
   # hangs on hosted runners, holodeck#29).
+  #
+  # The MCP server (packages/mcp) runs in this job too: it consumes the same four
+  # built packages and bundles pure modules of apps/studio/src (its src/studio.ts),
+  # so it is affected by exactly the studio's inputs. One sandbox instead of two.
   studio:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci')
     name: studio
@@ -337,7 +341,7 @@ jobs:
 
       # The studio consumes editor-2.5d-react and the provider/library packages (file:
       # deps), so a change to any of them, or to the studio, runs it (scripts/ci-scope.mjs).
-      - name: Does this change touch the studio or a package it consumes?
+      - name: Does this change touch the studio, the MCP server or a package they consume?
         id: scope
         env:
           EVENT: ${{ github.event_name }}
@@ -346,7 +350,7 @@ jobs:
         run: |
           if ! command -v node >/dev/null; then echo "no node on the image yet: run"; echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           node holodeck/scripts/ci-scope.mjs --cwd holodeck --event "$EVENT" --base "$BASE_SHA" --sdk-ref "$SDK_REF" \
-            --paths '^apps/studio/' --paths '^packages/(editor-2\.5d-react|provider-http|provider-aws|library-cloud)/'
+            --paths '^apps/studio/' --paths '^packages/(editor-2\.5d-react|provider-http|provider-aws|library-cloud|mcp)/'
 
       - name: Checkout holodeck-sdk (${{ steps.sdk.outputs.ref }})
         if: steps.scope.outputs.run == 'true'
@@ -373,6 +377,7 @@ jobs:
             holodeck/packages/provider-aws/pnpm-lock.yaml
             holodeck/packages/library-cloud/pnpm-lock.yaml
             holodeck/apps/studio/pnpm-lock.yaml
+            holodeck/packages/mcp/pnpm-lock.yaml
 
       - name: Build holodeck-sdk
         if: steps.scope.outputs.run == 'true'
@@ -395,6 +400,14 @@ jobs:
           for p in provider-http provider-aws library-cloud; do
             (cd holodeck/packages/$p && pnpm install --frozen-lockfile && pnpm build)
           done
+
+      # Install, type check, unit tests (InMemoryTransport clients), build, smoke-dist.
+      - name: MCP server (packages/mcp)
+        if: steps.scope.outputs.run == 'true'
+        working-directory: holodeck
+        env:
+          HOLODECK_SKIP_RENDER_TESTS: '1'
+        run: scripts/ci-package.sh mcp
 
       - name: Install
         if: steps.scope.outputs.run == 'true'
