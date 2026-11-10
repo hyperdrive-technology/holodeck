@@ -1,0 +1,243 @@
+# Process asset catalog (`holodeck.process`)
+
+What a full industrial-process part library looks like for Holodeck, what exists
+today, and the order the rest is built in. Reviewed 2026-11-11 against `main`
+at `f9ce1f1`.
+
+The coverage guide is the automation set of the
+[OpenBridge design system](https://www.openbridge.no/)
+([components](https://github.com/Ocean-Industries-Concept-Lab/openbridge-webcomponents/tree/main/packages/openbridge-webcomponents/src/automation)).
+OpenBridge is a 2D maritime HMI kit. It is used here only as a checklist of
+equipment classes; no artwork, geometry or code is taken from it. Classes that
+a land-based process plant needs and OpenBridge lacks (solids handling,
+columns, compressors, actuator types) come from ISA-5.1 / ISO 10628 equipment
+classes.
+
+## What exists today
+
+| Asset | Kind | Where | Placeable in Studio | Notes |
+| --- | --- | --- | --- | --- |
+| Tank (parametric top / bottom / stand, level, alarm) | code (R3F) | `editor-2.5d-react/assets/process/Tank.tsx` | yes | being reworked in #228 (draft) |
+| Mixer (agitated vessel) | code | `Mixer.tsx`, `TankAgitator.tsx` | yes | `mixer.glb` variant in #227 / #228 (drafts) |
+| Shaft | code | `Shaft.tsx` | yes | |
+| Valve (handwheel, inline) | code | `Valve.tsx`, `valve-geometry.ts` | yes | `open` is a boolean with no visual state |
+| Pipe, elbow, end cap | code | `Pipe.tsx`, `Elbow.tsx`, `EndCap.tsx` | yes | routed; no tee, cross, reducer |
+| Label, area | code | `Label.tsx`, `Area.tsx` | yes | |
+| `pump.glb` (end-suction centrifugal) | Blender | `blender/parts/pump.py` | no (core's brewery extension only) | authored at pipe radius 0.09, scene pipes are 0.2: needs `scale` |
+| `heat-exchanger.glb` (plate) | Blender | `blender/parts/heat-exchanger.py` | no (brewery extension only) | no ports, no anim nodes |
+| `valve.glb` (globe + doughnut wheel) | Blender | `blender/parts/valve.py` | no | older shape than the code valve; wheel dwarfs the body |
+| `fermenter`, `brite-tank`, `kettle`, `mash-tun` `.glb` | Blender | `blender/parts/*.py` | no | unused: Tank presets replaced them |
+| 26 cloud archetypes, 54 AWS services | Blender + SVG | `library-cloud`, `assets-aws` | yes | not process assets; the packaging model to copy |
+
+So a standalone Studio user can place nine process parts, two of which are
+annotations. There is no rotating equipment, no instrument, no actuated valve,
+no heat transfer, no solids handling and no electrical part in the palette.
+
+## Package
+
+Process parts ship as a library package, `@holodeck/library-process`
+(`holodeck.process`), built the same way as `@holodeck/library-cloud`:
+
+- Blender scripts in `blender/parts/process/<slug>.py`, shared vocabulary in
+  `blender/parts/process/_common.py`.
+- GLBs in `packages/library-process/assets/models/<slug>.glb`.
+- Data-only part definitions (`src/parts.json`), ids `process:<slug>`.
+- The existing brewery GLBs stay where they are until the package covers them.
+
+Nothing in the package knows about PLCs or Hyperdrive. Hyperdrive binds tags to
+the part params through the normal binding model.
+
+## Authoring rules for process GLBs
+
+These add to the contract in [`blender/README.md`](../../blender/README.md).
+
+- **Scale.** 1 unit = 1 grid cell. Author at scene scale so no part needs
+  `scale`: pipe radius `0.2`, pipe axis height `0.32` (`pipeWorldY()` =
+  radius + 0.12 gap), flange radius `0.27`. The numbers live in
+  `packages/editor-2.5d-react/assets/process/pipe-math.ts` and
+  `valve-geometry.ts`.
+- **Inline parts** (valves, strainers, inline meters): origin on the pipe axis
+  at the body centre, pipe axis = X, `port.in` at -X and `port.out` at +X on
+  the flange faces. Body length is a multiple of 0.5.
+- **Floor parts** (pumps, motors, skids, cabinets): origin on the floor at the
+  footprint centre, resting on Y = 0. Nozzle axes sit at 0.32 where the part
+  connects to floor-level pipe runs. Fit a whole-cell footprint.
+- **Ports.** One `port.<name>` empty per nozzle, on the flange face. Names say
+  the function: `in`, `out`, `suction`, `discharge`, `shell-in`, `tube-out`,
+  `drain`, `vent`.
+- **Animation pivots.** `anim.<name>` empties, with the moving meshes as
+  children, so the runtime can drive them from a param:
+  - `anim.shaft`: continuous spin about the shaft axis (motor, pump, fan).
+  - `anim.stem`: linear travel along local +Y, 0 to 1 = closed to open.
+  - `anim.handle` / `anim.disc`: quarter turn, 0 to 1 = closed to open.
+  - `anim.blades`: damper louvres.
+  - `anim.needle`: gauge needle sweep.
+- **State colour.** The part of the model that should carry state (actuator
+  cap, position indicator, beacon lens, motor band) uses `hd.accent`. It is the
+  one per-instance colour, so running / stopped / fault can tint it.
+- **Look.** Low-poly, flat-shaded, facet creases as outlines, no bevels except
+  small baked radii on boxes. 8 or 12 radial segments so facets line up with
+  pipes (6 sides) and flanges. Suppress outline noise on thin parts with
+  `hd_edges=False` or a higher `hd_edge_threshold`.
+- **Budget.** Under 60 KB per GLB, under 3 000 triangles.
+
+## Catalog
+
+Status: **have** = on `main` and placeable; **partial** = exists but not
+placeable or missing states; **wave 1 / 2 / 3** = planned; **code** = needs
+routing or parametric code, not a GLB.
+
+### Valves
+
+| Part | OpenBridge class | Params (bindable) | Status |
+| --- | --- | --- | --- |
+| `valve-gate` handwheel | digital-valve (manual) | open | partial (code valve, no state visual) |
+| `valve-ball` lever | digital-valve | open | wave 1 pilot |
+| `valve-butterfly` lever | digital-valve | open | wave 1 |
+| `valve-control` globe + pneumatic diaphragm | analog-valve | position 0-100 %, fault | wave 1 pilot |
+| `valve-actuated` ball + rotary actuator | digital-valve | open, fault | wave 1 |
+| `valve-solenoid` | digital-valve | energised | wave 1 |
+| `valve-three-way` actuated | analog / digital-threeway-valve | position, fault | wave 1 |
+| `valve-check` swing | non-return-valve, hydraulic-check-valve | (none) | wave 1 |
+| `valve-relief` angle, spring bonnet | (none) | lifted | wave 1 |
+| `valve-pressure-reducing` | pressure-reduction-valve | setpoint | wave 2 |
+| `valve-pressure-sustaining` | pressure-sustain-valve | setpoint | wave 2 |
+| `valve-diaphragm` hygienic | (none) | open | wave 2 |
+| `valve-mixproof` hygienic double seat | (none) | upper, lower | wave 3 |
+| `valve-directional` hydraulic 4/3, x/2 | hydraulic-valve-4-3, hydraulic-valve-x-2 | spool | wave 3 |
+| `damper` duct louvre | damper | position | wave 2 |
+
+### Pumps, motors and other rotating equipment
+
+| Part | OpenBridge class | Params | Status |
+| --- | --- | --- | --- |
+| `pump-centrifugal` end suction | pump | running, speed, fault | partial (`pump.glb`, brewery only, off-scale) |
+| `motor` foot-mounted | motor | running, speed, fault | wave 1 pilot |
+| `pump-lobe` positive displacement | pump | running, speed | wave 1 |
+| `pump-inline` vertical inline | pump | running, speed | wave 1 |
+| `pump-dosing` diaphragm metering | pump | running, stroke | wave 1 |
+| `blower` centrifugal fan | fan | running, speed | wave 1 |
+| `compressor` screw package | (none) | running, load | wave 1 |
+| `fan-axial` duct fan | fan | running, speed | wave 2 |
+| `pump-submersible` | pump | running | wave 2 |
+| `pump-vacuum` liquid ring | pump | running | wave 2 |
+| `gearbox` | (none) | (none) | wave 2 |
+| `agitator-drive` top entry | (none) | running, speed | wave 2 (after #228) |
+| `turbine`, `engine`, `generator` set | indicator-engine, gauge-generator | running, load | wave 3 |
+
+### Heat transfer
+
+| Part | OpenBridge class | Params | Status |
+| --- | --- | --- | --- |
+| `heat-exchanger-plate` | heat-exchanger | temperatures | partial (GLB, brewery only, no ports) |
+| `heat-exchanger-shell-tube` | heat-exchanger | temperatures | wave 1 pilot |
+| `boiler` | (none) | firing, pressure | wave 1 |
+| `cooling-tower` | (none) | fan running | wave 1 |
+| `chiller` / `heat-pump` | heat-pump | running | wave 2 |
+| `air-cooler` fin fan | (none) | fan running | wave 2 |
+| `heater-inline` electric | (none) | on | wave 2 |
+| `burner` / `flare` | (none) | firing | wave 3 |
+
+### Separation and solids
+
+| Part | OpenBridge class | Params | Status |
+| --- | --- | --- | --- |
+| `filter` cartridge / bag housing | filter | differential pressure, blocked | wave 1 |
+| `strainer-y` inline | filter | blocked | wave 1 |
+| `cyclone` | (none) | (none) | wave 1 |
+| `separator` disc stack centrifuge | hydraulic-separator | running | wave 2 |
+| `conveyor-belt` | (none) | running, speed | wave 2 |
+| `conveyor-screw` | (none) | running | wave 2 |
+| `rotary-valve` airlock | (none) | running | wave 2 |
+| `hopper`, `silo` | (none) | level | wave 2 (after #228) |
+| `bucket-elevator`, `mill`, `dryer` | (none) | running | wave 3 |
+
+### Vessels
+
+Vessel work waits for #228, which changes the tank primitives and line rules.
+
+| Part | OpenBridge class | Params | Status |
+| --- | --- | --- | --- |
+| Tank, mixer | automation-tank | level, temperature, alarm | have |
+| `tank-storage` flat bottom, cone roof | indicator-tank-atmospheric | level | wave 2 |
+| `drum-horizontal` on saddles | specialty-tank | level, pressure | wave 2 |
+| `column` tray / packed tower | (none) | levels | wave 2 |
+| `reactor` jacketed | (none) | level, temperature, speed | wave 2 |
+| `ibc-tote`, `drum-200l` | (none) | level | wave 2 |
+| `sump` / pit | (none) | level | wave 3 |
+
+### Instruments
+
+| Part | OpenBridge class | Params | Status |
+| --- | --- | --- | --- |
+| Label with reading | automation-readout, automation-badge | value, alarm | have |
+| `transmitter` head on a stem | transmitter, transmitter-stack | value, alarm | wave 1 pilot |
+| `gauge-pressure` dial | gauge-* | value | wave 1 |
+| `flowmeter-mag` inline | transmitter | value | wave 1 |
+| `level-radar` top mount | transmitter | value | wave 1 |
+| `beacon` stack light | automation-badge (alarm) | state | wave 1 |
+| `flowmeter-coriolis` inline | transmitter | value | wave 2 |
+| `level-switch`, `sight-glass` | transmitter | state | wave 2 |
+| `analyser` probe (pH, conductivity) | transmitter | value | wave 2 |
+| `load-cell`, `camera`, `e-stop` | (none) | state | wave 3 |
+
+### Piping
+
+Pipes are routed and drawn by code, so fittings belong to the routing lane,
+not to Blender.
+
+| Part | OpenBridge class | Status |
+| --- | --- | --- |
+| Pipe, elbow, end cap | horizontal-line, vertical-line, corner-line, end-point-line | have |
+| Tee, cross | three-way-line, line-cross | code |
+| Bridge (pipes that cross without joining) | line-overlap | code |
+| Flow direction arrow / animated flow | direction-line | code |
+| Reducer, expansion joint, hose | (none) | code |
+| Medium colour (water, steam, product, air) | line medium types | code (theme) |
+
+### Electrical and controls
+
+| Part | OpenBridge class | Params | Status |
+| --- | --- | --- | --- |
+| `cabinet` control panel / MCC | (none) | fault | wave 1 pilot |
+| `vfd` drive | converter | running, fault | wave 1 |
+| `junction-box` | (none) | (none) | wave 1 |
+| `transformer` | transformer | energised | wave 2 |
+| `generator` | gauge-generator, indicator-generator | running, load | wave 2 |
+| `battery` rack | electricity-battery, indicator-battery | charge | wave 2 |
+| `switchgear` / breaker | switch, bus | closed | wave 2 |
+| `plc-rack`, `hmi-panel`, `network-switch` | router | state | wave 2 |
+| Circuit symbols (resistor, diode, transistor, logic gates) | resistor, capacitor, diodes, mosfet, logic | out of scope: 2D schematic symbols |
+
+### Site and structure
+
+| Part | Status |
+| --- | --- |
+| Area (floor, bund walls) | have |
+| `skid` base frame, `platform` with stairs, `pipe-rack` | wave 3 |
+| `building` shed, `tanker` truck, `forklift`, `pallet`, `operator` | wave 3 |
+
+## Count
+
+| | Parts |
+| --- | --- |
+| Placeable today (process) | 9 |
+| Wave 1 (28 GLBs, 6 of them the pilot) | 28 |
+| Wave 2 | about 30 |
+| Wave 3 | about 15 |
+| Code lane (fittings, flow, medium colours) | 6 items |
+
+## Order of work
+
+1. **Pilot** (Blender, first pass by Codex `gpt-6-astra`): `_common.py` plus
+   `valve-ball`, `valve-control`, `motor`, `heat-exchanger-shell-tube`,
+   `transmitter`, `cabinet`. One part per family, to settle scale, ports,
+   animation pivots and the look before the rest is generated.
+2. **Wave 1 remainder** (22 GLBs) in parallel batches on the settled vocabulary.
+3. **Package lane** (code): `@holodeck/library-process` with definitions,
+   animators for `stem` / `handle` / `needle`, state colour, GLB contract
+   tests, Blender drift coverage, Studio install, a sample scene.
+4. **Fix-ups of existing assets**: rescale `pump.glb`, add ports to
+   `heat-exchanger.glb`, retire or restyle `valve.glb`, give the code valve an
+   open / closed visual.
+5. **Wave 2** after #228 lands (vessels build on its primitives).
