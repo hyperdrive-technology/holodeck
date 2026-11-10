@@ -10,7 +10,7 @@ const onDisk = readdirSync(__dirname)
 describe('built-in model urls', () => {
   it('maps exactly the GLBs in this directory (the map is explicit; keep it in sync)', () => {
     expect(Object.keys(BUILTIN_MODEL_URLS).sort()).toEqual(onDisk);
-    expect(onDisk).toEqual(['brite-tank', 'fermenter', 'heat-exchanger', 'kettle', 'mash-tun', 'pump', 'valve']);
+    expect(onDisk).toEqual(['brite-tank', 'fermenter', 'heat-exchanger', 'kettle', 'mash-tun', 'mixer', 'pump', 'valve']);
   });
   it('each url ends in its own basename', () => {
     for (const name of onDisk) expect(modelUrl(name)).toMatch(new RegExp(`${name}\\.glb$`));

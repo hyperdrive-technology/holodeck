@@ -11,7 +11,7 @@ import type { LineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
 import type { Line2NodeMaterial } from 'three/webgpu';
 import { createEdgeLines, createEdgeMaterial } from './edge-lines';
 import { createFinishMaterial } from './materials';
-import { FINISH_NAMES, HOLODECK_STYLE, type FinishName, type HolodeckStyle } from './style';
+import { FINISH_NAMES, HOLODECK_STYLE, liquidFinish, type FinishName, type HolodeckStyle } from './style';
 
 /**
  * Apply the Holodeck iso look to any three scene graph (typically a
@@ -26,6 +26,7 @@ import { FINISH_NAMES, HOLODECK_STYLE, type FinishName, type HolodeckStyle } fro
  * | material `hd.vessel`                   | tank iso shade                                |
  * | material `hd.flask`                    | mixer iso shade                               |
  * | material `hd.accent`                   | unlit, source base colour (or `overrides.accent`) |
+ * | material `hd.liquid`                   | translucent liquid: `style.colors.liquid` (or `overrides.liquid`), finish opacity, depthWrite off, mesh renderOrder = finish renderOrder, edges drawn |
  * | any other / unnamed material           | white + one console.warn per name             |
  * | extras `hd_edge_threshold: number`     | EdgesGeometry crease angle (degrees)          |
  * | extras `hd_edges: false`               | no outline on that mesh                       |
@@ -50,6 +51,10 @@ export type ApplyStyleOverrides = {
    * Data-only parts set it from `IsoPartDefinition.colors.body`.
    */
   body?: ColorRepresentation;
+  /** Colour for every `hd.liquid` mesh (live level colour / alarm). Beats `style.colors.liquid`. */
+  liquid?: ColorRepresentation;
+  /** Opacity for every `hd.liquid` mesh. Beats the liquid finish token. */
+  liquidOpacity?: number;
   /** Outline colour. Defaults to `style.colors.edge`. */
   edgeColor?: ColorRepresentation;
   /** Outline width in CSS px. Defaults to `style.edges.lineWidth`. */
@@ -194,6 +199,8 @@ export function applyHolodeckStyle(
   const defaultThreshold = overrides.threshold ?? style.edges.threshold;
   const accentOverride = overrides.accent !== undefined ? new Color(overrides.accent) : undefined;
   const bodyOverride = overrides.body !== undefined ? new Color(overrides.body) : undefined;
+  const liquidOverride = overrides.liquid !== undefined ? new Color(overrides.liquid) : undefined;
+  const liquidOrder = liquidFinish(style).renderOrder;
 
   const finishFor = (source: Material): Material => {
     const existing = created.get(source);
@@ -215,8 +222,14 @@ export function applyHolodeckStyle(
       finish = 'white';
     }
     const color =
-      finish === 'accent' ? (accentOverride ?? sourceColor(source)) : finish === 'white' ? bodyOverride : undefined;
-    const material = createFinishMaterial(finish, { style, color, side: source.side });
+      finish === 'accent'
+        ? (accentOverride ?? sourceColor(source))
+        : finish === 'white'
+          ? bodyOverride
+          : finish === 'liquid'
+            ? liquidOverride
+            : undefined;
+    const material = createFinishMaterial(finish, { style, color, side: source.side, opacity: overrides.liquidOpacity });
     created.set(source, material);
     return material;
   };
@@ -226,6 +239,12 @@ export function applyHolodeckStyle(
       ? mesh.material.map(finishFor)
       : finishFor(mesh.material);
     mesh.userData.hdStyled = true;
+    // Liquid blends over the shell: draw it after (a material cannot carry render order).
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    if (mats.some((m) => m.userData?.hdFinish === 'liquid')) {
+      mesh.userData.hdRenderOrder = mesh.renderOrder;
+      mesh.renderOrder = liquidOrder;
+    }
 
     // `mesh.type` is 'Mesh' on InstancedMesh in r186, so test the flags.
     const kind =
@@ -277,6 +296,10 @@ export function applyHolodeckStyle(
     }
     for (const mesh of meshes) {
       delete mesh.userData.hdStyled;
+      if (typeof mesh.userData.hdRenderOrder === 'number') {
+        mesh.renderOrder = mesh.userData.hdRenderOrder;
+        delete mesh.userData.hdRenderOrder;
+      }
     }
   };
 }

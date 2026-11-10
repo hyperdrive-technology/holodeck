@@ -79,7 +79,7 @@ def three_matrix(position_t: Vec3 = (0, 0, 0), rotation_t: Vec3 = (0, 0, 0)) -> 
 # Scene + materials
 # --------------------------------------------------------------------------
 
-HD_MATERIALS = ("hd.white", "hd.shaded", "hd.vessel", "hd.flask", "hd.accent")
+HD_MATERIALS = ("hd.white", "hd.shaded", "hd.vessel", "hd.flask", "hd.accent", "hd.liquid")
 
 
 def reset_scene() -> None:
@@ -107,15 +107,26 @@ def hex_to_linear_rgba(hex_color: str) -> tuple[float, float, float, float]:
     return (srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b), 1.0)
 
 
-def material(name: str, color: str = "#ffffff") -> bpy.types.Material:
+def material(name: str, color: str = "#ffffff", alpha: float = 1.0) -> bpy.types.Material:
     """Get or create an `hd.*` material. Only `hd.accent`'s colour matters
-    to the runtime (it is the default accent); others are placeholders."""
+    to the runtime (it is the default accent); others are placeholders.
+    `hd.liquid` is the runtime's translucent liquid finish (style.ts
+    `liquidFinish`, opacity 0.62, colour from the style, edges drawn);
+    `alpha < 1` here only makes the Workbench PREVIEW translucent (and lands
+    in the GLB as alphaMode BLEND, which the style layer ignores)."""
     if name not in HD_MATERIALS:
         raise ValueError(f"material {name!r} is not part of the hd.* contract {HD_MATERIALS}")
     mat = bpy.data.materials.get(name)
     if mat is None:
         mat = bpy.data.materials.new(name)
     rgba = hex_to_linear_rgba(color)
+    if alpha < 1.0:
+        rgba = (rgba[0], rgba[1], rgba[2], alpha)
+        # Blender 4.2+ EEVEE/Workbench transparency switch; older name kept for safety.
+        if hasattr(mat, "surface_render_method"):
+            mat.surface_render_method = "BLENDED"
+        elif hasattr(mat, "blend_method"):
+            mat.blend_method = "BLEND"
     mat.diffuse_color = rgba
     # Without this the exporter writes `doubleSided: true` (found by
     # inspecting the GLB). Parts are closed solids -> single-sided like
@@ -128,6 +139,8 @@ def material(name: str, color: str = "#ffffff") -> bpy.types.Material:
         bsdf.inputs["Base Color"].default_value = rgba
         bsdf.inputs["Roughness"].default_value = 1.0
         bsdf.inputs["Metallic"].default_value = 0.0
+        if alpha < 1.0:
+            bsdf.inputs["Alpha"].default_value = alpha
     return mat
 
 

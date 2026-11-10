@@ -44,10 +44,32 @@ export type IsoFinish = {
   offset: boolean;
 };
 
-export type Finish = UnlitFinish | IsoFinish;
+/**
+ * Translucent liquid (tank / mixer fill, GLB `hd.liquid`). Unlit, blended,
+ * `depthWrite` off so the interior back-wall lines, the impeller and the
+ * liquid's own edges read through it like reference.jpg's light-blue fill.
+ * Drawn after the (opaque) shell: `renderOrder` is applied to the mesh so a
+ * transparent shell layer in the same part still sorts behind the liquid.
+ * Colour: `color` when set, else `style.colors.liquid` (per-instance level
+ * colours come in as an override, like the accent).
+ */
+export type LiquidFinish = {
+  kind: 'liquid';
+  /** Fill colour; absent = `style.colors.liquid`. */
+  color?: string;
+  /** 0..1 blend opacity. */
+  opacity: number;
+  /** Mesh render order (after shells at 0). */
+  renderOrder: number;
+  /** Always false: see above. Kept as a token so tests and the Blender lane can read it. */
+  depthWrite: false;
+  offset: boolean;
+};
+
+export type Finish = UnlitFinish | IsoFinish | LiquidFinish;
 
 /** Finish names. A GLB material named `hd.<name>` picks the matching finish. */
-export type FinishName = 'white' | 'shaded' | 'vessel' | 'flask' | 'accent';
+export type FinishName = 'white' | 'shaded' | 'vessel' | 'flask' | 'accent' | 'liquid';
 
 /**
  * Tokens for the Arcentry-parity annotation objects (connectors, area
@@ -142,12 +164,17 @@ export type HolodeckStyle = {
     /** Pipe / fitting / vessel wire width in CSS px. */
     wireWidth: number;
   };
-  finishes: Record<FinishName, Finish> & {
+  finishes: {
     white: UnlitFinish;
     shaded: IsoFinish;
     vessel: IsoFinish;
     flask: IsoFinish;
     accent: UnlitFinish;
+    /**
+     * Optional so themes written before `hd.liquid` (2026-10-29) still
+     * validate; read it through `liquidFinish(style)`.
+     */
+    liquid?: LiquidFinish;
   };
 };
 
@@ -174,6 +201,21 @@ export const HOLODECK_ANNOTATION_STYLE: AnnotationStyle = {
 export function annotationStyle(style: HolodeckStyle): AnnotationStyle {
   return style.annotation ?? HOLODECK_ANNOTATION_STYLE;
 }
+
+/**
+ * Default liquid finish. Opacity history (Tank liquidOpacity before the
+ * token): 0.69 with depthWrite on printed flask meridians; 1 (solid) hid the
+ * interior rings; 0.84 hid the agitator. 0.62 with depthWrite off is the
+ * reference's light see-through fill: back-wall lines and blades read
+ * through, the colour still reads as liquid.
+ */
+export const LIQUID_FINISH: LiquidFinish = {
+  kind: 'liquid',
+  opacity: 0.62,
+  renderOrder: 2,
+  depthWrite: false,
+  offset: false,
+};
 
 export const HOLODECK_STYLE: HolodeckStyle = {
   annotation: HOLODECK_ANNOTATION_STYLE,
@@ -264,11 +306,22 @@ export const HOLODECK_STYLE: HolodeckStyle = {
     // Unlit flat colour. On a GLB the source material's base colour wins
     // over this default; `applyHolodeckStyle(..., { accent })` wins over both.
     accent: { kind: 'unlit', color: '#c0392b', offset: false },
+    liquid: LIQUID_FINISH,
   },
 };
 
 /** Finish names in a fixed order (tests, tuners, material-name parsing). */
-export const FINISH_NAMES: readonly FinishName[] = ['white', 'shaded', 'vessel', 'flask', 'accent'];
+export const FINISH_NAMES: readonly FinishName[] = ['white', 'shaded', 'vessel', 'flask', 'accent', 'liquid'];
+
+/** The liquid finish of `style`, defaulted for themes that predate it. */
+export function liquidFinish(style: HolodeckStyle): LiquidFinish {
+  return style.finishes.liquid ?? LIQUID_FINISH;
+}
+
+/** A finish token by name; `liquid` falls back to `LIQUID_FINISH` for older themes. */
+export function finishToken(style: HolodeckStyle, name: FinishName): Finish {
+  return name === 'liquid' ? liquidFinish(style) : style.finishes[name];
+}
 
 /**
  * Vertical gap (world units) between stacked ground layers, so a part's

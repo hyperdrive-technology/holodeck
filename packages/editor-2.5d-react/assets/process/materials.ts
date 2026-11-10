@@ -1,7 +1,7 @@
 import { Color, type ColorRepresentation, type Side } from 'three';
 import { clamp, float, length, max, min, mix, normalView, positionLocal, uniform, vec3 } from 'three/tsl';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { HOLODECK_STYLE, type Finish, type FinishName, type HolodeckStyle, type IsoFinish } from './style';
+import { HOLODECK_STYLE, finishToken, type Finish, type FinishName, type HolodeckStyle, type IsoFinish } from './style';
 
 /**
  * Plain (non-React) material factories for the Holodeck iso look.
@@ -103,11 +103,35 @@ export function createUnlitMaterial({
   return mat;
 }
 
+/**
+ * Translucent liquid (finish `liquid`): unlit `color`, blended at `opacity`,
+ * no depth writes. The caller sets `mesh.renderOrder = finish.renderOrder`
+ * (a material cannot); `applyHolodeckStyle` and `LiquidVolume` do.
+ */
+export function createLiquidMaterial({
+  color,
+  opacity,
+}: {
+  color: ColorRepresentation | Color;
+  opacity: number;
+}): MeshBasicNodeMaterial {
+  const mat = new MeshBasicNodeMaterial();
+  if (color instanceof Color) mat.color.copy(color);
+  else mat.color.set(color);
+  mat.toneMapped = false;
+  mat.transparent = true;
+  mat.opacity = Math.min(1, Math.max(0, opacity));
+  mat.depthWrite = false;
+  return mat;
+}
+
 export type FinishMaterialOptions = {
   /** Token source when `finish` is a name. Defaults to `HOLODECK_STYLE`. */
   style?: HolodeckStyle;
-  /** Unlit finishes only: overrides the finish colour (accent per instance). */
+  /** Unlit / liquid finishes: overrides the finish colour (accent per instance, liquid level colour). */
   color?: ColorRepresentation | Color;
+  /** Liquid finish only: overrides the opacity token (tuner slider). */
+  opacity?: number;
   /** Overrides the finish's polygon offset. */
   offset?: boolean;
   /** Iso finishes only: hub radius. Defaults to 1 (unused unless `whiteHub`). */
@@ -129,10 +153,15 @@ export function createFinishMaterial(
   opts: FinishMaterialOptions = {},
 ): MeshBasicNodeMaterial {
   const style = opts.style ?? HOLODECK_STYLE;
-  const token = typeof finish === 'string' ? style.finishes[finish] : finish;
+  const token = typeof finish === 'string' ? finishToken(style, finish) : finish;
   const offset = opts.offset ?? token.offset;
   const mat =
-    token.kind === 'iso'
+    token.kind === 'liquid'
+      ? createLiquidMaterial({
+          color: opts.color ?? token.color ?? style.colors.liquid,
+          opacity: opts.opacity ?? token.opacity,
+        })
+      : token.kind === 'iso'
       ? createIsoShadeMaterial({
           radius: opts.radius ?? 1,
           whiteHub: opts.whiteHub ?? token.whiteHub,

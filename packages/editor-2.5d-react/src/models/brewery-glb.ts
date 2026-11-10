@@ -14,7 +14,7 @@ const PKG = resolve(__dirname, '../..');
 export const loadModel = (name: string): GltfJson =>
   parseGlbJson(new Uint8Array(readFileSync(join(PKG, 'assets/models', `${name}.glb`))));
 
-export const ALLOWED_MATERIALS = ['hd.white', 'hd.shaded', 'hd.vessel', 'hd.flask', 'hd.accent'];
+export const ALLOWED_MATERIALS = ['hd.white', 'hd.shaded', 'hd.vessel', 'hd.flask', 'hd.accent', 'hd.liquid'];
 export const MAX_TRIS = 5000;
 
 export function triangleCount(gltf: GltfJson): number {

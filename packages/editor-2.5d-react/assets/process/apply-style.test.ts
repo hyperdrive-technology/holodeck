@@ -55,6 +55,48 @@ afterEach(() => {
   warn.mockRestore();
 });
 
+describe('hd.liquid (translucent liquid contract shared with the Blender lane)', () => {
+  it('parses hd.liquid and its Blender duplicate suffix', () => {
+    expect(finishForMaterialName('hd.liquid')).toBe('liquid');
+    expect(finishForMaterialName('hd.liquid.002')).toBe('liquid');
+  });
+
+  it('renders as the translucent liquid: style colour, finish opacity, depthWrite off, render order, edges', () => {
+    const liquid = part('hd.liquid', '#ff0000');
+    const shell = part('hd.vessel');
+    const root = new Group().add(shell, liquid);
+    const dispose = applyHolodeckStyle(root);
+    const mat = liquid.material as MeshBasicNodeMaterial;
+    expect(mat.userData.hdFinish).toBe('liquid');
+    expect(mat.transparent).toBe(true);
+    expect(mat.depthWrite).toBe(false);
+    expect(mat.opacity).toBeCloseTo(HOLODECK_STYLE.finishes.liquid!.opacity);
+    // Colour comes from the style, not the GLB base colour (level colour is a runtime override).
+    expect(`#${mat.color.getHexString()}`).toBe(HOLODECK_STYLE.colors.liquid);
+    expect(liquid.renderOrder).toBe(HOLODECK_STYLE.finishes.liquid!.renderOrder);
+    expect(liquid.renderOrder).toBeGreaterThan(shell.renderOrder);
+    expect(edgesOf(liquid)).toBeDefined();
+    dispose();
+    expect(liquid.renderOrder).toBe(0);
+  });
+
+  it('overrides.liquid / liquidOpacity beat the style', () => {
+    const liquid = part('hd.liquid');
+    applyHolodeckStyle(new Group().add(liquid), HOLODECK_STYLE, { liquid: '#18bae6', liquidOpacity: 0.5 });
+    const mat = liquid.material as MeshBasicNodeMaterial;
+    expect(`#${mat.color.getHexString()}`).toBe('#18bae6');
+    expect(mat.opacity).toBeCloseTo(0.5);
+  });
+
+  it('a theme without finishes.liquid still styles hd.liquid with the default token', () => {
+    const { liquid: _omit, ...finishes } = HOLODECK_STYLE.finishes;
+    const liquid = part('hd.liquid');
+    applyHolodeckStyle(new Group().add(liquid), { ...HOLODECK_STYLE, finishes });
+    expect((liquid.material as MeshBasicNodeMaterial).transparent).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
 describe('finishForMaterialName', () => {
   it('maps the hd.* contract and Blender duplicate suffixes', () => {
     expect(finishForMaterialName('hd.white')).toBe('white');

@@ -34,8 +34,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import bmesh  # noqa: E402
 import holodeck_bpy as hd  # noqa: E402
+from primitives import _dedupe, lathe  # noqa: E402,F401  (moved to primitives.py unchanged; re-exported)
 
 SEG = 16  # radial segments on every round part
 PIPE_R = 0.07
@@ -54,64 +54,6 @@ def box(name, size_t, mat, position_t=(0, 0, 0), rotation_t=(0, 0, 0), parent=No
     ]
     faces = [(4, 5, 6, 7), (1, 0, 3, 2), (5, 1, 2, 6), (0, 4, 7, 3), (3, 7, 6, 2), (0, 1, 5, 4)]
     return hd._mesh_object(name, verts, faces, mat, position_t, rotation_t, parent)
-
-
-def _dedupe(face):
-    """Drop consecutive duplicate indices (cyclic) so pole quads become tris."""
-    out = [i for k, i in enumerate(face) if i != face[k - 1]]
-    return tuple(out)
-
-
-def lathe(name, profile, seg, mat, position_t=(0, 0, 0), parent=None, arc=None, arc_steps=3):
-    """Solid of revolution about three-space +Y.
-
-    `profile` is [(r, y), ...] ordered TOP -> BOTTOM. Rings with r == 0 are
-    single shared pole vertices. Full revolution: a non-zero first/last r gets
-    an n-gon cap. `arc=(a0, a1)` (radians, theta as in hd.cylinder: x=r sin,
-    z=r cos) builds a closed pie slice instead; then profile must start and
-    end on the axis (r == 0).
-    Face winding is fixed afterwards with bmesh.recalc_face_normals so it
-    does not depend on getting every orientation right by hand (closed
-    manifold meshes only, which all of these are).
-    """
-    cols = (arc_steps + 1) if arc else seg
-    verts, rings = [], []
-    for r, y in profile:
-        if r <= 1e-9:
-            verts.append((0.0, y, 0.0))
-            rings.append([len(verts) - 1] * cols)
-        else:
-            ring = []
-            for c in range(cols):
-                th = (arc[0] + c / arc_steps * (arc[1] - arc[0])) if arc else c / seg * math.tau
-                verts.append((r * math.sin(th), y, r * math.cos(th)))
-                ring.append(len(verts) - 1)
-            rings.append(ring)
-    faces = []
-    n_quads = arc_steps if arc else seg
-    for a, b in zip(rings, rings[1:]):
-        for c in range(n_quads):
-            c2 = c + 1 if arc else (c + 1) % seg
-            f = _dedupe((a[c], b[c], b[c2], a[c2]))
-            if len(f) >= 3:
-                faces.append(f)
-    if arc:
-        assert profile[0][0] == 0 and profile[-1][0] == 0, "arc lathe profile must start/end on the axis"
-        faces.append(_dedupe(tuple(ring[0] for ring in rings)))
-        faces.append(_dedupe(tuple(ring[-1] for ring in reversed(rings))))
-    else:
-        if profile[0][0] > 0:
-            faces.append(tuple(rings[0]))
-        if profile[-1][0] > 0:
-            faces.append(tuple(reversed(rings[-1])))
-    obj = hd._mesh_object(name, verts, faces, mat, position_t, (0, 0, 0), parent)
-    bm = bmesh.new()
-    bm.from_mesh(obj.data)
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    bm.to_mesh(obj.data)
-    bm.free()
-    obj.data.update()
-    return obj
 
 
 def dome_top(radius, y0, height, steps=3):
