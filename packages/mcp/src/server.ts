@@ -24,6 +24,7 @@ import { createMcpHost } from './host';
 import {
   MAX_COORD,
   MAX_IDS_PER_CALL,
+  MAX_IMAGE_BYTES,
   MAX_NAME_LENGTH,
   MAX_PARAMS_PER_CALL,
   MAX_PARTS_PAGE,
@@ -31,7 +32,7 @@ import {
   MAX_TEXT_LENGTH,
 } from './limits';
 import { listParts, partDetail } from './parts';
-import { errorResult, imageResult, okResult } from './result';
+import { errorResult, imageResult, imageTooLarge, okResult } from './result';
 import { MAX_SIDE, MIN_SIDE, SceneRenderer } from './render';
 import { SceneEditor } from './scene-editor';
 import { createIsoDocument, createPlaygroundDocument, serializeDocument, withDocumentId, withDocumentName } from './studio';
@@ -581,7 +582,9 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
     {
       title: 'Render a document',
       description:
-        'A PNG of the document as the studio draws it (run mode, scene fitted, params as stored; no live data), captured in headless Chromium with WebGPU. No WebGPU, a refused document, a timeout or a flat image is an explicit error, never a blank picture. Optionally also writes the PNG to `out` (.png, needs tier author). Needs the studio build (apps/studio: pnpm build).',
+        'A PNG of the document as the studio draws it (run mode, scene fitted, params as stored; no live data), captured in headless Chromium with WebGPU. No WebGPU, a refused document, a timeout or a flat image is an explicit error, never a blank picture. Optionally also writes the PNG to `out` (.png, needs tier author). A PNG over ' +
+        `${MAX_IMAGE_BYTES / 1024 / 1024} MB` +
+        ' is not returned inline: too_large, or with `out` the file is written and only its metadata returned (inline: false). Needs the studio build (apps/studio: pnpm build).',
       tier: 'read',
       input: {
         path: optionalPath,
@@ -601,7 +604,17 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
       const png = await context.renderer.render(loaded.document, { width: args.width, height: args.height });
       const meta: Record<string, unknown> = { path: loaded.path, etag: loaded.etag, width: args.width, height: args.height, bytes: png.byteLength };
       if (args.out !== undefined) meta.out = (await workspace.writeData(args.out, png, args.overwrite ? undefined : null, '.png')).path;
-      return { raw: imageResult(png, meta) };
+      // Too big to return inline (MAX_IMAGE_BYTES): with `out` the file is
+      // written anyway and only the metadata comes back; without it, too_large.
+      if (meta.out !== undefined && imageTooLarge(png)) {
+        return { ...meta, inline: false, note: `the PNG (${png.byteLength} bytes) is over the ${MAX_IMAGE_BYTES}-byte inline limit: it was written to ${String(meta.out)} but is not returned here` };
+      }
+      return {
+        raw: imageResult(png, meta, [
+          'pass `out` (a .png path in the workspace) to write the image to a file instead',
+          `or ask for a smaller width / height (now ${args.width} x ${args.height})`,
+        ]),
+      };
     },
   );
 
