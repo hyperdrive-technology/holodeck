@@ -1336,3 +1336,79 @@ describe('load: switching documents', () => {
     expect(emitted.map((e) => e.id)).toEqual(['B']);
   });
 });
+
+describe('apply-scene (an edit computed outside the editor: the MCP playground bridge)', () => {
+  const withTank = () => {
+    let s = editorReducer(blank(), { type: 'place-mode', object: 'tank' });
+    s = editorReducer(s, { type: 'floor-click', x: 0, y: 0 });
+    return editorReducer(s, { type: 'select-mode' });
+  };
+
+  it('commits several changes as one undo step, and undo / redo restore around it', () => {
+    const before = withTank();
+    // What a headless run of several actions produces: two new valves and a moved tank.
+    let side = editorReducer(before, { type: 'place-mode', object: 'valve' });
+    side = editorReducer(side, { type: 'floor-click', x: 4, y: 0 });
+    side = editorReducer(side, { type: 'floor-click', x: 6, y: 0 });
+    const target = { ...side.scene, objects: side.scene.objects.map((o) => (o.id === 'tank-1' ? { ...o, x: -3 } : o)) };
+
+    const applied = editorReducer(before, { type: 'apply-scene', scene: target });
+    expect(applied.revision).toBe(before.revision + 1);
+    expect(applied.past).toHaveLength(before.past.length + 1);
+    expect(applied.future).toEqual([]);
+    expect(applied.scene.objects.map((o) => o.id)).toEqual(['tank-1', 'valve-1', 'valve-2']);
+    // The editor keeps the given object (the host matches it to know the edit landed).
+    expect(applied.scene).toBe(target);
+    expect(committedScene(before, applied)).toBe(applied.scene);
+
+    const undone = editorReducer(applied, { type: 'undo' });
+    expect(undone.scene.objects.map((o) => o.id)).toEqual(['tank-1']);
+    expect(undone.scene.objects[0]!.x).toBe(0);
+    const redone = editorReducer(undone, { type: 'redo' });
+    expect(redone.scene.objects.map((o) => [o.id, o.x])).toEqual([
+      ['tank-1', -3],
+      ['valve-1', 4],
+      ['valve-2', 6],
+    ]);
+  });
+
+  it('refuses a scene of another document, unknown parts and bad geometry, changing nothing', () => {
+    const before = withTank();
+    const other = editorReducer(before, { type: 'apply-scene', scene: { ...before.scene, id: 'other' } });
+    expect(other.notice).toMatch(/^Edit rejected: the scene is for document "other"/);
+    expect(other.scene).toBe(before.scene);
+    expect(other.revision).toBe(before.revision);
+
+    const unknown = editorReducer(before, {
+      type: 'apply-scene',
+      scene: { ...before.scene, objects: [...before.scene.objects, { id: 'x-1', object: 'no-such-part', x: 1, y: 1 } as IsoPlacement] },
+    });
+    expect(unknown.notice).toMatch(/^Edit rejected/);
+    expect(unknown.revision).toBe(before.revision);
+    expect(unknown.past).toBe(before.past);
+
+    const nan = editorReducer(before, {
+      type: 'apply-scene',
+      scene: { ...before.scene, objects: before.scene.objects.map((o) => ({ ...o, x: Number.NaN })) },
+    });
+    expect(nan.notice).toMatch(/^Edit rejected/);
+    expect(nan.revision).toBe(before.revision);
+  });
+
+  it('is ignored in run mode (read-only), like every edit', () => {
+    const ro = editorReducer(withTank(), { type: 'set-read-only', readOnly: true });
+    const after = editorReducer(ro, { type: 'apply-scene', scene: { ...ro.scene, objects: [] } });
+    expect(after).toBe(ro);
+  });
+
+  it('drops a pipe being drawn and keeps a selection that survives', () => {
+    let s = withTank();
+    s = editorReducer(s, { type: 'select', id: 'tank-1' });
+    s = editorReducer(s, { type: 'pipe-mode' });
+    s = editorReducer(s, { type: 'floor-click', x: 5, y: 5 });
+    expect(s.pipeStart).not.toBeNull();
+    const applied = editorReducer(s, { type: 'apply-scene', scene: { ...s.scene, objects: s.scene.objects.map((o) => ({ ...o, y: 2 })) } });
+    expect(applied.pipeStart).toBeNull();
+    expect(applied.scene.objects[0]!.y).toBe(2);
+  });
+});

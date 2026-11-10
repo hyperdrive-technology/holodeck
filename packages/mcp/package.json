@@ -55,9 +55,11 @@
   "devDependencies": {
     "@types/node": "^26.0.0",
     "@types/pngjs": "^6.0.5",
+    "@types/ws": "8.18.2",
     "tsup": "^8.5.1",
     "typescript": "^6.0.0",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "ws": "8.22.1"
   },
   "engines": {
     "node": ">=26.13.0"

@@ -221,6 +221,17 @@ export type EditorAction =
    * transient editing state are reset (see `loadDocument`).
    */
   | { type: 'load'; scene: IsoSceneFile }
+  /**
+   * Commit a scene computed outside the editor as ONE undo step: an agent's
+   * edit arriving over the MCP playground bridge (holodeck docs/MCP.md), which
+   * ran these same reducer actions headlessly on a copy. Unlike `load` it is
+   * a commit (history, `revision`, `onChange`). Must keep `scene.id` (a
+   * different document is refused); validated like any commit (geometry, new
+   * placements' part types). Ignored in run mode like every edit. The editor
+   * keeps the given object as its scene (as `load` does), so a host can tell
+   * when it was committed; don't mutate it afterwards.
+   */
+  | { type: 'apply-scene'; scene: IsoSceneFile }
   | { type: 'set-read-only'; readOnly: boolean }
   | { type: 'cancel' };
 
@@ -1157,6 +1168,13 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
       });
     case 'load':
       return loadDocument(state, action.scene);
+    case 'apply-scene':
+      if (action.scene.id !== state.scene.id) {
+        return { ...state, notice: `${EDIT_REJECTED_PREFIX}: the scene is for document "${action.scene.id}", not "${state.scene.id}"` };
+      }
+      // Any gesture in progress is dropped (commit clears drag / resize); the
+      // host refuses an apply mid-gesture before it gets here.
+      return commit(state, action.scene, { linkDrag: null, pipeStart: null, pipeStartHeading: null, linkStart: null });
     case 'set-read-only':
       return action.readOnly === state.readOnly
         ? state
