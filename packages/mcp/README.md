@@ -82,7 +82,9 @@ tier it needs.
   param out of range), the whole call fails.
 - **Size bounds**: documents up to 20 MB (the studio import limit); results up
   to 256k characters (narrow the request with `objectIds`, `view: "summary"`,
-  `limit`); every input string and list is bounded by its schema
+  `limit`); `scene_render` images up to 3 MB of PNG (bigger is `too_large`:
+  pass `out` to write the file instead, or render smaller); every input
+  string and list is bounded by its schema
   (`src/limits.ts`).
 
 ## Rendering
@@ -100,7 +102,13 @@ viewport. These cases are errors with a reason, never a blank PNG:
 
 One browser starts on first use. Renders run one at a time. The browser
 closes after 2 idle minutes, when the client disconnects, or on SIGINT /
-SIGTERM.
+SIGTERM; renders still queued then fail with `closed` and the one in
+progress is aborted. A browser that crashes or is killed is forgotten and
+the next render starts a new one.
+
+A PNG over 3 MB (`MAX_IMAGE_BYTES`, 4 MB as base64) is not put in the tool
+result: without `out` it is a `too_large` error; with `out` the file is
+written and the result carries only its metadata (`inline: false`).
 
 Design notes, the playground bridge and the Blender flow: [`docs/MCP.md`](../../docs/MCP.md).
 

@@ -1,6 +1,6 @@
 /**
  * Size bounds. Every tool input is capped by its zod schema and every output
- * by `MAX_RESULT_CHARS`, so one call can never pull a huge file into the
+ * by `MAX_RESULT_CHARS` (images: `MAX_IMAGE_BYTES`), so one call can never pull a huge file into the
  * model's context or make the server hold one in memory.
  */
 
@@ -10,6 +10,12 @@ import { MAX_IMPORT_BYTES } from './studio';
 export const MAX_DOCUMENT_BYTES = MAX_IMPORT_BYTES;
 /** Longest text a tool returns (about 64k tokens). Bigger results ask the caller to narrow the request. */
 export const MAX_RESULT_CHARS = 256 * 1024;
+/**
+ * Largest PNG returned inline by `scene_render`: 3 MiB, which is 4 MiB once
+ * base64-encoded in the tool result. A busy 2048 x 2048 render can be several
+ * MB; past this the caller gets `too_large` (or, with `out`, the file only).
+ */
+export const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 /** Longest workspace-relative path accepted. */
 export const MAX_PATH_LENGTH = 512;
 /** Most objects one call may name (remove, get). */

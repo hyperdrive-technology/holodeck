@@ -2,7 +2,7 @@
 
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { messageOf, ToolError } from './errors';
-import { MAX_RESULT_CHARS } from './limits';
+import { MAX_IMAGE_BYTES, MAX_RESULT_CHARS } from './limits';
 
 export function okResult(payload: Record<string, unknown>): CallToolResult {
   const text = JSON.stringify(payload, null, 2);
@@ -23,8 +23,18 @@ export function errorResult(error: unknown): CallToolResult {
   return { isError: true, content: [{ type: 'text', text }], structuredContent: { error: { code, message, problems } } };
 }
 
-/** An image plus its metadata (as JSON text and `structuredContent`). */
-export function imageResult(png: Uint8Array, payload: Record<string, unknown>): CallToolResult {
+/** Would this PNG be refused inline by `imageResult`? */
+export const imageTooLarge = (png: Uint8Array): boolean => png.byteLength > MAX_IMAGE_BYTES;
+
+/**
+ * An image plus its metadata (as JSON text and `structuredContent`). A PNG
+ * over `MAX_IMAGE_BYTES` is a `too_large` error carrying `hints` (what the
+ * caller can do instead), never a multi-MB result in the model's context.
+ */
+export function imageResult(png: Uint8Array, payload: Record<string, unknown>, hints: readonly string[] = []): CallToolResult {
+  if (imageTooLarge(png)) {
+    return errorResult(new ToolError(`the image is ${png.byteLength} bytes, over the ${MAX_IMAGE_BYTES}-byte limit for an inline image`, hints, 'too_large'));
+  }
   const meta = okResult(payload);
   if (meta.isError) return meta;
   return { content: [{ type: 'image', data: Buffer.from(png).toString('base64'), mimeType: 'image/png' }, ...meta.content], structuredContent: payload };
