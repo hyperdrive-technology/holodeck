@@ -225,8 +225,12 @@ def check(*, kind, footprint, height, ports=(), anim=(), length=None, y_min=0):
     allowed_high = (footprint[0] / 2, y_min + height, footprint[1] / 2)
     if any(low[i] < allowed_low[i] - EPS or high[i] > allowed_high[i] + EPS for i in range(3)):
         raise ValueError(f"bounds {low} .. {high} exceed {allowed_low} .. {allowed_high}")
-    if kind in {"floor", "mounted"} and abs(low[1]) > EPS:
-        raise ValueError(f"{kind} part must start at Y=0, got {low[1]}")
+    # Floor parts rest on Y=0. Mounted parts start at y_min: 0 for most, below
+    # 0 for a part that hangs through its mounting face (a radar horn).
+    if kind == "floor" and abs(low[1]) > EPS:
+        raise ValueError(f"floor part must start at Y=0, got {low[1]}")
+    if kind == "mounted" and abs(low[1] - y_min) > EPS:
+        raise ValueError(f"mounted part must start at Y={y_min}, got {low[1]}")
     if triangles >= 3000:
         raise ValueError(f"triangle budget exceeded: {triangles} >= 3000")
     for prefix, expected in (("port.", ports), ("anim.", anim)):
