@@ -30,3 +30,16 @@ export { metadataProblems, stampDocument, withDocumentId, withDocumentName } fro
 export { createIsoDocument, DEFAULT_DOCUMENT_NAME } from '../../../apps/studio/src/documents/new-document';
 export { createPlaygroundDocument, PLAYGROUND_CONNECTION_ID } from '../../../apps/studio/src/playground/starter';
 export { connectionConfigProblems, credentialInText } from '../../../apps/studio/src/connections/credentials';
+export {
+  BRIDGE_FILE_NAME,
+  BRIDGE_PROTOCOL_VERSION,
+  BRIDGE_REQUEST_TIMEOUT_MS,
+  BRIDGE_STATUS_METHOD,
+  MAX_BRIDGE_MESSAGE_BYTES,
+  parseBridgeMessage,
+  type BridgeFile,
+  type BridgeStatus,
+  type EditResult,
+  type ScreenshotResult,
+  type SessionState,
+} from '../../../apps/studio/src/playground/bridge-protocol';

@@ -16,7 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { z, type ZodRawShape } from 'zod';
-import type { HolodeckHost, SignalBinding } from '@holodeck/sdk';
+import { SIM_PROVIDER_ID, type HolodeckHost, type HolodeckProvider, type ProviderConnection, type ProviderContext, type SignalBinding, type SignalNode } from '@holodeck/sdk';
 import { isoComponentsCsv, type IsoPlacement } from '@holodeck/editor-2.5d-react';
 import { DocumentStore, type IsoDoc, type LoadedDocument } from './documents';
 import { ToolError } from './errors';
@@ -31,12 +31,23 @@ import {
   MAX_TEXT_LENGTH,
 } from './limits';
 import { listParts, partDetail } from './parts';
+import { PlaygroundBridge, PLAYGROUND_PATH } from './playground';
 import { errorResult, imageResult, okResult } from './result';
 import { MAX_SIDE, MIN_SIDE, SceneRenderer } from './render';
 import { SceneEditor } from './scene-editor';
-import { createIsoDocument, createPlaygroundDocument, serializeDocument, withDocumentId, withDocumentName } from './studio';
+import {
+  connectionConfigProblems,
+  createIsoDocument,
+  createPlaygroundDocument,
+  serializeDocument,
+  withDocumentId,
+  withDocumentName,
+  type EditResult,
+  type ScreenshotResult,
+  type SessionState,
+} from './studio';
 import { DEFAULT_TIER, TIERS, tierAllows, type Tier } from './tiers';
-import { Workspace } from './workspace';
+import { serialised, Workspace } from './workspace';
 
 /** Room left for an edit acknowledgement: well under MAX_RESULT_CHARS, so it can never be refused after a save. */
 const MAX_ACK_CHARS = 64 * 1024;
@@ -54,6 +65,8 @@ export interface HolodeckMcpOptions {
   now?: () => Date;
   /** Headless renderer for `scene_render` (default: the built studio in Chromium, started on first use). */
   renderer?: SceneRenderer;
+  /** Link to `pnpm playground` (default: reads `.holodeck-mcp.json`, see playground.ts). */
+  bridge?: PlaygroundBridge;
 }
 
 /** What the tools share. `current` is the document `scene_open` selected. */
@@ -63,6 +76,8 @@ export interface ServerContext {
   workspace: Workspace;
   store: DocumentStore;
   renderer: SceneRenderer;
+  bridge: PlaygroundBridge;
+  /** A document path, `@playground`, or null. */
   current: string | null;
 }
 
@@ -80,9 +95,13 @@ export interface HolodeckMcp {
 const name = z.string().min(1).max(MAX_NAME_LENGTH);
 const coord = z.number().finite().min(-MAX_COORD).max(MAX_COORD);
 const point = z.object({ x: coord, y: coord }).strict();
-const docPath = z.string().min(1).max(MAX_PATH_LENGTH).describe('Document path relative to the workspace root, ending in .holodeck.json');
+const docPath = z
+  .string()
+  .min(1)
+  .max(MAX_PATH_LENGTH)
+  .describe(`Document path relative to the workspace root, ending in .holodeck.json; or "${PLAYGROUND_PATH}" for the scene open in the playground tab (pnpm playground)`);
 const optionalPath = docPath.optional().describe('Document path (default: the document scene_open selected)');
-const etag = z.string().max(64).optional().describe('The etag from scene_get / the last edit: refuse if the file changed since (optional)');
+const etag = z.string().max(64).optional().describe('The etag from scene_get / playground_state / the last edit: refuse if the document changed since (optional)');
 const boundedRecord = (what: string) =>
   z
     .record(z.string().min(1).max(MAX_NAME_LENGTH), z.unknown())
@@ -139,6 +158,45 @@ function documentSummary(loaded: Pick<LoadedDocument, 'path' | 'etag' | 'documen
   };
 }
 
+/** Most signal nodes one `provider_browse` returns (the tab caps at the same number). */
+const MAX_BROWSE_NODES = 500;
+const OFFLINE_BROWSE_TIMEOUT_MS = 10_000;
+/** Providers `provider_browse` may connect in this process for a document file: no network, no secrets. */
+const OFFLINE_PROVIDERS = new Set([SIM_PROVIDER_ID]);
+
+/**
+ * Browse a provider that needs no network and no secrets (the simulator) in
+ * this process: connect, list, close. Its context refuses network use.
+ */
+async function browseOffline(host: HolodeckHost, provider: HolodeckProvider, connection: ProviderConnection, path: string | undefined): Promise<SignalNode[]> {
+  const abort = new AbortController();
+  const ctx: ProviderContext = {
+    connectionId: connection.id,
+    secret: async () => undefined,
+    fetch: (async () => {
+      throw new Error('network use is not allowed here');
+    }) as typeof fetch,
+    now: () => Date.now(),
+    registry: host.registry,
+    log: () => undefined,
+    signal: abort.signal,
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new ToolError(`provider "${provider.id}" did not answer in time`, [], 'timeout')), OFFLINE_BROWSE_TIMEOUT_MS);
+  });
+  let session: Awaited<ReturnType<HolodeckProvider['connect']>> | undefined;
+  try {
+    session = await Promise.race([provider.connect(connection.config ?? {}, ctx), deadline]);
+    if (!session.browse) throw new ToolError(`provider "${provider.id}" cannot list its signals`, [], 'unsupported');
+    return await Promise.race([session.browse(path), deadline]);
+  } finally {
+    clearTimeout(timer);
+    abort.abort();
+    await session?.close().catch(() => undefined);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------
@@ -152,6 +210,7 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
     workspace,
     store: new DocumentStore(workspace, host, options.now),
     renderer: options.renderer ?? new SceneRenderer(),
+    bridge: options.bridge ?? new PlaygroundBridge(),
     current: null,
   };
   const server = new McpServer(
@@ -162,6 +221,8 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
         'Typical loop: parts_list / parts_get to learn parts (params, ports), scene_new or scene_open,',
         'scene_add_object, scene_connect (pipes between ports), scene_update_params, scene_bind, then scene_validate / scene_get.',
         'Every edit is validated like a studio save; an invalid edit is refused with every problem listed and nothing is written.',
+        `When the user runs pnpm playground, path "${PLAYGROUND_PATH}" edits the scene open in their browser tab live (one undo step per call);`,
+        'playground_status says whether one is connected, playground_state / playground_screenshot read it back. Providers: provider_list, provider_connect, provider_browse.',
       ].join(' '),
     },
   );
@@ -202,8 +263,30 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
   };
 
   /**
+   * The playground tab's working copy, validated like a file (the bridge
+   * returns it with an etag that changes whenever the user edits).
+   */
+  const loadPlayground = async (): Promise<LoadedDocument & { state: SessionState }> => {
+    const state = (await context.bridge.call('state', { metrics: false })) as SessionState;
+    const parsed = context.store.parse(JSON.stringify(state.document), 'the playground document');
+    return { path: PLAYGROUND_PATH, etag: String(state.etag), document: parsed.document, wrapped: false, state };
+  };
+  const load = (path: string): Promise<LoadedDocument> => (path === PLAYGROUND_PATH ? loadPlayground() : context.store.load(path));
+
+  /** Validate `doc` as a save would, then have the tab commit its body as ONE undo step (`apply`). */
+  const applyPlayground = async (basedOn: string, doc: IsoDoc): Promise<LoadedDocument> => {
+    const checked = context.store.check(doc);
+    const applied = (await context.bridge.call('apply', { etag: basedOn, scene: checked.body })) as EditResult;
+    return { path: PLAYGROUND_PATH, etag: String(applied.etag), document: context.store.parse(JSON.stringify(applied.document), 'the playground document').document, wrapped: false };
+  };
+  /** Playground edits from this server run one at a time, like file edits. */
+  const playgroundLocks = new Map<string, Promise<unknown>>();
+  const exclusive = <T,>(target: string, fn: () => Promise<T>): Promise<T> =>
+    target === PLAYGROUND_PATH ? serialised(playgroundLocks, PLAYGROUND_PATH, fn) : workspace.exclusive(target, fn);
+
+  /**
    * Load, run `fn` on a SceneEditor, validate and save. One tool call = one
-   * write. Edits of one document run one at a time (`Workspace.exclusive`), so
+   * write (for `@playground`: one undo step in the tab). Edits of one document run one at a time (`Workspace.exclusive`), so
    * two concurrent calls both apply instead of one overwriting the other.
    */
   const edit = async <R,>(
@@ -212,15 +295,16 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
     fn: (editor: SceneEditor, doc: IsoDoc) => R,
   ): Promise<{ result: R; saved: LoadedDocument; editor: SceneEditor; before: LoadedDocument }> => {
     const target = pathOf(path);
-    return workspace.exclusive(target, async () => {
-      const loaded = await context.store.load(target);
+    return exclusive(target, async () => {
+      const loaded = await load(target);
       if (expected !== undefined && expected !== loaded.etag) {
         throw new ToolError(`${loaded.path} changed since you read it (etag ${expected}, now ${loaded.etag})`, ['read it again (scene_get) and redo the edit'], 'conflict');
       }
       const editor = new SceneEditor(loaded.document.body, host.registry);
       const result = fn(editor, loaded.document);
       if (!editor.changed) throw new ToolError('nothing changed', editor.notices, 'no_change');
-      const saved = await context.store.save(loaded.path, { ...loaded.document, body: editor.scene }, loaded.etag);
+      const next: IsoDoc = { ...loaded.document, body: editor.scene };
+      const saved = target === PLAYGROUND_PATH ? await applyPlayground(loaded.etag, next) : await context.store.save(loaded.path, next, loaded.etag);
       return { result, saved, editor, before: loaded };
     });
   };
@@ -320,7 +404,7 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
       annotations: READ,
     },
     async (args) => {
-      const loaded = await context.store.load(args.path);
+      const loaded = await load(args.path);
       context.current = loaded.path;
       return { ...documentSummary(loaded), wrapped: loaded.wrapped };
     },
@@ -341,7 +425,7 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
       annotations: READ,
     },
     async (args) => {
-      const loaded = await context.store.load(pathOf(args.path));
+      const loaded = await load(pathOf(args.path));
       const wanted = args.objectIds ? new Set(args.objectIds) : null;
       const objects = loaded.document.body.objects.filter((o) => !wanted || wanted.has(o.id));
       const missing = args.objectIds?.filter((id: string) => !objects.some((o) => o.id === id)) ?? [];
@@ -373,7 +457,7 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
         return { valid: problems.length === 0, problems };
       }
       try {
-        const loaded = await context.store.load(pathOf(args.path));
+        const loaded = await load(pathOf(args.path));
         return { valid: true, problems: [], path: loaded.path, etag: loaded.etag, wrapped: loaded.wrapped };
       } catch (error) {
         if (error instanceof ToolError && error.code === 'invalid_document') return { valid: false, problems: [...error.problems] };
@@ -400,6 +484,9 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
       annotations: DESTRUCTIVE,
     },
     async (args) => {
+      if (args.path === PLAYGROUND_PATH) {
+        throw new ToolError('the playground document always exists', ['edit it with the scene tools (path "@playground"), or ask the user to press Reset in the page'], 'invalid_request');
+      }
       const id = randomUUID();
       let doc: IsoDoc = args.template === 'starter' ? withDocumentId(createPlaygroundDocument(), id) : createIsoDocument(args.name, id);
       if (args.name !== undefined) doc = withDocumentName(doc, args.name.trim() || doc.name);
@@ -566,7 +653,7 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
       annotations: WRITE,
     },
     async (args) => {
-      const loaded = await context.store.load(pathOf(args.path));
+      const loaded = await load(pathOf(args.path));
       const text = args.format === 'document' ? serializeDocument(loaded.document) : isoComponentsCsv(loaded.document.body, host.registry);
       if (args.out === undefined) return { path: loaded.path, format: args.format, text };
       if (!tierAllows(context.tier, 'author')) throw new ToolError(`writing an export needs tier "author"; this server runs at "${context.tier}"`, [], 'tier');
@@ -597,7 +684,7 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
         throw new ToolError(`writing a render needs tier "author"; this server runs at "${context.tier}"`, [], 'tier');
       }
       if (args.out !== undefined) workspace.lexical(args.out, '.png');
-      const loaded = await context.store.load(pathOf(args.path));
+      const loaded = await load(pathOf(args.path));
       const png = await context.renderer.render(loaded.document, { width: args.width, height: args.height });
       const meta: Record<string, unknown> = { path: loaded.path, etag: loaded.etag, width: args.width, height: args.height, bytes: png.byteLength };
       if (args.out !== undefined) meta.out = (await workspace.writeData(args.out, png, args.overwrite ? undefined : null, '.png')).path;
@@ -605,10 +692,235 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
     },
   );
 
-  // Close the render browser with the server (transport closed, client gone).
-  server.server.onclose = () => void context.renderer.close();
+  // --- Playground (live tab over the bridge) ---------------------------------
+
+  tool(
+    'playground_status',
+    {
+      title: 'Playground status',
+      description: `Is pnpm playground running with its MCP bridge, and which tabs are connected? The newest tab is the one "${PLAYGROUND_PATH}" edits. Never an error when nothing runs.`,
+      tier: 'read',
+      input: {},
+      annotations: READ,
+    },
+    async () => {
+      let found;
+      try {
+        found = await context.bridge.status();
+      } catch (error) {
+        if (error instanceof ToolError && error.code === 'no_bridge') return { running: false, file: context.bridge.file, reason: error.message, hints: [...error.problems] };
+        throw error;
+      }
+      if (!found) {
+        return { running: false, file: context.bridge.file, hints: ['ask the user to run: cd holodeck/apps/studio && pnpm playground', 'meanwhile, edit document files (scene_new / path)'] };
+      }
+      return {
+        running: true,
+        file: found.file,
+        url: found.bridge.url,
+        studio: found.bridge.studio,
+        startedAt: found.bridge.startedAt,
+        sessions: found.status.sessions,
+        connected: found.status.sessions.length > 0,
+        ...(found.status.sessions.length ? {} : { hints: [`open the playground page${found.bridge.studio ? ` (${found.bridge.studio})` : ''} in a browser`] }),
+      };
+    },
+  );
+
+  tool(
+    'playground_state',
+    {
+      title: 'Read the live playground',
+      description: `The scene open in the playground tab, as the user sees it (saved or not): etag (pass it to edits), active tab (edit / viewer; edits need edit), save status, selection, why edits would wait (busy), connection states and live values. view "summary" lists objects compactly, "full" returns the document. Scene tools edit it with path "${PLAYGROUND_PATH}".`,
+      tier: 'read',
+      input: {
+        view: z.enum(['summary', 'full']).default('summary'),
+        metrics: z.boolean().default(true).describe('Include the live values (bounded)'),
+      },
+      annotations: READ,
+    },
+    async (args) => {
+      const state = (await context.bridge.call('state', { metrics: args.metrics })) as SessionState;
+      const { document } = context.store.parse(JSON.stringify(state.document), 'the playground document');
+      const loaded = { path: PLAYGROUND_PATH, etag: String(state.etag), document };
+      const live = {
+        tab: state.tab,
+        save: state.save,
+        selectedId: state.selectedId,
+        busy: state.busy,
+        connectionStates: state.connections,
+        ...(state.metrics ? { metrics: state.metrics } : {}),
+        ...(state.metricsOmitted ? { metricsOmitted: state.metricsOmitted } : {}),
+      };
+      if (args.view === 'full') return { path: PLAYGROUND_PATH, etag: loaded.etag, ...live, document };
+      return { ...documentSummary(loaded), ...live, objects: document.body.objects.map(objectSummary) };
+    },
+  );
+
+  tool(
+    'playground_screenshot',
+    {
+      title: 'Screenshot the playground',
+      description:
+        'A PNG of the playground canvas as the user sees it now (live values, current camera). scale 1–4 multiplies the canvas size. Optionally also writes it to `out` (.png, needs tier author).',
+      tier: 'read',
+      input: {
+        scale: z.number().min(1).max(4).default(1),
+        out: z.string().min(1).max(MAX_PATH_LENGTH).optional(),
+        overwrite: z.boolean().default(false),
+      },
+      annotations: READ,
+    },
+    async (args) => {
+      if (args.out !== undefined && !tierAllows(context.tier, 'author')) {
+        throw new ToolError(`writing a screenshot needs tier "author"; this server runs at "${context.tier}"`, [], 'tier');
+      }
+      if (args.out !== undefined) workspace.lexical(args.out, '.png');
+      const shot = (await context.bridge.call('screenshot', { scale: args.scale })) as ScreenshotResult;
+      if (typeof shot?.data !== 'string') throw new ToolError('the playground returned no image', [], 'playground');
+      const png = new Uint8Array(Buffer.from(shot.data, 'base64'));
+      const meta: Record<string, unknown> = { path: PLAYGROUND_PATH, width: shot.width, height: shot.height, bytes: png.byteLength };
+      if (args.out !== undefined) meta.out = (await workspace.writeData(args.out, png, args.overwrite ? undefined : null, '.png')).path;
+      return { raw: imageResult(png, meta) };
+    },
+  );
+
+  // --- Providers --------------------------------------------------------------
+
+  const providers = () => host.registry.list<HolodeckProvider>('holodeck.provider');
+  const providerOf = (id: string): HolodeckProvider => {
+    const provider = providers().find((p) => p.id === id);
+    if (!provider) throw new ToolError(`no provider "${id}" is installed`, [`installed: ${providers().map((p) => p.id).join(', ')}`], 'not_found');
+    return provider;
+  };
+  /** Secrets the user must enter in the studio (an agent never handles them). */
+  const requiredSecrets = (provider: HolodeckProvider) => (provider.secrets ?? []).filter((s) => !s.optional).map((s) => s.key);
+
+  tool(
+    'provider_list',
+    {
+      title: 'List providers',
+      description:
+        'Installed data providers (the studio Connections tab): id, capabilities, source syntax for bindings, the JSON Schema of the secret-free config provider_connect takes, and the secrets the user enters in the studio (never via tools).',
+      tier: 'read',
+      input: {},
+      annotations: READ,
+    },
+    async () => ({
+      providers: providers().map((p) => ({
+        id: p.id,
+        label: p.label,
+        description: p.description ?? null,
+        capabilities: p.capabilities,
+        sourceSyntax: p.sourceSyntax ?? null,
+        configSchema: p.configSchema ?? null,
+        secrets: (p.secrets ?? []).map((sec) => ({ key: sec.key, label: sec.label, optional: sec.optional === true })),
+        network: p.origins ?? [],
+      })),
+    }),
+  );
+
+  tool(
+    'provider_connect',
+    {
+      title: 'Add or replace a connection',
+      description: `Add a ProviderConnection to a document (or replace the one with the same id): {id, provider, label?, config?}. Config must be secret-free: the studio's credential rules refuse tokens, passwords, Authorization headers, user:pass URLs and the like; secrets are entered by the user in the studio. On "${PLAYGROUND_PATH}" the tab connects it at once.`,
+      tier: 'author',
+      input: {
+        path: optionalPath,
+        etag,
+        connection: z
+          .object({
+            id: name,
+            provider: name,
+            label: z.string().max(MAX_TEXT_LENGTH).optional(),
+            config: z.record(z.string(), z.unknown()).optional(),
+          })
+          .strict(),
+      },
+      annotations: WRITE,
+    },
+    async (args) => {
+      const target = pathOf(args.path);
+      const provider = providerOf(args.connection.provider);
+      const connection: ProviderConnection = {
+        id: args.connection.id,
+        provider: args.connection.provider,
+        ...(args.connection.label ? { label: args.connection.label } : {}),
+        ...(args.connection.config ? { config: args.connection.config } : {}),
+      };
+      const problems = connectionConfigProblems(connection, provider);
+      if (problems.length) throw new ToolError('the connection config is refused', problems, 'invalid_connection');
+      const missing = requiredSecrets(provider);
+      const notices = missing.length ? [`the user must enter ${missing.join(', ')} for "${connection.id}" in the studio (Connections tab) before it connects`] : [];
+      return exclusive(target, async () => {
+        if (target === PLAYGROUND_PATH) {
+          const done = (await context.bridge.call('connect', { connection, ...(args.etag ? { etag: args.etag } : {}) })) as EditResult;
+          return { path: PLAYGROUND_PATH, etag: String(done.etag), connection, notices };
+        }
+        const loaded = await context.store.load(target);
+        if (args.etag !== undefined && args.etag !== loaded.etag) {
+          throw new ToolError(`${loaded.path} changed since you read it (etag ${args.etag}, now ${loaded.etag})`, ['read it again (scene_get) and redo the edit'], 'conflict');
+        }
+        const existing = loaded.document.connections ?? [];
+        const replaced = existing.some((c) => c.id === connection.id);
+        const connections = replaced ? existing.map((c) => (c.id === connection.id ? connection : c)) : [...existing, connection];
+        const saved = await context.store.save(loaded.path, { ...loaded.document, connections }, loaded.etag);
+        return { path: saved.path, etag: saved.etag, connection, replaced, notices };
+      });
+    },
+  );
+
+  tool(
+    'provider_browse',
+    {
+      title: 'Browse a connection\'s signals',
+      description: `List the signals of one of a document's connections (a tree: pass a node's path to list its children; leaves carry the "source" to bind with scene_bind). On "${PLAYGROUND_PATH}" the tab's live connection answers; on a file only the simulator (holodeck.sim, no network or secrets) can be browsed here.`,
+      tier: 'read',
+      input: {
+        path: optionalPath,
+        connection: name.describe('Connection id in the document'),
+        signalPath: z.string().max(MAX_TEXT_LENGTH).optional().describe('A node path from an earlier browse (default: the root)'),
+      },
+      annotations: READ,
+    },
+    async (args) => {
+      const target = pathOf(args.path);
+      if (target === PLAYGROUND_PATH) {
+        const out = (await context.bridge.call('browse', { connection: args.connection, ...(args.signalPath !== undefined ? { path: args.signalPath } : {}) })) as {
+          nodes: SignalNode[];
+          truncated: boolean;
+        };
+        return { path: PLAYGROUND_PATH, connection: args.connection, nodes: out.nodes, truncated: out.truncated };
+      }
+      const loaded = await context.store.load(target);
+      const connection = (loaded.document.connections ?? []).find((c) => c.id === args.connection);
+      if (!connection) throw new ToolError(`${loaded.path} has no connection "${args.connection}"`, [`connections: ${(loaded.document.connections ?? []).map((c) => c.id).join(', ') || 'none'}`], 'not_found');
+      const provider = providerOf(connection.provider);
+      // Only providers known to work offline run in this process: others may
+      // read any URL their config names (holodeck.http declares no fixed
+      // origins) or need the user's secrets.
+      if (!OFFLINE_PROVIDERS.has(provider.id)) {
+        throw new ToolError(
+          `browsing "${connection.provider}" needs the network or secrets, which this server does not use`,
+          [`open the document in the playground and browse with path "${PLAYGROUND_PATH}"`, 'or read the provider\'s source syntax in provider_list'],
+          'needs_playground',
+        );
+      }
+      if (!provider.capabilities.browse) throw new ToolError(`provider "${provider.id}" cannot list its signals`, ['read its source syntax in provider_list'], 'unsupported');
+      const nodes = await browseOffline(host, provider, connection, args.signalPath);
+      return { path: loaded.path, connection: args.connection, nodes: nodes.slice(0, MAX_BROWSE_NODES), truncated: nodes.length > MAX_BROWSE_NODES };
+    },
+  );
+
+  // Close the render browser and the bridge link with the server (transport closed, client gone).
+  server.server.onclose = () => {
+    context.bridge.close();
+    void context.renderer.close();
+  };
   const close = async () => {
     await server.close();
+    context.bridge.close();
     await context.renderer.close();
   };
   return { server, context, close };
