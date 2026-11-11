@@ -142,6 +142,14 @@ export function createPlaygroundBridgeHandler(deps: PlaygroundBridgeDeps): Playg
     if (trial.scene !== scene) {
       throw new BridgeError('the canvas refused the edit', 'invalid_edit', trial.notice?.startsWith(EDIT_REJECTED_PREFIX) ? [trial.notice] : []);
     }
+    // The editor's state updates at render but the working copy only once the
+    // editor reports the commit (a passive effect): in between, a user commit is
+    // in the editor but not in the etag the agent just matched (GPT review of #276).
+    // (By value: the editor clones the scene it is loaded with.)
+    const shown = editor.getState().scene;
+    if (shown !== deps.doc().body && JSON.stringify(shown) !== JSON.stringify(deps.doc().body)) {
+      throw new BridgeError('the playground cannot take an edit right now: the canvas is mid-update', 'busy', ['retry in a moment']);
+    }
     const before = editor.getState().revision;
     editor.dispatch({ type: 'apply-scene', scene, expectRevision: before });
     // The editor commits on its next render (keeping this very object as its

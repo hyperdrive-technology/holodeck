@@ -93,6 +93,20 @@ describe('startMcpBridge', () => {
     await expect(session()).resolves.toBeDefined();
   });
 
+  it('a malformed request target is a 400, not an exception that ends the server (GPT review of holodeck#276)', async () => {
+    const { connect: tcp } = await import('node:net');
+    const url = new URL(bridge.url.replace('ws:', 'http:'));
+    const status = await new Promise<string>((done, failed) => {
+      const socket = tcp(Number(url.port), url.hostname, () => {
+        socket.write(`GET //[ HTTP/1.1\r\nHost: ${url.host}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n`);
+      });
+      socket.once('data', (d) => done(d.toString().split('\r\n')[0] ?? ''));
+      socket.once('error', failed);
+    });
+    expect(status).toMatch(/ 400 /);
+    await expect(agent()).resolves.toBeDefined();
+  });
+
   it('refuses agents with an Origin (any browser page), the session token, or no role', async () => {
     await expect(connect(`?role=agent&token=${bridge.agentToken}`, { Origin: ORIGIN })).rejects.toThrow('HTTP 403');
     await expect(connect(`?role=agent&token=${bridge.sessionToken}`)).rejects.toThrow('HTTP 401');

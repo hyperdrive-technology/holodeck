@@ -5,6 +5,7 @@
  * Without a bridge this makes one request at mount and then does nothing.
  */
 
+import { hasUncommittedDraft } from '../features/fields';
 import { useEffect, useRef, useState } from 'react';
 import type { SignalNode } from '@holodeck/sdk';
 import { useStudio } from '../studio-context';
@@ -34,7 +35,7 @@ export function useMcpBridge(session: DocumentSession, { tab, blocked }: McpBrid
       doc: () => now().session.docRef.current,
       editor: () => now().session.editorRef.current,
       tab: () => now().tab,
-      blocked: () => now().blocked,
+      blocked: () => now().blocked ?? (hasUncommittedDraft() ? 'the user is typing in the inspector' : null),
       save: () => {
         const w = now().session.writer.getState();
         return { status: w.status.kind, revision: w.revision, dirty: w.dirty };

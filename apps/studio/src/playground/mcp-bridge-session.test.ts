@@ -466,6 +466,16 @@ describe('apply', () => {
     expect(h.live.doc.body.name).toBe('User');
   });
 
+  it('refuses while the editor is ahead of the working copy (commit not yet reported): busy', async () => {
+    const h = harness();
+    const { etag } = await h.state();
+    // The editor rendered a user commit; onChange (a passive effect) has not run yet.
+    h.setEditorState(editorReducer(h.getEditorState(), { type: 'apply-scene', scene: renamed('User') }));
+    const error = await bridgeError(h.handle('apply', { etag, scene: renamed('Agent') }));
+    expect(error.code).toBe('busy');
+    expect(h.dispatched).toEqual([]);
+  });
+
   it('times out when the canvas never commits (fake clock)', async () => {
     const h = harness();
     h.live.commits = false;
