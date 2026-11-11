@@ -181,9 +181,14 @@ describe('routePipe', () => {
     // tie-break drift while still failing if the search ever floods the grid
     // (which would be 40_000+ cells x 4 headings).
     const EXPANSION_CAP = 5_000;
-    const t0 = performance.now();
-    const r = routePipe(at(0, 0), at(199, 199), occOf([]))!;
-    const ms = performance.now() - t0;
+    // Fastest of three: a contended CPU only ever slows a run (parallel test files).
+    let r = routePipe(at(0, 0), at(199, 199), occOf([]))!;
+    let ms = Infinity;
+    for (let i = 0; i < 3; i += 1) {
+      const t0 = performance.now();
+      r = routePipe(at(0, 0), at(199, 199), occOf([]))!;
+      ms = Math.min(ms, performance.now() - t0);
+    }
     expect(r).not.toBeNull();
     expect(r.bends).toBe(1);
     expect(r.expanded).toBeLessThan(EXPANSION_CAP);
