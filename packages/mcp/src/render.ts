@@ -18,8 +18,10 @@
  * Same choice and the same WebGPU flags as the studio e2e
  * (apps/studio/playwright.config.ts). One browser is started on first use,
  * renders run one at a time, and it is closed after `IDLE_CLOSE_MS` without
- * a render, or when the server closes. Stray headless Chromes have filled
- * this machine before (AGENTS.md, "Browser MCP leak").
+ * a render, or when the server closes (renders still queued then are refused
+ * with `closed` and the one in progress is aborted). A browser that exits on
+ * its own is forgotten, and the next render starts a new one. Stray headless
+ * Chromes have filled this machine before (AGENTS.md, "Browser MCP leak").
  */
 
 import { existsSync, statSync } from 'node:fs';
@@ -28,7 +30,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium, type Browser } from 'playwright-core';
+import { chromium, type Browser, type BrowserContext } from 'playwright-core';
 import { PNG } from 'pngjs';
 import { messageOf, ToolError } from './errors';
 
@@ -150,16 +152,24 @@ export interface RendererOptions {
   timeoutMs?: number;
   idleCloseMs?: number;
   env?: NodeJS.ProcessEnv;
+  /** Starts the browser; default Playwright's `chromium.launch` (headless). Tests inject a fake or a spy. */
+  launch?: (executablePath: string, args: readonly string[]) => Promise<Browser>;
 }
+
+const defaultLaunch = (executablePath: string, args: readonly string[]): Promise<Browser> => chromium.launch({ executablePath, headless: true, args: [...args] });
 
 type Session = { browser: Browser; server: Server; baseUrl: string };
 type Outcome = { state: 'ready' | 'unsupported' | 'invalid' | 'missing'; problems: string[] };
+
+const closedError = () => new ToolError('the renderer is closed (the MCP server is shutting down); no image was produced', [], 'closed');
 
 export class SceneRenderer {
   private session: Promise<Session> | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   private idle: NodeJS.Timeout | null = null;
   private closed = false;
+  /** The browser context of the capture in progress, so `close()` can abort it. */
+  private active: BrowserContext | null = null;
 
   constructor(private readonly options: RendererOptions = {}) {}
 
@@ -173,31 +183,59 @@ export class SceneRenderer {
   }
 
   private start(): Promise<Session> {
-    this.session ??= (async () => {
+    if (this.session) return this.session;
+    const session: Promise<Session> = (async () => {
       const dir = this.studioDist();
       const executable = this.options.chromium === undefined ? findChromium(this.options.env ?? process.env) : this.options.chromium;
       if (!executable) {
         throw new ToolError('no Chromium to render with', ['set HOLODECK_CHROMIUM to a Chrome / Chromium binary, or run: npx playwright install chromium'], 'no_browser');
       }
       const { server, baseUrl } = await serveStatic(dir);
+      let browser: Browser;
       try {
-        const browser = await chromium.launch({ executablePath: executable, headless: true, args: [...RENDER_ARGS] });
-        return { browser, server, baseUrl };
+        browser = await (this.options.launch ?? defaultLaunch)(executable, RENDER_ARGS);
       } catch (error) {
         server.close();
         throw new ToolError(`could not start ${executable}`, [messageOf(error)], 'no_browser');
       }
+      // A browser that crashes, is killed (cleanup scripts) or otherwise goes
+      // away after a good start must not stay cached: drop it so the next
+      // render launches a fresh one. `stop()` clears `this.session` before it
+      // closes the browser, so this only fires for a disconnect nobody asked for.
+      browser.on('disconnected', () => this.forget(session, server));
+      return { browser, server, baseUrl };
     })();
+    this.session = session;
     // A failed start is not cached: the next call tries again (e.g. after the studio is built).
-    this.session.catch(() => {
-      this.session = null;
+    session.catch(() => {
+      if (this.session === session) this.session = null;
     });
-    return this.session;
+    return session;
+  }
+
+  /** Drop a cached session whose browser is gone (no-op if it was already replaced or stopped). */
+  private forget(session: Promise<Session>, server: Server): void {
+    if (this.session !== session) return;
+    this.session = null;
+    server.close();
+  }
+
+  /**
+   * The running session, relaunched once if its browser is already dead (it
+   * crashed, but the `disconnected` event has not been delivered yet).
+   */
+  private async acquire(): Promise<{ session: Promise<Session> } & Session> {
+    for (let attempt = 0; ; attempt++) {
+      const session = this.start();
+      const s = await session;
+      if (s.browser.isConnected() || attempt > 0) return { session, ...s };
+      this.forget(session, s.server);
+    }
   }
 
   /** Render `document` at `width` x `height` CSS px (device scale 1). One at a time. */
   render(document: unknown, size: { width: number; height: number }): Promise<Buffer> {
-    if (this.closed) return Promise.reject(new ToolError('the renderer is closed', [], 'closed'));
+    if (this.closed) return Promise.reject(closedError());
     for (const side of [size.width, size.height]) {
       if (!Number.isInteger(side) || side < MIN_SIDE || side > MAX_SIDE) throw new ToolError(`width and height must be whole numbers in ${MIN_SIDE}..${MAX_SIDE}`);
     }
@@ -207,61 +245,86 @@ export class SceneRenderer {
   }
 
   private async renderNow(document: unknown, size: { width: number; height: number }): Promise<Buffer> {
+    // Queued behind a render that was running when the client went away.
+    if (this.closed) throw closedError();
     if (this.idle) clearTimeout(this.idle);
-    const { browser, baseUrl } = await this.start();
-    const context = await browser.newContext({ viewport: size, deviceScaleFactor: 1 });
-    const errors: string[] = [];
     try {
-      const page = await context.newPage();
-      page.on('pageerror', (error) => errors.push(error.message));
-      await page.addInitScript(
-        ({ key, value }) => {
-          (window as unknown as Record<string, unknown>)[key] = value;
-        },
-        { key: RENDER_INPUT_GLOBAL, value: document },
-      );
-      await page.goto(`${baseUrl}/render`);
-      let outcome: Outcome;
+      const { session, browser, server, baseUrl } = await this.acquire();
+      if (this.closed) throw closedError();
+      const errors: string[] = [];
       try {
-        const handle = await page.waitForFunction(
-          () => {
-            const root = window.document.querySelector('[data-testid="render"]');
-            const input = root?.getAttribute('data-render-input');
-            if (input === 'invalid' || input === 'missing') {
-              const problems = [...window.document.querySelectorAll('[data-testid="render-problems"] li')].map((li) => li.textContent ?? '');
-              return { state: input, problems };
-            }
-            const state = window.document.querySelector('[data-testid="process-editor"]')?.getAttribute('data-render-state');
-            return state === 'ready' || state === 'unsupported' ? { state, problems: [] } : null;
-          },
-          undefined,
-          { timeout: this.options.timeoutMs ?? RENDER_TIMEOUT_MS, polling: 100 },
-        );
-        outcome = (await handle.jsonValue()) as Outcome;
+        const context = await browser.newContext({ viewport: size, deviceScaleFactor: 1 });
+        this.active = context;
+        try {
+          // close() may have run while the context was being created (`active` was still null).
+          if (this.closed) throw closedError();
+          return await this.capture(context, document, baseUrl, errors);
+        } finally {
+          this.active = null;
+          await context.close().catch(() => undefined);
+        }
       } catch (error) {
-        const state = await page
-          .locator('[data-testid="process-editor"]')
-          .getAttribute('data-render-state', { timeout: 1000 })
-          .catch(() => null);
-        throw new ToolError('the render did not finish in time; no image was produced', [`last data-render-state: ${state ?? '(no canvas)'}`, ...errors, messageOf(error)], 'timeout');
+        if (this.closed) throw closedError();
+        if (!browser.isConnected()) {
+          this.forget(session, server);
+          throw new ToolError('the render browser exited during the render; no image was produced', ['try again: the next render starts a new browser', messageOf(error), ...errors], 'browser_closed');
+        }
+        throw error;
       }
-      if (outcome.state === 'invalid' || outcome.state === 'missing') {
-        throw new ToolError('the studio refused the document; no image was produced', outcome.problems, 'invalid_document');
-      }
-      if (outcome.state === 'unsupported') {
-        throw new ToolError(
-          'WebGPU is not available in this Chromium, so the scene cannot be drawn; no image was produced',
-          ['use a Chrome with WebGPU (HOLODECK_CHROMIUM); on GPU-less Linux the SwiftShader flags need Vulkan', ...errors],
-          'unsupported',
-        );
-      }
-      const png = await page.screenshot({ type: 'png' });
-      if (isUniform(png)) throw new ToolError('the capture is a single flat colour (nothing was drawn); not returning it', errors, 'blank_image');
-      return png;
     } finally {
-      await context.close().catch(() => undefined);
-      this.armIdle();
+      // Always re-armed (a failed start or a dead browser included), so the
+      // idle close is never lost; not after close(), which stops everything itself.
+      if (!this.closed) this.armIdle();
     }
+  }
+
+  private async capture(context: BrowserContext, document: unknown, baseUrl: string, errors: string[]): Promise<Buffer> {
+    const page = await context.newPage();
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.addInitScript(
+      ({ key, value }) => {
+        (window as unknown as Record<string, unknown>)[key] = value;
+      },
+      { key: RENDER_INPUT_GLOBAL, value: document },
+    );
+    await page.goto(`${baseUrl}/render`);
+    let outcome: Outcome;
+    try {
+      const handle = await page.waitForFunction(
+        () => {
+          const root = window.document.querySelector('[data-testid="render"]');
+          const input = root?.getAttribute('data-render-input');
+          if (input === 'invalid' || input === 'missing') {
+            const problems = [...window.document.querySelectorAll('[data-testid="render-problems"] li')].map((li) => li.textContent ?? '');
+            return { state: input, problems };
+          }
+          const state = window.document.querySelector('[data-testid="process-editor"]')?.getAttribute('data-render-state');
+          return state === 'ready' || state === 'unsupported' ? { state, problems: [] } : null;
+        },
+        undefined,
+        { timeout: this.options.timeoutMs ?? RENDER_TIMEOUT_MS, polling: 100 },
+      );
+      outcome = (await handle.jsonValue()) as Outcome;
+    } catch (error) {
+      const state = await page
+        .locator('[data-testid="process-editor"]')
+        .getAttribute('data-render-state', { timeout: 1000 })
+        .catch(() => null);
+      throw new ToolError('the render did not finish in time; no image was produced', [`last data-render-state: ${state ?? '(no canvas)'}`, ...errors, messageOf(error)], 'timeout');
+    }
+    if (outcome.state === 'invalid' || outcome.state === 'missing') {
+      throw new ToolError('the studio refused the document; no image was produced', outcome.problems, 'invalid_document');
+    }
+    if (outcome.state === 'unsupported') {
+      throw new ToolError(
+        'WebGPU is not available in this Chromium, so the scene cannot be drawn; no image was produced',
+        ['use a Chrome with WebGPU (HOLODECK_CHROMIUM); on GPU-less Linux the SwiftShader flags need Vulkan', ...errors],
+        'unsupported',
+      );
+    }
+    const png = await page.screenshot({ type: 'png' });
+    if (isUniform(png)) throw new ToolError('the capture is a single flat colour (nothing was drawn); not returning it', errors, 'blank_image');
+    return png;
   }
 
   private armIdle(): void {
@@ -285,9 +348,15 @@ export class SceneRenderer {
     return this.session !== null;
   }
 
+  /**
+   * Stop for good: queued renders reject with `closed` (they check at their
+   * start), the capture in progress is aborted by closing its browser context
+   * (it rejects with `closed` too), then the browser and server stop.
+   */
   async close(): Promise<void> {
     this.closed = true;
     if (this.idle) clearTimeout(this.idle);
+    await this.active?.close().catch(() => undefined);
     await this.queue.catch(() => undefined);
     await this.stop();
   }
