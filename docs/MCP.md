@@ -193,7 +193,10 @@ blender_status ─▶ blender_build_part ─▶ part_validate ─▶ blender_pre
   page fetches the GLB from a fixed same-origin path that the capture answers
   from memory (`page.route`); the route refuses any other URL. No WebGPU, a
   timeout or a flat capture is an explicit error, never a blank image;
-  `styled: false` returns the Workbench image alone. For an installed part
+  `styled: false` returns the Workbench image alone. The view is the
+  editor's fit, which stops at its maximum zoom (80 px per unit): a small
+  part stays small next to the 1-unit grid, which is its real size beside
+  0.1-radius pipes. For an installed part
   the Workbench image is re-rendered from its script into scratch.
 - **Install and registration.** The library's built-in GLBs are an explicit
   import map, `assets/models/index.ts` (`BUILTIN_MODEL_URLS`, kept explicit

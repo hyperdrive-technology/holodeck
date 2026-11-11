@@ -195,9 +195,10 @@ describe('parseGlb', () => {
 });
 
 describe('footprintOf', () => {
-  it('covers the box around the origin in whole cells, with the top as height', () => {
+  it('just covers the box around the origin (rounded up to 0.01), with the top as height', () => {
     expect(footprintOf({ min: [-0.5, 0, -0.5], max: [0.5, 1, 0.5] })).toEqual({ w: 1, h: 1, height: 1 });
     // Off-centre: the footprint is centred on the origin, so it doubles the far side.
-    expect(footprintOf({ min: [-0.2, -0.3, -0.1], max: [1.2, 0.05, 0.1] })).toEqual({ w: 3, h: 1, height: 0.1 });
+    expect(footprintOf({ min: [-0.2, -0.3, -0.1], max: [1.2, 0.05, 0.1] })).toEqual({ w: 2.4, h: 0.2, height: 0.1 });
+    expect(footprintOf({ min: [-0.001, 0, -0.001], max: [0.001, 0.01, 0.001] })).toEqual({ w: 0.1, h: 0.1, height: 0.1 });
   });
 });

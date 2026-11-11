@@ -313,9 +313,14 @@ export function validatePartGlb(bytes: Uint8Array, options: ValidateOptions = {}
   return { ok: problems.length === 0, problems, warnings, stats };
 }
 
-/** The placement footprint (grid cells, centred on the origin) and height that contain `bounds`. */
+/**
+ * The footprint (grid units, centred on the origin) and height that just
+ * contain `bounds`, for framing a one-part preview (`blender_preview`). Not
+ * rounded up to whole cells: the editor fits the view to the footprint, so a
+ * tight box frames a small part as large as a big one.
+ */
 export function footprintOf(bounds: Box): { w: number; h: number; height: number } {
   const half = (k: number) => Math.max(Math.abs(bounds.min[k]!), Math.abs(bounds.max[k]!));
-  const cells = (n: number) => Math.max(1, Math.ceil(2 * n - 1e-6));
-  return { w: cells(half(0)), h: cells(half(2)), height: Math.max(0.1, round(bounds.max[1])) };
+  const side = (n: number) => Math.max(0.1, Math.ceil(2 * n * 100) / 100);
+  return { w: side(half(0)), h: side(half(2)), height: Math.max(0.1, Math.ceil(bounds.max[1] * 100) / 100) };
 }
