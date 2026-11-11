@@ -280,6 +280,11 @@ test('findChromium: an explicit HOLODECK_CHROMIUM must exist', () => {
   assert.equal(findChromium({ HOLODECK_CHROMIUM: process.execPath }), process.execPath);
 });
 
+test('findChromium: HOLODECK_SKIP_RENDER_TESTS=1 means no browser, even with HOLODECK_CHROMIUM', () => {
+  assert.equal(findChromium({ HOLODECK_SKIP_RENDER_TESTS: '1', HOLODECK_CHROMIUM: process.execPath }), null);
+  assert.equal(findChromium({ HOLODECK_SKIP_RENDER_TESTS: '0', HOLODECK_CHROMIUM: process.execPath }), process.execPath);
+});
+
 // --- one source of truth with the workflows ----------------------------------------
 
 test('every gated package directory is a target; packages/cli (not built anywhere) is the only exception', () => {

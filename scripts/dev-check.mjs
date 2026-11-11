@@ -395,8 +395,14 @@ export function changedFiles(baseRef, cwd = REPO_ROOT) {
   return { base: mergeBase, changed: [...files].sort() };
 }
 
-/** HOLODECK_CHROMIUM if set (must exist), else the macOS Chrome, else null. */
+/**
+ * HOLODECK_CHROMIUM if set (must exist), else the macOS Chrome, else null. HOLODECK_SKIP_RENDER_TESTS=1
+ * (the packages' own opt-out) means no browser: render tests, the Vite consumer check and e2e skip
+ * with a note. Use it when the Mac's GPU is busy (other sessions' WebGPU e2e: holodeck#300) and
+ * let the boat CI run cover the browser steps.
+ */
 export function findChromium(env = process.env) {
+  if (env.HOLODECK_SKIP_RENDER_TESTS === '1') return null;
   if (env.HOLODECK_CHROMIUM) return existsSync(env.HOLODECK_CHROMIUM) ? env.HOLODECK_CHROMIUM : null;
   return existsSync(MAC_CHROME) ? MAC_CHROME : null;
 }

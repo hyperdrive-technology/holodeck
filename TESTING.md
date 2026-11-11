@@ -45,7 +45,10 @@ and `.dev-check/last.json` records the run for `~/dev/hyperdrive/scripts/ci-loca
   tests, the Vite consumer check and e2e run in `push`/`full` when a Chrome is found; without one
   they are skipped and the run prints a `SKIPPED` note (CI still runs them). Playwright's own
   Chromium download is not needed.
-- `HOLODECK_SKIP_RENDER_TESTS=1` in `fast` (render tests are `push`+).
+- `HOLODECK_SKIP_RENDER_TESTS=1` in `fast` (render tests are `push`+). Set it yourself
+  (`HOLODECK_SKIP_RENDER_TESTS=1 scripts/dev-check.sh full`) to skip every browser step on purpose,
+  with a note: when the Mac's GPU is shared with other sessions' WebGPU e2e, render files hang at
+  random (holodeck#300); the boat CI run still covers them.
 - `HOLODECK_SKIP_BLENDER=1` for the package tests (CI's package jobs have no Blender either); the
   Blender rebuild runs once, in the `blender:*` steps, with `HOLODECK_REQUIRE_BLENDER=1`.
 - `DEV_CHECK_JOBS=<n>`: steps run in parallel, default a third of the CPUs (min 2). Steps that
