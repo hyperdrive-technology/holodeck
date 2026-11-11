@@ -88,7 +88,7 @@ export const FULL_PATHS = [
   [/^\.github\/holodeck-sdk-ref$/, 'holodeck-sdk ref pin'],
   [/^\.node-version$/, 'Node toolchain pin'],
   [/^(packages|apps)\/[^/]+\/(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml)$/, 'dependencies / lockfile'],
-  [/^(packages|apps)\/[^/]+\/(tsconfig[^/]*\.json|vitest\.config\.[cm]?[jt]s|vite\.config\.[cm]?[jt]s|tsup\.config\.[cm]?[jt]s|playwright\.config\.[cm]?[jt]s)$/, 'build / test config'],
+  [/^(packages|apps)\/[^/]+\/(tsconfig[^/]*\.json|vitest\.(config|workspace)\.[cm]?[jt]s|vite\.config\.[cm]?[jt]s|tsup\.config\.[cm]?[jt]s|playwright\.config\.[cm]?[jt]s)$/, 'build / test config'],
   [/^scripts\/(ci-package\.sh|ci-studio\.sh|ci-scope\.mjs|dev-check\.mjs)$/, 'CI / dev-check plumbing'],
 ];
 

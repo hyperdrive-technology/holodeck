@@ -4,6 +4,7 @@ import { HEADING_VECTOR, MAX_GRID_COORD, type GridPoint } from './grid';
 import { last, occOf, pipe, tank } from './test-helpers';
 import { ELBOW_RADIUS } from '../../assets/process/pipe-math';
 import type { Occupancy } from '../index';
+import { fastestCpuTime } from '../test-support/cpu-time';
 
 const at = (x: number, y: number) => ({ cell: { x, y } });
 
@@ -181,14 +182,8 @@ describe('routePipe', () => {
     // tie-break drift while still failing if the search ever floods the grid
     // (which would be 40_000+ cells x 4 headings).
     const EXPANSION_CAP = 5_000;
-    // Fastest of three: a contended CPU only ever slows a run (parallel test files).
-    let r = routePipe(at(0, 0), at(199, 199), occOf([]))!;
-    let ms = Infinity;
-    for (let i = 0; i < 3; i += 1) {
-      const t0 = performance.now();
-      r = routePipe(at(0, 0), at(199, 199), occOf([]))!;
-      ms = Math.min(ms, performance.now() - t0);
-    }
+    // CPU time, fastest of three after a warm-up (test-support/cpu-time.ts).
+    const { ms, value: r } = fastestCpuTime(() => routePipe(at(0, 0), at(199, 199), occOf([]))!);
     expect(r).not.toBeNull();
     expect(r.bends).toBe(1);
     expect(r.expanded).toBeLessThan(EXPANSION_CAP);

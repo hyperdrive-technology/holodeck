@@ -1,14 +1,28 @@
 import { defineConfig } from 'vitest/config';
 
+/** Every test file (assets/ holds colocated part tests: style tokens, apply-style). */
+export const ALL_TESTS = ['src/**/*.{test,spec}.{ts,tsx}', 'assets/**/*.{test,spec}.{ts,tsx}'];
+
+/**
+ * Test files that drive headless Chromium + WebGPU (a Vite dev server and a browser per file).
+ * Run in parallel they race for the GPU and time out at random (tank-tuner, scene-render,
+ * parts-render), so vitest.workspace.ts runs them one at a time in their own `browser` project,
+ * next to the `unit` project, whose plain-Node files run in parallel. Before this split the whole
+ * package ran one file at a time (`fileParallelism: false`), so ~80 unit files waited behind the
+ * render suites (dev-loop shift-left, 2026-11-11; timings in TESTING.md).
+ *
+ * A new browser-driving test must be named `*-render.test.ts` or added here; the guard in
+ * src/test-support/browser-tests.test.ts fails on one that is neither.
+ */
+export const BROWSER_TESTS = ['**/*-render.test.ts', 'src/iso/tank-tuner.test.ts', 'src/test-support/render-harness.test.ts'];
+
+/**
+ * Shared by both projects in vitest.workspace.ts. No `include` here: a project that `extends`
+ * this file would get its include list concatenated with this one (vitest merges arrays).
+ */
 export default defineConfig({
   test: {
     environment: 'node',
-    // assets/ holds colocated part tests (style tokens, apply-style).
-    include: ['src/**/*.{test,spec}.{ts,tsx}', 'assets/**/*.{test,spec}.{ts,tsx}'],
     testTimeout: 60_000,
-    // Four suites each launch headless Chromium + WebGPU. Run in parallel
-    // they race for the GPU and time out at random (tank-tuner, scene-render,
-    // parts-render). Sequential was faster too: 19s vs 33s on an M-series Mac.
-    fileParallelism: false,
   },
 });

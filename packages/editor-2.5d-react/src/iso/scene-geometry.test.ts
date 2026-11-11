@@ -7,6 +7,7 @@ import { buildOccupancy } from '../routing/occupancy';
 import { createIsoRegistryWithBuiltins, getDefaultIsoRegistry } from '../registry/default';
 import type { IsoPartDefinition } from '../registry/types';
 import { parseSceneFile, sceneBounds, validateSceneFile, validateSceneGeometry, type IsoPlacement } from './scene';
+import { fastestCpuTime } from '../test-support/cpu-time';
 
 const scene = (obj: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
   id: 's',
@@ -177,20 +178,11 @@ describe('large scene validation', () => {
   };
 
   it.each([['geometry', validateSceneGeometry], ['import', validateSceneFile]] as const)('%s validates 10,000 placements in under 50 ms', (_name, validate) => {
-    // Warm up first, then take the fastest of five runs: the unit files run in
-    // parallel (vitest.config.ts) on a shared machine, and a busy CPU slows a
-    // run but never speeds one up, so the minimum is the code's own cost. An
-    // O(n^2) regression still misses 50 ms by far. Includes effective footprint
-    // checks and duplicate IDs.
-    validate(file, registry);
-    const times: number[] = [];
-    for (let i = 0; i < 5; i += 1) {
-      const start = performance.now();
-      const validated = validate(file, registry);
-      times.push(performance.now() - start);
-      expect(validated.objects).toHaveLength(10_000);
-    }
-    expect(Math.min(...times)).toBeLessThan(50);
+    // CPU time, fastest of five after a warm-up (test-support/cpu-time.ts: wall time measured
+    // the machine's load, not the code). Includes effective footprint checks and duplicate IDs.
+    const { ms, value: validated } = fastestCpuTime(() => validate(file, registry), 5);
+    expect(validated.objects).toHaveLength(10_000);
+    expect(ms).toBeLessThan(50);
   });
 
   it('rejects a duplicate at the end of a large scene', () => {

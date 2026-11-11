@@ -64,6 +64,7 @@ test('classify: workflows, toolchain, lockfiles, package config and CI plumbing 
     'packages/provider-aws/package.json',
     'apps/studio/package.json',
     'packages/editor-2.5d-react/vitest.config.ts',
+    'packages/editor-2.5d-react/vitest.workspace.ts',
     'packages/flow-runtime/tsup.config.ts',
     'packages/mcp/tsconfig.json',
     'apps/studio/playwright.config.ts',
