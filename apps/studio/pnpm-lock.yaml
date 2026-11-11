@@ -172,6 +172,9 @@ importers:
       '@holodeck/library-cloud':
         specifier: file:../../packages/library-cloud
         version: file:../../packages/library-cloud
+      '@holodeck/library-process':
+        specifier: file:../../packages/library-process
+        version: file:../../packages/library-process
       '@holodeck/provider-aws':
         specifier: file:../../packages/provider-aws
         version: file:../../packages/provider-aws
@@ -462,6 +465,10 @@ packages:
 
   '@holodeck/library-cloud@file:../../packages/library-cloud':
     resolution: {directory: ../../packages/library-cloud, type: directory}
+    engines: {node: '>=26.13.0'}
+
+  '@holodeck/library-process@file:../../packages/library-process':
+    resolution: {directory: ../../packages/library-process, type: directory}
     engines: {node: '>=26.13.0'}
 
   '@holodeck/provider-aws@file:../../packages/provider-aws':
@@ -2413,6 +2420,10 @@ snapshots:
       - react-native
 
   '@holodeck/library-cloud@file:../../packages/library-cloud':
+    dependencies:
+      '@holodeck/sdk': file:../../../holodeck-sdk/ts
+
+  '@holodeck/library-process@file:../../packages/library-process':
     dependencies:
       '@holodeck/sdk': file:../../../holodeck-sdk/ts
 

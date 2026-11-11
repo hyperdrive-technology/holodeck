@@ -206,7 +206,50 @@ test('ci.yml studio job (studio + MCP server) runs for the studio, the MCP serve
     'packages/provider-http/src/a.ts',
     'packages/provider-aws/src/a.ts',
     'packages/library-cloud/src/a.ts',
+    'packages/library-process/src/parts.json',
   ]) assert.equal(runs(file), true, file);
   assert.equal(runs('packages/flow-runtime/src/a.ts'), false);
   assert.equal(runs('packages/mcp-extra/src/a.ts'), false);
+});
+
+/** The `--paths` of one job's scope step (`name:` of the step), from the raw workflow text. */
+function scopePaths(file, job, step) {
+  const yml = readFileSync(join(dirname(SCRIPT), `../.github/workflows/${file}`), 'utf8');
+  const body = yml.slice(yml.indexOf(`\n  ${job}:`));
+  const from = body.indexOf(step);
+  const scope = body.slice(from, body.indexOf('\n      - ', from + 1));
+  return { scope, paths: [...scope.matchAll(/--paths ['"]([^'"]+)['"]/g)].map((m) => m[1]) };
+}
+
+test('ci.yml small-packages job runs library-process for everything its tests read', () => {
+  const { scope, paths } = scopePaths('ci.yml', 'small-packages', 'Does this change touch the small packages?');
+  const yml = readFileSync(join(dirname(SCRIPT), '../.github/workflows/ci.yml'), 'utf8');
+  const packages = /PACKAGES: ([^\n]+)/.exec(yml)[1].trim();
+  assert.ok(packages.split(' ').includes('library-process'), packages);
+  assert.ok(scope.includes('${PACKAGES// /|}'), 'the package pattern is built from PACKAGES');
+  // Expand the shell pattern the way the step does.
+  const expanded = paths.map((p) => p.replace('${PACKAGES// /|}', packages.split(' ').join('|')).replace(/\\\\/g, '\\'));
+  const runs = (file) => decide({ event: 'pull_request', changed: [file], paths: expanded }).run;
+  for (const file of [
+    'packages/library-process/src/parts.json',
+    'packages/library-process/assets/models/motor.glb',
+    'blender/parts/process/motor.py',
+    'blender/parts/process/_common.py',
+    'docs/assets/process-catalog.md',
+    'packages/editor-2.5d-react/src/anim/animators.ts',
+    'packages/library-cloud/src/parts.json',
+  ]) assert.equal(runs(file), true, file);
+  assert.equal(runs('blender/parts/cloud/server.py'), false);
+  assert.equal(runs('docs/ROADMAP.md'), false);
+  assert.equal(runs('apps/studio/src/a.ts'), false);
+});
+
+test('blender-drift.yml rebuilds library-process when its scripts, GLBs or package change', () => {
+  const { paths } = scopePaths('blender-drift.yml', 'rebuild', 'Does this change touch Blender inputs?');
+  const runs = (file) => decide({ event: 'pull_request', changed: [file], paths, shared: false }).run;
+  for (const file of ['blender/parts/process/motor.py', 'blender/parts/process/_common.py', 'packages/library-process/assets/models/motor.glb', 'packages/library-process/src/models.json']) {
+    assert.equal(runs(file), true, file);
+  }
+  const yml = readFileSync(join(dirname(SCRIPT), '../.github/workflows/blender-drift.yml'), 'utf8');
+  assert.match(yml, /working-directory: holodeck\/packages\/library-process\n\s+run: \|\n\s+pnpm install --frozen-lockfile\n\s+pnpm exec vitest run src\/process-glb\.test\.ts/);
 });

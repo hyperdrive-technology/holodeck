@@ -7,7 +7,8 @@ import type { HolodeckDocument, HolodeckHost } from '@holodeck/sdk';
 import type { IsoSceneFile } from '@holodeck/editor-2.5d-react';
 import { DocumentExistsError, type DocumentStore, type VersionedDocument } from '../documents/store';
 import { withRequires } from '../host/document-checks';
-import { createPlaygroundDocument, PLAYGROUND_DOCUMENT_ID } from './starter';
+import { createProcessLinePlayground } from '../samples/process-line';
+import { createPlaygroundDocument, PLAYGROUND_DOCUMENT_ID, PLAYGROUND_DOCUMENT_NAME } from './starter';
 
 /** Tabs are the playground's primary navigation: `/playground?tab=viewer` is linkable and survives a reload. */
 export const PLAYGROUND_TABS = ['edit', 'viewer'] as const;
@@ -31,6 +32,16 @@ export function parsePlaygroundSearch(search: Record<string, unknown>): Playgrou
 /** The starter document with `requires` filled in for this host (what the store validates). */
 export function playgroundStarter(host: HolodeckHost): HolodeckDocument<IsoSceneFile> {
   const doc = createPlaygroundDocument();
+  withRequires(doc, host);
+  return doc;
+}
+
+/**
+ * The process-parts sample as the playground document, `requires` filled in
+ * for this host: the Reset dialog's "Load the process-parts sample".
+ */
+export function playgroundProcessSample(host: HolodeckHost): HolodeckDocument<IsoSceneFile> {
+  const doc = createProcessLinePlayground(PLAYGROUND_DOCUMENT_ID, PLAYGROUND_DOCUMENT_NAME);
   withRequires(doc, host);
   return doc;
 }

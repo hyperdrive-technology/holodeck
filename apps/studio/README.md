@@ -10,8 +10,11 @@ PLC or Hyperdrive code: the studio is a plain Holodeck host.
   registered and packages installed through their manifests, as any
   third-party host would. Today: the `holodeck.iso` engine and its built-in
   package from `@holodeck/editor-2.5d-react`, plus `@holodeck/library-cloud`
-  (all 26 cloud archetypes and both Arcentry themes). Cloud assets resolve
-  through Vite URL imports (`src/host/cloud-package.ts`) in dev and production.
+  (all 26 cloud archetypes and both Arcentry themes) and
+  `@holodeck/library-process` ("Process parts": valves, a motor, a heat
+  exchanger, a transmitter and a control cabinet). Their assets resolve
+  through Vite URL imports (`src/host/cloud-package.ts`,
+  `src/host/process-package.ts`) in dev and production.
 - **Documents** in IndexedDB (`src/documents/db.ts`, `store.ts`): every write
   is validated (envelope via `@holodeck/sdk`, body and installed packages via
   the host). Per-document view state lives in a separate `views` store.
@@ -126,7 +129,11 @@ No document list or welcome screen; the studio at `/` is unchanged.
   connection (`sim`) with every binding in place, so the Viewer animates with
   zero configuration. **Reset** (header) restores the starter: scene,
   connections, bindings; it clears the undo history and this tab's secrets
-  for the document. Deleted from another tab, the playground starts again
+  for the document. The same dialog can instead **load the process-parts
+  sample** (`samples/process-line.holodeck.json`, `src/samples/process-line.ts`):
+  tank → ball valve → control valve → shell-and-tube exchanger, with a motor,
+  a transmitter and a control cabinet, all on `holodeck.sim` (stem position,
+  lever, shaft and fault tints animate in the Viewer). Deleted from another tab, the playground starts again
   from the starter.
 - Shared code: the working copy, writer and every command live in
   `useDocumentSession` (`src/features/use-document-session.ts`), used by both
@@ -250,6 +257,7 @@ copied at install time). After changing either, rebuild it and reinstall:
 (cd ../../../holodeck-sdk/ts && pnpm build)
 (cd ../../packages/editor-2.5d-react && pnpm build)
 (cd ../../packages/library-cloud && pnpm install --frozen-lockfile && pnpm build)
+(cd ../../packages/library-process && pnpm install --frozen-lockfile && pnpm build)
 (cd ../../packages/provider-http && pnpm install --frozen-lockfile && pnpm build)
 (cd ../../packages/provider-aws && pnpm install --frozen-lockfile && pnpm build)
 pnpm install

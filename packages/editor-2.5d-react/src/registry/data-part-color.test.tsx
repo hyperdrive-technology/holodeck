@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { HOLODECK_STYLE } from '../../assets/process/style';
 import { DataPart } from './DataPart';
+import { GlbPart } from './GlbPart';
 import { resolveParams } from './params';
 import type { IsoPartDefinition } from './types';
 
@@ -71,5 +72,24 @@ describe('data-only model colour bindings', () => {
     // R3F props render as plain attributes in static markup: position="x,y,z".
     expect(markup({ ...base, id: 'process:valve', origin: 'pipe-axis' })).toMatch(/position="0.5,0.32,0.5"/);
     expect(markup({ ...base, id: 'process:motor' })).toMatch(/position="0.5,0,0.5"/);
+  });
+
+  it('GlbPart: pipe-axis origin and alarm tint over the handwheel colour', () => {
+    const def: IsoPartDefinition = {
+      id: 'pack:valve', label: 'V', footprint: { w: 1, h: 1 }, origin: 'pipe-axis', alarmParam: 'fault',
+      params: { fault: { type: 'boolean', label: 'Fault', default: false } }, model: '/v.glb',
+    };
+    const placement = { id: 'v1', object: def.id, x: 2, y: 3, handwheel: '#00ff00' };
+    const draw = (params: Record<string, unknown>) => {
+      model.mockClear();
+      renderToStaticMarkup(<GlbPart placement={placement} params={params} style={HOLODECK_STYLE} def={def} selected={false} />);
+      return (model.mock.calls as unknown as Array<[{ accent: string; position: number[] }]>)[0]?.[0];
+    };
+    expect(draw({ fault: false })).toMatchObject({ accent: '#00ff00', position: [2.5, 0.32, 3.5] });
+    expect(draw({ fault: true })?.accent).toBe(HOLODECK_STYLE.colors.alarm);
+    const floor = { ...def, origin: undefined };
+    model.mockClear();
+    renderToStaticMarkup(<GlbPart placement={placement} params={{}} style={HOLODECK_STYLE} def={floor} selected={false} />);
+    expect((model.mock.calls as unknown as Array<[{ position: number[] }]>)[0]?.[0].position).toEqual([2.5, 0, 3.5]);
   });
 });

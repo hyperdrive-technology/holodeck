@@ -15,13 +15,19 @@ import { ISO_ENGINE_ID, ISO_PACKAGE_MANIFEST, isoEngine, isoPackage } from '@hol
 import { createHost, type StudioPackage } from './document-checks';
 import { PROVIDER_PACKAGES } from './provider-packages';
 import { CLOUD_PACKAGE } from './cloud-package';
+import { PROCESS_PACKAGE } from './process-package';
 
 export * from './document-checks';
 
 export const STUDIO_HOST_NAME = 'holodeck-studio';
 
 export const STUDIO_ENGINES: readonly HolodeckEngine[] = [isoEngine as HolodeckEngine];
-export const STUDIO_PACKAGES: readonly StudioPackage[] = [{ manifest: ISO_PACKAGE_MANIFEST, module: isoPackage }, CLOUD_PACKAGE, ...PROVIDER_PACKAGES];
+export const STUDIO_PACKAGES: readonly StudioPackage[] = [
+  { manifest: ISO_PACKAGE_MANIFEST, module: isoPackage },
+  CLOUD_PACKAGE,
+  PROCESS_PACKAGE,
+  ...PROVIDER_PACKAGES,
+];
 
 /** The engine new documents use. */
 export const DEFAULT_ENGINE_ID = ISO_ENGINE_ID;
