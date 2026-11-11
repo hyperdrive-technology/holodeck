@@ -4,3 +4,7 @@ This repo is part of the Hyperdrive workspace (`~/dev/hyperdrive`). **Before you
 shared instructions are not already in your context, Read `~/dev/hyperdrive/AGENTS.md`** (the import
 above can be skipped when this repo is opened from a T3 worktree outside `~/dev/hyperdrive`). Then follow
 its "Multi-session coordination" section: register with the coordinator before starting work.
+
+Checks: run `scripts/dev-check.sh fast` before every push (the pre-push hook does it after
+`scripts/install-hooks.sh`), `push` before opening a PR, `full` before merging. Ladder, budgets and
+timings: [TESTING.md](TESTING.md).
