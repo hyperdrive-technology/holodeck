@@ -76,9 +76,12 @@ describe('isUniform', () => {
   });
 });
 
+// HOLODECK_SKIP_RENDER_TESTS=1 is the repo-wide opt-out for browser tests (scripts/ci-package.sh,
+// dev-check.sh). Without this check findChromium() falls back to the macOS Chrome and the browser
+// tests ran anyway on a Mac (dev-check full, 2026-11-12).
 let chromiumPath: string | null = null;
 try {
-  chromiumPath = findChromium();
+  chromiumPath = process.env.HOLODECK_SKIP_RENDER_TESTS === '1' ? null : findChromium();
 } catch {
   chromiumPath = null;
 }
