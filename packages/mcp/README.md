@@ -35,7 +35,10 @@ To register it for a client (`.mcp.json`, project scope):
 | `HOLODECK_MCP_TIER` | `author` | `read`, `author` or `exec` (see below). Any other value fails at startup |
 | `HOLODECK_CHROMIUM` | macOS Chrome, then Playwright's Chromium | Browser for `scene_render` |
 | `HOLODECK_MCP_BRIDGE_FILE` | `.holodeck-mcp.json` at the holodeck repo root | Playground bridge file that `pnpm playground` writes (URL + agent token) |
-| `HOLODECK_STUDIO_DIST` | `apps/studio/dist` next to this package | Studio build that `scene_render` serves (`cd apps/studio && pnpm build`) |
+| `HOLODECK_STUDIO_DIST` | `apps/studio/dist` next to this package | Studio build that `scene_render` and `blender_preview` serve (`cd apps/studio && pnpm build`) |
+| `HOLODECK_MCP_ALLOW_BLENDER` | unset (off) | `1` lets the Blender tools run Blender (they also need `HOLODECK_MCP_TIER=exec`) |
+| `BLENDER` | macOS `/Applications/Blender.app`, then `blender` on PATH | Blender binary (tested with 5.2.2 LTS) |
+| `HOLODECK_MCP_REPO` | the holodeck repo this package sits in | Repo whose `blender/parts/` and `assets/models/` the Blender tools use |
 
 ## Tools
 
@@ -63,6 +66,11 @@ To register it for a client (`.mcp.json`, project scope):
 | `provider_list` | read | Installed providers: capabilities, source syntax, secret-free config schema, secrets the user enters |
 | `provider_connect` | author | Add or replace a secret-free connection (the studio's credential rules) |
 | `provider_browse` | read | A connection's signal tree; on a file only the offline simulator, on `@playground` the tab's live session |
+| `blender_status` | read | Blender found (path, version)? Gate open? Part scripts, installed models, this session's builds (never an error) |
+| `blender_build_part` | exec + `HOLODECK_MCP_ALLOW_BLENDER=1` | Write `blender/parts/<name>.py`, run Blender headless (timeout), GLB to a scratch folder; returns the contract check, the log tail and the Workbench PNG |
+| `part_validate` | read | The part contract on a build or an installed model: one line per problem (materials, ports, cameras/lights, triangles, size, floor, anchor, Y-up) |
+| `blender_preview` | exec + `HOLODECK_MCP_ALLOW_BLENDER=1` | Workbench PNG plus the GLB in the real Holodeck style (studio `/render`, WebGPU); no WebGPU is an error |
+| `part_install` | exec + `HOLODECK_MCP_ALLOW_BLENDER=1` | Copy a validated build to `assets/models/<name>.glb` and register it in the model map (`index.ts`) |
 
 `path: "@playground"` makes any `scene_*` edit tool (and `provider_*`) work on
 the scene open in the playground tab: one undo step per call, refused with
@@ -70,7 +78,26 @@ the scene open in the playground tab: one undo step per call, refused with
 [`docs/MCP.md`](../../docs/MCP.md#playground-bridge).
 
 A tool above the server's tier is still listed, but it refuses and names the
-tier it needs.
+tier it needs. The Blender tools that run Blender need tier `exec` **and**
+`HOLODECK_MCP_ALLOW_BLENDER=1` (Blender runs arbitrary Python); without the
+variable they refuse with `blender_disabled`.
+
+## Blender parts
+
+```sh
+HOLODECK_MCP_TIER=exec HOLODECK_MCP_ALLOW_BLENDER=1 node dist/cli.js
+```
+
+`blender_status` → `blender_build_part` (a `holodeck_bpy` script; copy the
+header of `blender/parts/valve.py`) → fix what `part_validate` lists →
+`blender_preview` → `part_install`, then commit `blender/parts/<name>.py`,
+`assets/models/<name>.glb` and `assets/models/index.ts`. Part names are
+lower-case words joined by `-` (`plate-heat-exchanger`); an existing part is
+only replaced with `overwrite: true`. Builds run one at a time with a
+wall-clock timeout (the process group is killed), Blender gets a minimal
+environment, and GLBs stay in a scratch folder until installed. Details,
+safety rules and the Phase 2 (daemon) / Phase 3 (add-on) designs:
+[`docs/MCP.md`](../../docs/MCP.md#blender-parts-phase-1).
 
 ## Guarantees
 
