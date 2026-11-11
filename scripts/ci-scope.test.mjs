@@ -198,6 +198,11 @@ test('ci.yml studio job (studio + MCP server) runs for the studio, the MCP serve
   const job = yml.slice(yml.indexOf('\n  studio:'));
   const paths = [...job.slice(0, job.indexOf('Checkout holodeck-sdk')).matchAll(/--paths '([^']+)'/g)].map((m) => m[1]);
   assert.ok(job.includes('scripts/ci-package.sh mcp'), 'the studio job runs the MCP package gate');
+  // Once, after the studio build: scene_render and the bridge e2e need apps/studio/dist (holodeck#272).
+  const gate = 'run: scripts/ci-package.sh mcp';
+  assert.equal(job.split(gate).length - 1, 1, 'the studio job runs the MCP package gate exactly once');
+  const build = job.indexOf('working-directory: holodeck/apps/studio\n        run: pnpm build');
+  assert.ok(build > 0 && build < job.indexOf(gate), 'the MCP package gate runs after the studio build');
   const runs = (file) => decide({ event: 'pull_request', changed: [file], paths }).run;
   for (const file of [
     'apps/studio/src/host/document-checks.ts',
