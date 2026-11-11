@@ -7,13 +7,20 @@ import {
   BOB_ANIMATOR,
   BUILTIN_ISO_ANIMATORS,
   FILL_ANIMATOR,
+  fractionOf,
   PULSE_ANIMATOR,
   SPIN_ANIMATOR,
+  TRAVEL_ANIMATOR,
+  TURN_ANIMATOR,
   VISIBLE_ANIMATOR,
 } from './animators';
 import { applyAnimations, planAnimations } from './use-iso-animators';
 
-const ctx = (node: Object3D, value: unknown, extra: Partial<{ dt: number; elapsed: number; settings: Record<string, unknown> }> = {}) => ({
+const ctx = (
+  node: Object3D,
+  value: unknown,
+  extra: Partial<{ dt: number; elapsed: number; settings: Record<string, unknown>; params: Record<string, unknown> }> = {},
+) => ({
   node,
   value,
   dt: 1,
@@ -46,6 +53,124 @@ describe('spin', () => {
     SPIN_ANIMATOR.apply(ctx(still, Number.NaN));
     SPIN_ANIMATOR.apply(ctx(still, 0));
     expect(still.rotation.y).toBe(0);
+  });
+});
+
+describe('spin enableParam', () => {
+  it('turns only while the named param is truthy', () => {
+    const node = new Object3D();
+    const settings = { axis: 'x', enableParam: 'running' };
+    SPIN_ANIMATOR.apply(ctx(node, 60, { settings, params: { running: false, speed: 60 } }));
+    expect(node.rotation.x).toBe(0);
+    SPIN_ANIMATOR.apply(ctx(node, 60, { settings, params: { running: true, speed: 60 } }));
+    expect(node.rotation.x).toBeCloseTo(Math.PI * 2);
+  });
+
+  it('treats a missing params bag or a missing gate param as off', () => {
+    const node = new Object3D();
+    SPIN_ANIMATOR.apply(ctx(node, 60, { settings: { enableParam: 'running' } }));
+    SPIN_ANIMATOR.apply(ctx(node, 60, { settings: { enableParam: 'running' }, params: {} }));
+    expect(node.rotation.y).toBe(0);
+  });
+
+  it('ignores an empty or non-string gate (always on)', () => {
+    for (const enableParam of ['', 7, null]) {
+      const node = new Object3D();
+      SPIN_ANIMATOR.apply(ctx(node, 60, { settings: { enableParam }, params: {} }));
+      expect(node.rotation.y).toBeCloseTo(Math.PI * 2);
+    }
+  });
+});
+
+describe('fractionOf', () => {
+  it('maps booleans to 0/1 and numbers against the full scale, clamped', () => {
+    expect(fractionOf(true, 1)).toBe(1);
+    expect(fractionOf(false, 100)).toBe(0);
+    expect(fractionOf(50, 100)).toBe(0.5);
+    expect(fractionOf(250, 100)).toBe(1);
+    expect(fractionOf(-4, 1)).toBe(0);
+    expect(fractionOf(0.25, undefined)).toBe(0.25);
+  });
+
+  it('is 0 for garbage values and falls back to scale 1 for a bad scale', () => {
+    for (const value of [undefined, null, 'open', Number.NaN, Number.POSITIVE_INFINITY, {}]) expect(fractionOf(value, 1)).toBe(0);
+    expect(fractionOf(0.5, 0)).toBe(0.5);
+    expect(fractionOf(0.5, -3)).toBe(0.5);
+    expect(fractionOf(0.5, 'x')).toBe(0.5);
+  });
+});
+
+describe('travel', () => {
+  it('moves along +Y by distance * fraction from the authored position', () => {
+    const node = new Object3D();
+    node.position.set(0, 0.48, 0);
+    TRAVEL_ANIMATOR.apply(ctx(node, 50, { settings: { axis: 'y', distance: 0.08, scale: 100 } }));
+    expect(node.position.y).toBeCloseTo(0.52);
+    expect(node.position.x).toBe(0);
+    TRAVEL_ANIMATOR.apply(ctx(node, 100, { settings: { axis: 'y', distance: 0.08, scale: 100 } }));
+    expect(node.position.y).toBeCloseTo(0.56); // absolute, not accumulating
+  });
+
+  it('restores the authored position for 0, false and garbage', () => {
+    const node = new Object3D();
+    node.position.set(1, 2, 3);
+    for (const value of [0, false, 'x', undefined]) {
+      TRAVEL_ANIMATOR.apply(ctx(node, 1, { settings: { distance: 0.5 } }));
+      expect(node.position.y).toBeCloseTo(2.5);
+      TRAVEL_ANIMATOR.apply(ctx(node, value, { settings: { distance: 0.5 } }));
+      expect(node.position.toArray()).toEqual([1, 2, 3]);
+    }
+  });
+
+  it('honours the axis and a negative distance, and falls back to y for a bad axis', () => {
+    const node = new Object3D();
+    TRAVEL_ANIMATOR.apply(ctx(node, true, { settings: { axis: 'z', distance: -0.2 } }));
+    expect(node.position.toArray()).toEqual([0, 0, -0.2]);
+    const other = new Object3D();
+    TRAVEL_ANIMATOR.apply(ctx(other, true, { settings: { axis: 'w', distance: 0.3 } }));
+    expect(other.position.y).toBeCloseTo(0.3);
+  });
+
+  it('uses its spec defaults when settings are empty', () => {
+    const node = new Object3D();
+    TRAVEL_ANIMATOR.apply(ctx(node, 1));
+    expect(node.position.y).toBeCloseTo(0.1);
+  });
+});
+
+describe('turn', () => {
+  it('maps value 0..scale to fromDeg..toDeg about the axis, added to the authored rotation', () => {
+    const node = new Object3D();
+    node.rotation.x = 0.25;
+    const settings = { axis: 'y', fromDeg: 90, toDeg: 0 };
+    TURN_ANIMATOR.apply(ctx(node, false, { settings }));
+    expect(node.rotation.y).toBeCloseTo(Math.PI / 2);
+    TURN_ANIMATOR.apply(ctx(node, true, { settings }));
+    expect(node.rotation.y).toBeCloseTo(0);
+    TURN_ANIMATOR.apply(ctx(node, 0.5, { settings }));
+    expect(node.rotation.y).toBeCloseTo(Math.PI / 4);
+    expect(node.rotation.x).toBe(0.25); // other axes keep their authored value
+  });
+
+  it('is absolute: repeated frames at one value do not accumulate', () => {
+    const node = new Object3D();
+    for (let i = 0; i < 5; i++) TURN_ANIMATOR.apply(ctx(node, 1, { settings: { axis: 'z', fromDeg: 0, toDeg: 30 } }));
+    expect(node.rotation.z).toBeCloseTo(Math.PI / 6);
+  });
+
+  it('sweeps a gauge needle over a percent range and shows the value-0 pose for garbage', () => {
+    const node = new Object3D();
+    const settings = { axis: 'z', fromDeg: -135, toDeg: 135, scale: 100 };
+    TURN_ANIMATOR.apply(ctx(node, 50, { settings }));
+    expect(node.rotation.z).toBeCloseTo(0);
+    TURN_ANIMATOR.apply(ctx(node, 'bad', { settings }));
+    expect(node.rotation.z).toBeCloseTo((-135 * Math.PI) / 180);
+  });
+
+  it('uses its spec defaults when settings are empty (quarter turn about Y)', () => {
+    const node = new Object3D();
+    TURN_ANIMATOR.apply(ctx(node, 1));
+    expect(node.rotation.y).toBeCloseTo(Math.PI / 2);
   });
 });
 
@@ -158,7 +283,7 @@ describe('planAnimations / applyAnimations', () => {
       ['level', 'anim.liquid', 'fill'],
       ['agitatorRpm', 'anim.agitator', 'spin'],
     ]);
-    expect(plan[1]?.settings).toEqual({ axis: 'y', rpmScale: 1 });
+    expect(plan[1]?.settings).toEqual({ axis: 'y', rpmScale: 1, enableParam: '' });
   });
 
   it('lets placement.animation override animator and settings, and falls back to anim.<param>', () => {
@@ -170,10 +295,30 @@ describe('planAnimations / applyAnimations', () => {
       },
       lookup,
     );
-    expect(plan.find((b) => b.param === 'agitatorRpm')?.settings).toEqual({ axis: 'x', rpmScale: 3 });
+    expect(plan.find((b) => b.param === 'agitatorRpm')?.settings).toEqual({ axis: 'x', rpmScale: 3, enableParam: '' });
     expect(plan.find((b) => b.param === 'steam')).toMatchObject({ nodeName: 'anim.steam' });
     const swapped = planAnimations(def, { level: { animator: 'visible' } }, lookup);
     expect(swapped.find((b) => b.param === 'level')?.animator.id).toBe('visible');
+  });
+
+  it("layers the part's animNodes settings between the animator defaults and the placement", () => {
+    const motor = { animNodes: { speed: { node: 'anim.shaft', animator: 'spin', settings: { axis: 'x', enableParam: 'running' } } } };
+    expect(planAnimations(motor, undefined, lookup)[0]?.settings).toEqual({ axis: 'x', rpmScale: 1, enableParam: 'running' });
+    const tuned = planAnimations(motor, { speed: { animator: 'spin', settings: { rpmScale: 0.5 } } }, lookup);
+    expect(tuned[0]?.settings).toEqual({ axis: 'x', rpmScale: 0.5, enableParam: 'running' });
+    // A placement that swaps the animator does not inherit settings written for spin.
+    const swapped = planAnimations(motor, { speed: { animator: 'turn' } }, lookup);
+    expect(swapped[0]?.settings).toEqual({ axis: 'y', fromDeg: 0, toDeg: 90, scale: 1 });
+  });
+
+  it('hands every resolved param to the animator (spin gated by running)', () => {
+    const motor = { animNodes: { speed: { node: 'anim.shaft', animator: 'spin', settings: { axis: 'x', enableParam: 'running' } } } };
+    const shaft = new Object3D();
+    const plan = planAnimations(motor, undefined, lookup);
+    applyAnimations(plan, { 'anim.shaft': shaft }, { speed: 60, running: false }, 1, 1);
+    expect(shaft.rotation.x).toBe(0);
+    applyAnimations(plan, { 'anim.shaft': shaft }, { speed: 60, running: true }, 1, 2);
+    expect(shaft.rotation.x).toBeCloseTo(Math.PI * 2);
   });
 
   it('skips unknown animators instead of throwing', () => {

@@ -9,6 +9,8 @@ import { gridToWorld } from '../iso/grid';
 import { assetHoldKey, PendingAsset } from '../iso/render-signal';
 import { AssetBoundary, useTrackedTexture } from '../objects/assets';
 import { fitAspect, logoAnchorForBlock, logoAnchorFromModel, logoPlaneQuaternion, type LogoAnchor } from '../objects/logo';
+import { mergeFittingParams } from '../../assets/process/fitting-params';
+import { partAccent, partOriginY } from './part-pose';
 import { partScale } from './part-scale';
 import type { IsoPartDefinition, IsoPartLogo, IsoPartProps } from './types';
 
@@ -28,11 +30,13 @@ export const DATA_BLOCK_HEIGHT = 1;
  * - `logo` set: a textured plane on the top face (see `logoAnchorFromModel`
  *   for the `logo` empty contract).
  */
-export function DataPart({ placement, params, style, def }: IsoPartProps) {
+export function DataPart({ placement, params, style, def, tuning }: IsoPartProps) {
   const [wx, , wz] = gridToWorld(placement.x, placement.y);
   const yaw = placement.rotation ?? 0;
+  // Inline GLBs (`origin: 'pipe-axis'`) sit on the pipe axis for the current pipe radius.
+  const y = partOriginY(def, mergeFittingParams(tuning?.fittings).pipeRadius);
   return (
-    <group position={[wx, 0, wz]} rotation={[0, yaw, 0]}>
+    <group position={[wx, y, wz]} rotation={[0, yaw, 0]}>
       {def.model ? (
         // useLoader suspends; the fallback holds the canvas's rendered signal until the model is in.
         <AssetBoundary resetKey={def.model}>
@@ -42,10 +46,9 @@ export function DataPart({ placement, params, style, def }: IsoPartProps) {
               def={def}
               params={params}
               style={style}
-              // Resolved params include provider bindings (threshold colours in
-              // Studio's cloud sample). They take precedence over static colour; an empty
-              // string (a valid 'no colour' default) falls back to placement / package colour.
-              accent={typeof params.color === 'string' && params.color !== '' ? params.color : placement.color}
+              // Alarm param, then a bound `color` param (threshold colours in Studio's
+              // cloud sample), then the placement / package colour: see partAccent.
+              accent={partAccent(def, params, style, placement.color)}
               animation={placement.animation}
             />
           </Suspense>
@@ -84,7 +87,7 @@ function DataModel({
         // The surrounding group carries position and yaw.
         position={[0, 0, 0]}
         scale={scale}
-        accent={accent ?? def.colors?.accent}
+        accent={accent}
         body={def.colors?.body}
         edgeColor={def.colors?.edge}
         style={style}

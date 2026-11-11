@@ -122,8 +122,11 @@ export {
   BOB_ANIMATOR,
   BUILTIN_ISO_ANIMATORS,
   FILL_ANIMATOR,
+  fractionOf,
   PULSE_ANIMATOR,
   SPIN_ANIMATOR,
+  TRAVEL_ANIMATOR,
+  TURN_ANIMATOR,
   VISIBLE_ANIMATOR,
 } from './anim/animators';
 export { applyAnimations, planAnimations, useIsoAnimators } from './anim/use-iso-animators';

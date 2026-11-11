@@ -13,6 +13,7 @@ export {
   isIsoAnimator,
   isIsoInspectorPanel,
   isParamSpec,
+  ISO_PART_ORIGINS,
 } from './kinds';
 export {
   IsoRegistryProvider,
@@ -36,4 +37,5 @@ export { GlbPart } from './GlbPart';
 export { DataPart, DATA_BLOCK_HEIGHT, LogoPlane } from './DataPart';
 export { ANNOTATION_PARTS, CONNECTOR_PART, ICON_PART, IMAGE_PART } from './annotation-parts';
 export { partScale } from './part-scale';
+export { partAccent, partOriginY } from './part-pose';
 export { formatLabelText, formatLabelValue } from './label-text';

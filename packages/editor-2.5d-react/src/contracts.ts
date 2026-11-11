@@ -29,6 +29,20 @@ export {
   isIsoPartDefinition,
   isIsoTheme,
   isParamSpec,
+  ISO_PART_ORIGINS,
 } from './registry/kinds';
-export type { IsoAnimator, IsoInspectorPanel, IsoPartDefinition, IsoPartParamSpec, IsoTheme } from './registry/types';
+export type {
+  IsoAnimNode,
+  IsoAnimator,
+  IsoInspectorPanel,
+  IsoPartDefinition,
+  IsoPartOrigin,
+  IsoPartParamSpec,
+  IsoPartPort,
+  IsoTheme,
+} from './registry/types';
 export { HOLODECK_STYLE, type HolodeckStyle } from '../assets/process/style';
+// Built-in animators and the pure planner: library packages drive their GLBs'
+// anim nodes with the real animators in tests (no renderer, no React).
+export { BUILTIN_ISO_ANIMATORS, fractionOf } from './anim/animators';
+export { applyAnimations, planAnimations, type AnimationBinding } from './anim/plan';

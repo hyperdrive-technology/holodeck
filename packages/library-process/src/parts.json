@@ -1,0 +1,273 @@
+[
+  {
+    "id": "process:valve-ball",
+    "label": "Ball valve",
+    "category": "Valves",
+    "hint": "Flanged ball valve with a quarter-turn lever; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 1,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "open": {
+        "type": "boolean",
+        "label": "Open",
+        "default": true
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/valve-ball.glb",
+    "animNodes": {
+      "open": {
+        "node": "anim.handle",
+        "animator": "turn",
+        "settings": {
+          "axis": "y",
+          "fromDeg": 90,
+          "toDeg": 0,
+          "scale": 1
+        }
+      }
+    },
+    "instanced": false
+  },
+  {
+    "id": "process:valve-control",
+    "label": "Control valve",
+    "category": "Valves",
+    "hint": "Globe valve with a pneumatic diaphragm actuator; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 1,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "position": {
+        "type": "number",
+        "label": "Position",
+        "default": 0,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/valve-control.glb",
+    "animNodes": {
+      "position": {
+        "node": "anim.stem",
+        "animator": "travel",
+        "settings": {
+          "axis": "y",
+          "distance": 0.08,
+          "scale": 100
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "instanced": false
+  },
+  {
+    "id": "process:motor",
+    "label": "Motor",
+    "category": "Rotating equipment",
+    "hint": "Foot-mounted electric motor, shaft along its length",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "params": {
+      "running": {
+        "type": "boolean",
+        "label": "Running",
+        "default": false
+      },
+      "speed": {
+        "type": "number",
+        "label": "Speed",
+        "default": 100,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/motor.glb",
+    "animNodes": {
+      "speed": {
+        "node": "anim.shaft",
+        "animator": "spin",
+        "settings": {
+          "axis": "x",
+          "rpmScale": 0.6,
+          "enableParam": "running"
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "instanced": false
+  },
+  {
+    "id": "process:heat-exchanger-shell-tube",
+    "label": "Shell-and-tube heat exchanger",
+    "category": "Heat transfer",
+    "hint": "Horizontal shell-and-tube exchanger on two saddles, 3×1",
+    "footprint": {
+      "w": 3,
+      "h": 1
+    },
+    "params": {
+      "tubeInTemp": {
+        "type": "number",
+        "label": "Tube in",
+        "default": 20,
+        "min": -40,
+        "max": 400,
+        "step": 0.5,
+        "unit": "°C"
+      },
+      "tubeOutTemp": {
+        "type": "number",
+        "label": "Tube out",
+        "default": 20,
+        "min": -40,
+        "max": 400,
+        "step": 0.5,
+        "unit": "°C"
+      },
+      "shellInTemp": {
+        "type": "number",
+        "label": "Shell in",
+        "default": 20,
+        "min": -40,
+        "max": 400,
+        "step": 0.5,
+        "unit": "°C"
+      },
+      "shellOutTemp": {
+        "type": "number",
+        "label": "Shell out",
+        "default": 20,
+        "min": -40,
+        "max": 400,
+        "step": 0.5,
+        "unit": "°C"
+      }
+    },
+    "model": "models/heat-exchanger-shell-tube.glb",
+    "instanced": false
+  },
+  {
+    "id": "process:transmitter",
+    "label": "Transmitter",
+    "category": "Instruments",
+    "hint": "Field transmitter head on a short process connection",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "floor": true,
+    "params": {
+      "value": {
+        "type": "number",
+        "label": "Value",
+        "default": 0,
+        "reading": true
+      },
+      "unit": {
+        "type": "string",
+        "label": "Unit",
+        "default": ""
+      },
+      "alarm": {
+        "type": "boolean",
+        "label": "Alarm",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/transmitter.glb",
+    "alarmParam": "alarm",
+    "instanced": false
+  },
+  {
+    "id": "process:cabinet",
+    "label": "Control cabinet",
+    "category": "Electrical",
+    "hint": "Floor-standing control cabinet with a status beacon",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "params": {
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/cabinet.glb",
+    "alarmParam": "fault",
+    "instanced": false
+  }
+]

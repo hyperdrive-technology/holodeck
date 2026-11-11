@@ -27,11 +27,13 @@ classes.
 | `heat-exchanger.glb` (plate) | Blender | `blender/parts/heat-exchanger.py` | no (brewery extension only) | no ports, no anim nodes |
 | `valve.glb` (globe + doughnut wheel) | Blender | `blender/parts/valve.py` | no | older shape than the code valve; wheel dwarfs the body |
 | `fermenter`, `brite-tank`, `kettle`, `mash-tun` `.glb` | Blender | `blender/parts/*.py` | no | unused: Tank presets replaced them |
+| Pilot: ball valve, control valve, motor, shell-and-tube heat exchanger, transmitter, control cabinet | Blender | `blender/parts/process/*.py` → `@holodeck/library-process` | yes ("Process parts" in the palette) | animated lever, stem and shaft; `fault` / `alarm` tint `hd.accent`; sample `apps/studio/samples/process-line.holodeck.json` |
 | 26 cloud archetypes, 54 AWS services | Blender + SVG | `library-cloud`, `assets-aws` | yes | not process assets; the packaging model to copy |
 
-So a standalone Studio user can place nine process parts, two of which are
-annotations. There is no rotating equipment, no instrument, no actuated valve,
-no heat transfer, no solids handling and no electrical part in the palette.
+So a standalone Studio user can place fifteen process parts, two of which are
+annotations: the nine above plus the six pilot parts of `@holodeck/library-process`.
+There is still no pump in the palette (only the brewery's off-scale `pump.glb`),
+no solids handling and no vessel beyond Tank and Mixer.
 
 ## Package
 
@@ -41,8 +43,35 @@ Process parts ship as a library package, `@holodeck/library-process`
 - Blender scripts in `blender/parts/process/<slug>.py`, shared vocabulary in
   `blender/parts/process/_common.py`.
 - GLBs in `packages/library-process/assets/models/<slug>.glb`.
-- Data-only part definitions (`src/parts.json`), ids `process:<slug>`.
+- Data-only part definitions (`src/parts.json`), ids `process:<slug>`, and
+  `src/models.json`, a mirror of each script's final `c.check(...)` (kind,
+  envelope, `port.*` and `anim.*` positions, whether it has `hd.accent`). Tests
+  fail until every GLB has both, so each new Blender batch is a deliberate
+  edit of the two files (a few lines per part).
 - The existing brewery GLBs stay where they are until the package covers them.
+
+How the definitions use the editor contract (`IsoPartDefinition`):
+
+- Inline parts set `origin: 'pipe-axis'` (rendered at `pipeWorldY()`),
+  `inlineLength` = face-to-face length, and coincident `in` / `out` ports at
+  the body centre (`w` / `e`), so a drawn pipe snaps to the valve like the
+  code valve.
+- Animation: `animNodes` name a built-in animator plus per-part `settings`:
+  `turn` (quarter-turn lever: `fromDeg: 90, toDeg: 0` on `open`), `travel`
+  (stem: `distance: 0.08, scale: 100` on `position`), `spin` (motor shaft:
+  `axis: 'x'`, gated by `enableParam: 'running'`, on `speed`). Later parts
+  reuse them: `turn` for `needle` (gauge sweep) and `disc`, `travel` for
+  spools; `blades` (louvres moving together) still needs one.
+- State colour: `alarmParam` (`fault`, or `alarm` on the transmitter) tints
+  `hd.accent` with the theme's alarm colour; a `color` param takes a bound
+  colour (a threshold transform) like the cloud parts.
+- Grid ports are declared only where a pipe leaving a grid node meets the
+  GLB nozzle (a test checks it). The heat exchanger's nozzles are off the
+  grid (`tube-in` at x = -1.10 on a 3 x 1 footprint) or elevated, so it has
+  no grid ports yet: move `tube-in` to x = -1.0 (and consider a 3 x 2
+  footprint so a face lands on a node) to make it routable.
+- Mounted parts (`transmitter`) stand on the floor for now; mounting on a
+  pipe or vessel nozzle needs a placement elevation.
 
 Nothing in the package knows about PLCs or Hyperdrive. Hyperdrive binds tags to
 the part params through the normal binding model.
@@ -92,9 +121,9 @@ routing or parametric code, not a GLB.
 | Part | OpenBridge class | Params (bindable) | Status |
 | --- | --- | --- | --- |
 | `valve-gate` handwheel | digital-valve (manual) | open | partial (code valve, no state visual) |
-| `valve-ball` lever | digital-valve | open | wave 1 pilot |
+| `valve-ball` lever | digital-valve | open | have (`library-process`) |
 | `valve-butterfly` lever | digital-valve | open | wave 1 |
-| `valve-control` globe + pneumatic diaphragm | analog-valve | position 0-100 %, fault | wave 1 pilot |
+| `valve-control` globe + pneumatic diaphragm | analog-valve | position 0-100 %, fault | have (`library-process`) |
 | `valve-actuated` ball + rotary actuator | digital-valve | open, fault | wave 1 |
 | `valve-solenoid` | digital-valve | energised | wave 1 |
 | `valve-three-way` actuated | analog / digital-threeway-valve | position, fault | wave 1 |
@@ -112,7 +141,7 @@ routing or parametric code, not a GLB.
 | Part | OpenBridge class | Params | Status |
 | --- | --- | --- | --- |
 | `pump-centrifugal` end suction | pump | running, speed, fault | partial (`pump.glb`, brewery only, off-scale) |
-| `motor` foot-mounted | motor | running, speed, fault | wave 1 pilot |
+| `motor` foot-mounted | motor | running, speed, fault | have (`library-process`) |
 | `pump-lobe` positive displacement | pump | running, speed | wave 1 |
 | `pump-inline` vertical inline | pump | running, speed | wave 1 |
 | `pump-dosing` diaphragm metering | pump | running, stroke | wave 1 |
@@ -130,7 +159,7 @@ routing or parametric code, not a GLB.
 | Part | OpenBridge class | Params | Status |
 | --- | --- | --- | --- |
 | `heat-exchanger-plate` | heat-exchanger | temperatures | partial (GLB, brewery only, no ports) |
-| `heat-exchanger-shell-tube` | heat-exchanger | temperatures | wave 1 pilot |
+| `heat-exchanger-shell-tube` | heat-exchanger | temperatures | have (`library-process`); no grid ports yet (see Package) |
 | `boiler` | (none) | firing, pressure | wave 1 |
 | `cooling-tower` | (none) | fan running | wave 1 |
 | `chiller` / `heat-pump` | heat-pump | running | wave 2 |
@@ -171,7 +200,7 @@ Vessel work waits for #228, which changes the tank primitives and line rules.
 | Part | OpenBridge class | Params | Status |
 | --- | --- | --- | --- |
 | Label with reading | automation-readout, automation-badge | value, alarm | have |
-| `transmitter` head on a stem | transmitter, transmitter-stack | value, alarm | wave 1 pilot |
+| `transmitter` head on a stem | transmitter, transmitter-stack | value, alarm | have (`library-process`); floor-standing until mounting lands |
 | `gauge-pressure` dial | gauge-* | value | wave 1 |
 | `flowmeter-mag` inline | transmitter | value | wave 1 |
 | `level-radar` top mount | transmitter | value | wave 1 |
@@ -199,7 +228,7 @@ not to Blender.
 
 | Part | OpenBridge class | Params | Status |
 | --- | --- | --- | --- |
-| `cabinet` control panel / MCC | (none) | fault | wave 1 pilot |
+| `cabinet` control panel / MCC | (none) | fault | have (`library-process`) |
 | `vfd` drive | converter | running, fault | wave 1 |
 | `junction-box` | (none) | (none) | wave 1 |
 | `transformer` | transformer | energised | wave 2 |
@@ -221,7 +250,7 @@ not to Blender.
 
 | | Parts |
 | --- | --- |
-| Placeable today (process) | 9 |
+| Placeable today (process) | 15 |
 | Wave 1 (28 GLBs, 6 of them the pilot) | 28 |
 | Wave 2 | about 30 |
 | Wave 3 | about 15 |
@@ -236,7 +265,9 @@ not to Blender.
 2. **Wave 1 remainder** (22 GLBs) in parallel batches on the settled vocabulary.
 3. **Package lane** (code): `@holodeck/library-process` with definitions,
    animators for `stem` / `handle` / `needle`, state colour, GLB contract
-   tests, Blender drift coverage, Studio install, a sample scene.
+   tests, Blender drift coverage, Studio install, a sample scene. Done for
+   the pilot six; each wave-1 batch adds its entries to `parts.json` and
+   `models.json`.
 4. **Fix-ups of existing assets**: rescale `pump.glb`, add ports to
    `heat-exchanger.glb`, retire or restyle `valve.glb`, give the code valve an
    open / closed visual.

@@ -61,6 +61,19 @@ A part definition needs no React `component`. Without one it renders through `Da
   bounding-box top, 60% of the short side.
 - `floor: true` makes a pack part a floor annotation (never a routing obstacle); `extent(placement)`
   tells fit-to-view about anything beyond the footprint.
+- `origin: 'pipe-axis'`: the GLB is authored with its origin on the pipe axis (inline valves,
+  strainers, inline meters) and is drawn at `pipeWorldY()` for the current pipe radius, like the
+  code valve. Absent or `'floor'` = origin on the floor (Y = 0). `GlbPart` honours it too.
+- `animNodes[param]` binds a GLB `anim.*` node to an animator; its optional `settings` are the part's
+  own animator settings (over the animator's defaults, under `placement.animation[param].settings`,
+  and only while that animator is the one in use). Built-in animators: `spin` (with `enableParam`,
+  e.g. a motor shaft that turns from `speed` only while `running`), `fill`, `bob`, `visible`,
+  `pulse`, `travel` (linear stroke, e.g. a control-valve stem) and `turn` (angle between `fromDeg`
+  and `toDeg`, e.g. a quarter-turn lever or a gauge needle). Animators receive every resolved param
+  as `ctx.params`.
+- `alarmParam`: a declared boolean param that turns `hd.accent` into the theme's `colors.alarm`
+  while true (a faulted motor band, a cabinet beacon). It beats `params.color`, which beats the
+  placement colour, which beats `colors.accent` (`partAccent`, src/registry/part-pose.ts).
 
 ## Connectors
 

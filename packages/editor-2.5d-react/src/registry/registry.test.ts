@@ -62,6 +62,30 @@ describe('structural validators', () => {
     expect(isIsoPartDefinition({ ...part('x'), animNodes: { level: { node: 'anim.liquid' } } })).toBe(false);
   });
 
+  it('validates animNodes settings, origin, alarmParam, ports and inlineLength', () => {
+    const ok = (extra: Record<string, unknown>) => isIsoPartDefinition({ ...part('x'), ...extra });
+    const spin = { node: 'anim.shaft', animator: 'spin' };
+    expect(ok({ animNodes: { speed: { ...spin, settings: { axis: 'x' } } } })).toBe(true);
+    expect(ok({ animNodes: { speed: { ...spin, settings: 'x' } } })).toBe(false);
+    expect(ok({ animNodes: { speed: { ...spin, settings: ['x'] } } })).toBe(false);
+    expect(ok({ origin: 'floor' })).toBe(true);
+    expect(ok({ origin: 'pipe-axis' })).toBe(true);
+    expect(ok({ origin: 'ceiling' })).toBe(false);
+    const fault = { fault: { type: 'boolean', label: 'Fault', default: false } };
+    expect(ok({ params: fault, alarmParam: 'fault' })).toBe(true);
+    expect(ok({ params: fault, alarmParam: 'missing' })).toBe(false);
+    expect(ok({ params: fault, alarmParam: '' })).toBe(false);
+    expect(ok({ params: fault, alarmParam: 'toString' })).toBe(false);
+    expect(ok({ params: { level: { type: 'number', label: 'L', default: 0 } }, alarmParam: 'level' })).toBe(false);
+    expect(ok({ ports: { in: { x: 0, y: 0, dir: 'w' }, out: { x: 0, y: 0, dir: 'e' } } })).toBe(true);
+    expect(ok({ ports: { in: { x: 0, y: 0, dir: 'up' } } })).toBe(false);
+    expect(ok({ ports: { in: { x: Number.NaN, y: 0, dir: 'w' } } })).toBe(false);
+    expect(ok({ ports: 'in' })).toBe(false);
+    expect(ok({ inlineLength: 1 })).toBe(true);
+    expect(ok({ inlineLength: 0 })).toBe(true);
+    expect(ok({ inlineLength: -1 })).toBe(false);
+  });
+
   it('requires a pool renderer for instanced parts', () => {
     expect(isIsoPartDefinition(part('p', { instanced: true }))).toBe(false);
     expect(isIsoPartDefinition(part('p', { instanced: true, instancedRenderer: noop }))).toBe(true);
@@ -134,7 +158,7 @@ describe('built-in extension', () => {
         .list(HOLODECK_KINDS.isoAnimator)
         .map((a) => a.id)
         .sort(),
-    ).toEqual(['bob', 'fill', 'pulse', 'spin', 'visible']);
+    ).toEqual(['bob', 'fill', 'pulse', 'spin', 'travel', 'turn', 'visible']);
   });
 
   it('keeps the old footprints and pooled kinds', () => {
