@@ -5,7 +5,8 @@
  *  - against the real studio build with a shipped GLB (valve.glb), so the
  *    `/render` model input is exercised wherever CI has the build and a
  *    Chromium (the studio job), not only on a Mac with Blender.
- * Both skip cleanly without a Chromium.
+ * Both skip cleanly without a Chromium locally; on CI a missing Chromium or
+ * studio build fails the guard test in render.test.ts (holodeck#280).
  */
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
