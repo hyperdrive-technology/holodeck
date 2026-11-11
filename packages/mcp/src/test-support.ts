@@ -11,6 +11,7 @@ import { createMcpHost } from './host';
 import { createHolodeckMcpServer, type HolodeckMcp } from './server';
 import type { Tier } from './tiers';
 import type { SceneRenderer } from './render';
+import { PlaygroundBridge } from './playground';
 
 let sharedHost: Promise<HolodeckHost> | null = null;
 /** Installing every package takes a moment; tests share one host (it is never mutated by tools). */
@@ -40,10 +41,12 @@ export interface CallResult {
   data: Record<string, unknown> & { error?: { code: string; message: string; problems: string[] } };
 }
 
-export async function harness(opts: { tier?: Tier; dir?: string; renderer?: SceneRenderer } = {}): Promise<Harness> {
+export async function harness(opts: { tier?: Tier; dir?: string; renderer?: SceneRenderer; bridge?: PlaygroundBridge } = {}): Promise<Harness> {
   const temp = opts.dir ? null : await tempDir();
   const dir = opts.dir ?? temp!.dir;
-  const mcp = await createHolodeckMcpServer({ root: dir, tier: opts.tier, host: await testHost(), now: () => FIXED_NOW, renderer: opts.renderer });
+  // Never the developer's real `.holodeck-mcp.json` (a running playground): a file that does not exist unless a test passes its own bridge.
+  const bridge = opts.bridge ?? new PlaygroundBridge({ file: join(dir, '.no-bridge.json') });
+  const mcp = await createHolodeckMcpServer({ root: dir, tier: opts.tier, host: await testHost(), now: () => FIXED_NOW, renderer: opts.renderer, bridge });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'test', version: '0.0.0' });
   await Promise.all([mcp.server.connect(serverTransport), client.connect(clientTransport)]);

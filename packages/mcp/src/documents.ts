@@ -34,12 +34,17 @@ export class DocumentStore {
   /** Read and validate `path`. Throws a ToolError listing every problem. */
   async load(path: string): Promise<LoadedDocument> {
     const file = await this.workspace.read(path);
-    const parsed = parseDocumentText(file.text, this.host);
-    if (!parsed.ok) throw new ToolError(`${file.path} is not a valid Holodeck document`, parsed.problems, 'invalid_document');
+    return { path: file.path, etag: file.etag, ...this.parse(file.text, file.path) };
+  }
+
+  /** Validate a document's text (a file's, or the playground's working copy); `label` names it in errors. */
+  parse(text: string, label: string): { document: IsoDoc; wrapped: boolean } {
+    const parsed = parseDocumentText(text, this.host);
+    if (!parsed.ok) throw new ToolError(`${label} is not a valid Holodeck document`, parsed.problems, 'invalid_document');
     if (parsed.document.engine !== ISO_ENGINE_ID) {
-      throw new ToolError(`${file.path} uses engine "${parsed.document.engine}"; these tools edit "${ISO_ENGINE_ID}" documents`, [], 'unsupported_engine');
+      throw new ToolError(`${label} uses engine "${parsed.document.engine}"; these tools edit "${ISO_ENGINE_ID}" documents`, [], 'unsupported_engine');
     }
-    return { path: file.path, etag: file.etag, document: parsed.document as IsoDoc, wrapped: parsed.wrapped };
+    return { document: parsed.document as IsoDoc, wrapped: parsed.wrapped };
   }
 
   /** Problems with a document value (as `scene_validate` reports them); empty when it would load. */
@@ -54,14 +59,23 @@ export class DocumentStore {
    * etag the edit was based on, or `null` for a new file.
    */
   async save(path: string, doc: IsoDoc, expect: string | null | undefined): Promise<LoadedDocument> {
+    const normalised = this.check(doc);
+    const file = await this.workspace.write(path, serializeDocument(normalised), expect);
+    return { path: file.path, etag: file.etag, document: normalised, wrapped: false };
+  }
+
+  /**
+   * `doc` as a save would store it (`requires` recomputed, `metadata.updated`
+   * stamped, host checks), or a ToolError listing every problem. The
+   * playground bridge checks an edit with this before the tab commits it.
+   */
+  check(doc: IsoDoc): IsoDoc {
     const draft = stampDocument(structuredClone(doc), this.now());
     withRequires(draft, this.host);
     const checked = checkHostDocument(this.host, draft);
     const problems = [...metadataProblems(draft), ...checked.problems];
     if (problems.length || !checked.document) throw new ToolError('the edit would make the document invalid; nothing was written', problems, 'invalid_edit');
-    const normalised = checked.document as IsoDoc;
-    const file = await this.workspace.write(path, serializeDocument(normalised), expect);
-    return { path: file.path, etag: file.etag, document: normalised, wrapped: false };
+    return checked.document as IsoDoc;
   }
 }
 

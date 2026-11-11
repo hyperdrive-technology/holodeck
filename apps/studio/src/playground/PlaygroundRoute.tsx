@@ -43,6 +43,7 @@ import { useDocumentSession } from '../features/use-document-session';
 import { ensurePlaygroundDocument, PLAYGROUND_TABS, playgroundStarter, type PlaygroundTab } from './playground-state';
 import { PLAYGROUND_DOCUMENT_ID } from './starter';
 import { connectionProblems, ViewerPanel } from './ViewerPanel';
+import { useMcpBridge } from './use-mcp-bridge';
 
 export const playgroundKeys = { document: ['playground', 'document'] as const };
 
@@ -272,6 +273,13 @@ function PlaygroundWorkspace({
     });
   }, [deletedElsewhere, onRecreate, session]);
 
+  // An agent's edits over the MCP bridge (`pnpm playground` only) wait while a
+  // dialog owns the working copy, as the canvas keyboard does.
+  const bridge = useMcpBridge(session, {
+    tab,
+    blocked: rebuilding ? 'the playground is being rebuilt' : conflict ? 'a save conflict dialog is open' : resetOpen ? 'the reset dialog is open' : null,
+  });
+
   // The studio shortcuts that make sense here (the canvas binds its own:
   // Mod+Z, Delete, arrows...). Mod+K is advertised in the library search box.
   useHotkeys(
@@ -337,6 +345,11 @@ function PlaygroundWorkspace({
           </>
         ) : null}
         <div className="flex-1" />
+        {bridge === 'connected' ? (
+          <span className="px-2 text-xs text-muted-foreground" data-testid="playground-agent" title="An MCP agent can read and edit this scene (pnpm playground)">
+            Agent bridge on
+          </span>
+        ) : null}
         <span
           className={cn('px-2 text-xs', writerState.status.kind === 'error' || writerState.status.kind === 'conflict' ? 'text-destructive' : 'text-muted-foreground')}
           data-testid="playground-save-status"
