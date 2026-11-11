@@ -109,7 +109,8 @@ describe.skipIf(!blender)('Blender part tools (real Blender)', () => {
 
   describe.skipIf(!chromium || !studioBuilt)('styled preview (studio build + Chromium)', () => {
     it('Workbench + the Holodeck style, or an explicit unsupported (never a blank image)', async () => {
-      const raw = (await h.client.callTool({ name: 'blender_preview', arguments: { name: 'test-drum', width: 400, height: 300 } })) as CallToolResult;
+      // Past the MCP client's 60 s default: a cold Chromium + WebGPU start on a busy machine can take longer.
+      const raw = (await h.client.callTool({ name: 'blender_preview', arguments: { name: 'test-drum', width: 400, height: 300 } }, undefined, { timeout: 200_000 })) as CallToolResult;
       if (raw.isError) {
         expect(process.env.CI, JSON.stringify(raw.content)).toBeFalsy();
         expect(JSON.stringify(raw.structuredContent)).toContain('"unsupported"');

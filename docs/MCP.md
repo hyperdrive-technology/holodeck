@@ -133,7 +133,8 @@ blender_status ─▶ blender_build_part ─▶ part_validate ─▶ blender_pre
   environment: Blender runs arbitrary Python, so the tier alone is not
   enough. Below either, the tools stay listed and refuse with the reason
   (`tier` / `blender_disabled`). `blender_status` and `part_validate` are
-  `read` and always work; `blender_status` says what is missing.
+  `read` and always work; `blender_status` says what is missing (it runs
+  only `blender --version`, once per binary).
 - **Blender.** `$BLENDER`, then `/Applications/Blender.app/Contents/MacOS/Blender`,
   then `blender` on PATH, the order of `build-parts.mjs` (a `$BLENDER` that
   does not exist is "not found", never a silent fall-through). The command
