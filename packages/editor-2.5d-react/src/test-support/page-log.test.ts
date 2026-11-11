@@ -31,6 +31,6 @@ describe('collectPageLog', () => {
     for (let i = 0; i < PAGE_LOG_LIMIT * 3; i += 1) emit('console', consoleMsg('error', `frame ${i}`));
     expect(logs).toHaveLength(PAGE_LOG_LIMIT + 1);
     expect(logs[0]).toBe('error: frame 0');
-    expect(logs.at(-1)).toMatch(/rest were dropped/);
+    expect(logs[logs.length - 1]).toMatch(/rest were dropped/);
   });
 });

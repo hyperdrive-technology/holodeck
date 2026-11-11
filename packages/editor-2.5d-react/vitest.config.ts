@@ -21,6 +21,11 @@ export const BROWSER_TESTS = ['**/*-render.test.ts', 'src/iso/tank-tuner.test.ts
  * this file would get its include list concatenated with this one (vitest merges arrays).
  */
 export default defineConfig({
+  // `vitest related` (dev-check fast) walks each test's import graph and transforms
+  // `assets/models/*.glb?url` dependencies WITHOUT the `?url` query (vitest 1.6), so Vite tried
+  // to parse the binary GLB as JS and the run failed with an unhandled error. Treating .glb as an
+  // asset gives that walk a URL module; normal runs import with `?url` and are unaffected.
+  assetsInclude: ['**/*.glb'],
   test: {
     environment: 'node',
     testTimeout: 60_000,
