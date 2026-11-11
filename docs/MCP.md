@@ -40,6 +40,79 @@ the picture is exactly the studio's:
 runs the real-build test in the studio job, after the studio build, on
 SwiftShader WebGPU.
 
+## Playground bridge
+
+With `pnpm playground` running, an agent edits the scene open in the user's
+browser tab and sees the result live. The path `@playground` stands for that
+tab in the scene tools (`scene_get`, `scene_add_object` … `scene_bind`) and in
+`provider_connect` / `provider_browse`.
+
+```
+MCP server ──ws (agent token, no Origin)──▶ bridge ◀──ws (session token, studio Origin)── playground tab
+ packages/mcp/src/playground.ts        apps/studio/bridge/        apps/studio/src/playground/mcp-bridge-*.ts
+```
+
+- **Where it runs.** `mcpBridgePlugin` (`apps/studio/bridge/vite-plugin.ts`)
+  starts the bridge inside `vite` / `vite preview` in mode `playground`, or
+  when `HOLODECK_MCP_BRIDGE=1` (`=0` turns it off). Production builds never
+  include it: only dev and preview servers run plugin server hooks. The
+  bridge writes `.holodeck-mcp.json` (the WebSocket URL and the agent token,
+  mode 0600, gitignored) at the holodeck repo root, or at
+  `HOLODECK_MCP_BRIDGE_FILE`, and prints the token. The MCP server reads the
+  file again on every call, so a restarted dev server (with a new port and
+  token) is picked up without restarting the MCP server.
+- **Security** (`apps/studio/bridge/mcp-bridge.ts`):
+  - It listens on 127.0.0.1 only, even under `vite --host`.
+  - `Host` must be loopback, which stops DNS rebinding.
+  - There are two random 256-bit tokens, compared in constant time. The page
+    gets the session token from `/__holodeck/mcp-bridge`. That endpoint
+    answers loopback clients with a loopback `Host` only and sends no CORS
+    headers.
+  - Session sockets must carry the studio's own `Origin`. Agent sockets must
+    carry none, so no web page can act as the agent even if it learns the
+    token.
+  - The MCP server sends the token only to a `ws://127.0.0.1:<port>/` URL,
+    whatever the file says.
+  - Messages are capped at 32 MB. A tab has 30 s to answer.
+- **Edits are one undo step.** The MCP server reads the tab's working copy
+  (`state`, with an etag), runs the same `SceneEditor` reducer steps it uses
+  for files on a copy, and sends the resulting scene (`apply`). The tab
+  dry-runs the editor's `apply-scene` action (pure reducer). Then it
+  dispatches the action, which the editor commits as one history entry, so
+  Mod+Z undoes the whole tool call. The session then autosaves it like any
+  user edit.
+- **Refusals.** The tab refuses `apply` in these cases:
+  - the etag is stale: the user edited meanwhile (`conflict`, so read again);
+  - the Viewer tab is active (`viewer`);
+  - a gesture is in progress, the canvas is not ready, or a dialog is open
+    (reset, save conflict, rebuild) (`busy`);
+  - the reducer refuses the scene (`invalid_edit`, with the `Edit rejected:`
+    notice).
+- **Read back.** `playground_state` returns the working copy, saved or not,
+  plus the active tab, save status, selection, connection states and bounded
+  live values. `playground_screenshot` is the canvas's own PNG export, so it
+  shows live values and the current camera. Without WebGPU it is an error,
+  never a blank image.
+- **Providers.** `provider_connect` applies the studio's credential rules
+  (`src/connections/credentials.ts`) on both ends. Secrets are never sent:
+  the result names the ones the user must enter in the Connections tab. On
+  `@playground`, `provider_browse` uses the tab's live provider session. On a
+  file it runs only the offline simulator (`holodeck.sim`) in-process.
+  Anything that needs the network or secrets answers `needs_playground`.
+- **No tab.** File paths work as before. `playground_status` never fails: it
+  says whether a bridge runs and which tabs are connected (the newest tab is
+  the one `@playground` edits). Tools given `@playground` answer `no_bridge`
+  / `no_session`, with hints to run `pnpm playground` or to pass a document
+  path.
+- **Tests.** `apps/studio/bridge/mcp-bridge.test.ts` covers tokens, Origin,
+  Host and limits. `src/playground/mcp-bridge-{client,session}.test.ts` covers
+  the tab side with fakes. `packages/mcp/src/playground.test.ts` covers the
+  server side against a real bridge. `packages/mcp/src/bridge-e2e.test.ts`
+  runs the whole chain: studio build under `vite preview` with the bridge,
+  Chromium on `/playground`, then `scene_add_object` lands in the page as one
+  undo step, a stale etag is a `conflict`, and the screenshot fails without
+  WebGPU. It is skipped without the build or a Chromium.
+
 ## Tiers
 
 | Tier | Allows |
@@ -54,7 +127,7 @@ SwiftShader WebGPU.
 |---|---|---|
 | 1. Library + scenes | `parts_*`, `scene_*`, `holodeck_info` | done |
 | 2. Headless render | `scene_render` | done |
-| 3. Playground bridge | `playground_*`, `provider_*` | planned |
+| 3. Playground bridge | `playground_*`, `provider_*`, `@playground` path | done |
 | 4. Blender Phase 1 | `blender_*`, `part_validate`, `part_install` | planned |
 
 Known gaps in group 1:

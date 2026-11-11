@@ -34,6 +34,7 @@ To register it for a client (`.mcp.json`, project scope):
 | `HOLODECK_MCP_ROOT` | current directory | The only folder documents are read from or written to |
 | `HOLODECK_MCP_TIER` | `author` | `read`, `author` or `exec` (see below). Any other value fails at startup |
 | `HOLODECK_CHROMIUM` | macOS Chrome, then Playwright's Chromium | Browser for `scene_render` |
+| `HOLODECK_MCP_BRIDGE_FILE` | `.holodeck-mcp.json` at the holodeck repo root | Playground bridge file that `pnpm playground` writes (URL + agent token) |
 | `HOLODECK_STUDIO_DIST` | `apps/studio/dist` next to this package | Studio build that `scene_render` serves (`cd apps/studio && pnpm build`) |
 
 ## Tools
@@ -56,6 +57,17 @@ To register it for a client (`.mcp.json`, project scope):
 | `scene_connect` | author | Pipe between two ports (or free cells), routed around obstacles, ports recorded |
 | `scene_remove` | author | Delete objects; pipe ends on them are freed; groups go whole |
 | `scene_bind` | author | Bind a param to a provider signal, or unbind (`null`) |
+| `playground_status` | read | Is `pnpm playground` running with its bridge, which tabs are connected (never an error) |
+| `playground_state` | read | The live tab's scene (saved or not), etag, active tab, save status, selection, connection states, live values |
+| `playground_screenshot` | read (author to write `out`) | PNG of the live canvas (current camera, live values) |
+| `provider_list` | read | Installed providers: capabilities, source syntax, secret-free config schema, secrets the user enters |
+| `provider_connect` | author | Add or replace a secret-free connection (the studio's credential rules) |
+| `provider_browse` | read | A connection's signal tree; on a file only the offline simulator, on `@playground` the tab's live session |
+
+`path: "@playground"` makes any `scene_*` edit tool (and `provider_*`) work on
+the scene open in the playground tab: one undo step per call, refused with
+`conflict` when the user edited since your read. See
+[`docs/MCP.md`](../../docs/MCP.md#playground-bridge).
 
 A tool above the server's tier is still listed, but it refuses and names the
 tier it needs.
@@ -82,7 +94,9 @@ tier it needs.
   param out of range), the whole call fails.
 - **Size bounds**: documents up to 20 MB (the studio import limit); results up
   to 256k characters (narrow the request with `objectIds`, `view: "summary"`,
-  `limit`); every input string and list is bounded by its schema
+  `limit`); `scene_render` images up to 3 MB of PNG (bigger is `too_large`:
+  pass `out` to write the file instead, or render smaller); every input
+  string and list is bounded by its schema
   (`src/limits.ts`).
 
 ## Rendering
@@ -100,7 +114,13 @@ viewport. These cases are errors with a reason, never a blank PNG:
 
 One browser starts on first use. Renders run one at a time. The browser
 closes after 2 idle minutes, when the client disconnects, or on SIGINT /
-SIGTERM.
+SIGTERM; renders still queued then fail with `closed` and the one in
+progress is aborted. A browser that crashes or is killed is forgotten and
+the next render starts a new one.
+
+A PNG over 3 MB (`MAX_IMAGE_BYTES`, 4 MB as base64) is not put in the tool
+result: without `out` it is a `too_large` error; with `out` the file is
+written and the result carries only its metadata (`inline: false`).
 
 Design notes, the playground bridge and the Blender flow: [`docs/MCP.md`](../../docs/MCP.md).
 
