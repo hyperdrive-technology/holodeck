@@ -202,11 +202,12 @@ describe('helpers', () => {
 
 describe('bridgeConfigMiddleware', () => {
   type Res = { status?: number; body?: string; headers: Record<string, string> };
-  const run = (req: { url: string; method?: string; address?: string; host?: string }, b: McpBridge | null) =>
+  const run = (req: { url: string; method?: string; address?: string; host?: string; headers?: Record<string, string> }, b: McpBridge | null, preset: Record<string, string> = {}) =>
     new Promise<Res | 'next'>((done) => {
-      const out: Res = { headers: {} };
+      const out: Res = { headers: { ...preset } };
       const res = {
         setHeader: (k: string, v: string) => void (out.headers[k] = v),
+        removeHeader: (k: string) => void delete out.headers[k],
         writeHead(status: number, headers?: Record<string, string>) {
           out.status = status;
           Object.assign(out.headers, headers);
@@ -217,8 +218,8 @@ describe('bridgeConfigMiddleware', () => {
           done(out);
         },
       };
-      const incoming = { url: req.url, method: req.method ?? 'GET', socket: { remoteAddress: req.address ?? '127.0.0.1' }, headers: { host: req.host ?? 'localhost:5173' } };
-      bridgeConfigMiddleware(async () => b)(incoming as never, res as never, () => done('next'));
+      const incoming = { url: req.url, method: req.method ?? 'GET', socket: { remoteAddress: req.address ?? '127.0.0.1' }, headers: { host: req.host ?? 'localhost:5173', ...req.headers } };
+      bridgeConfigMiddleware(async () => b, (o) => isLoopbackOrigin(o, 5173))(incoming as never, res as never, () => done('next'));
     });
 
   it('gives loopback GETs the session config, never the agent token', async () => {
@@ -235,5 +236,35 @@ describe('bridgeConfigMiddleware', () => {
     expect(await run({ url: BRIDGE_CONFIG_PATH, method: 'POST' }, bridge)).toMatchObject({ status: 405 });
     expect(await run({ url: '/playground' }, bridge)).toBe('next');
     expect(await run({ url: BRIDGE_CONFIG_PATH }, null)).toMatchObject({ status: 503 });
+  });
+
+  it('serves the studio’s own pages (no Origin, or its own; same-origin / none fetches)', async () => {
+    const own: Array<Record<string, string>> = [{}, { origin: 'http://localhost:5173' }, { 'sec-fetch-site': 'same-origin' }, { 'sec-fetch-site': 'none' }];
+    for (const headers of own) {
+      expect(await run({ url: BRIDGE_CONFIG_PATH, headers }, bridge), JSON.stringify(headers)).toMatchObject({ status: 200 });
+    }
+  });
+
+  it('refuses other pages, even on localhost: a foreign Origin, or a cross-site / same-site fetch (holodeck#277)', async () => {
+    const others: Array<Record<string, string>> = [
+      { origin: 'http://localhost:6006' },
+      { origin: 'http://evil.localhost:5173' },
+      { origin: 'null' },
+      { origin: 'https://evil.example' },
+      { 'sec-fetch-site': 'cross-site' },
+      { 'sec-fetch-site': 'same-site' },
+    ];
+    for (const headers of others) {
+      const out = (await run({ url: BRIDGE_CONFIG_PATH, headers }, bridge)) as Res;
+      expect(out.status, JSON.stringify(headers)).toBe(403);
+      expect(out.body ?? '').not.toContain(bridge.sessionToken);
+    }
+  });
+
+  it('removes CORS headers an earlier middleware (Vite’s server.cors) set', async () => {
+    const out = (await run({ url: BRIDGE_CONFIG_PATH }, bridge, { 'Access-Control-Allow-Origin': 'http://localhost:6006', 'Access-Control-Allow-Credentials': 'true' })) as Res;
+    expect(out.status).toBe(200);
+    expect(out.headers['Access-Control-Allow-Origin']).toBeUndefined();
+    expect(out.headers['Access-Control-Allow-Credentials']).toBeUndefined();
   });
 });

@@ -7,7 +7,7 @@
  * page back.
  *
  * Needs the studio build (apps/studio: pnpm build) and a Chromium
- * (findChromium); skips cleanly without them. CI's studio job has both.
+ * (findChromium); skips cleanly without them locally, fails on CI (holodeck#280).
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -59,6 +59,12 @@ async function until(what: string, check: () => Promise<boolean> | boolean, time
     await new Promise((d) => setTimeout(d, step));
   }
 }
+
+// On CI (the studio job, after its build and Chrome steps) a missing
+// prerequisite fails instead of skipping the chain silently (holodeck#280).
+it.runIf(!!process.env.CI)('CI has the studio build, vite and a Chromium for the bridge e2e', () => {
+  expect({ chromium: chromiumPath !== null, build: existsSync(join(dist, 'index.html')), vite: existsSync(vite) }).toEqual({ chromium: true, build: true, vite: true });
+});
 
 describe.skipIf(!ready)('playground bridge end to end (studio build + Chromium)', () => {
   let preview: ChildProcess;

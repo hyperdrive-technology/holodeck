@@ -44,18 +44,34 @@ interface ServerLike {
   resolvedUrls: { local: string[] } | null;
 }
 
+/** CORS response headers Vite's own `server.cors` middleware may already have set. */
+const CORS_HEADERS = ['Access-Control-Allow-Origin', 'Access-Control-Allow-Credentials', 'Access-Control-Allow-Methods', 'Access-Control-Allow-Headers', 'Access-Control-Expose-Headers'];
+
 /**
  * The page's config endpoint. Loopback clients only, named by a loopback
- * `Host` (no DNS rebinding), GET only, never cached. A cross-site page cannot
- * read the answer (no CORS headers), and a LAN client (`vite --host`) gets 403.
+ * `Host` (no DNS rebinding), GET only, never cached, and only for the
+ * studio's own pages: a request carrying a foreign `Origin` or a cross-site /
+ * same-site `Sec-Fetch-Site` gets 403 (the playground's same-origin fetch
+ * sends neither, or `same-origin`). A LAN client (`vite --host`) gets 403.
+ *
+ * Vite installs its CORS middleware BEFORE plugin `configureServer` hooks run
+ * (Vite 8; default `server.cors` allows every localhost origin), so CORS
+ * headers can already be on `res` here: they are removed, and the real-Vite
+ * test in mcp-bridge.test.ts pins that no other localhost page can read the
+ * answer (holodeck#277).
  */
-export function bridgeConfigMiddleware(bridge: () => Promise<McpBridge | null>): Connect.NextHandleFunction {
+export function bridgeConfigMiddleware(bridge: () => Promise<McpBridge | null>, allowOrigin: (origin: string) => boolean): Connect.NextHandleFunction {
   return (req: IncomingMessage, res: ServerResponse, next: Connect.NextFunction) => {
     const path = (req.url ?? '/').split('?')[0];
     if (path !== BRIDGE_CONFIG_PATH) return next();
+    for (const header of CORS_HEADERS) res.removeHeader(header);
     res.setHeader('Cache-Control', 'no-store');
     if (req.method !== 'GET') return void res.writeHead(405).end();
     if (!isLoopbackAddress(req.socket.remoteAddress) || !LOOPBACK_NAMES.has(hostName(req.headers.host))) return void res.writeHead(403).end();
+    const origin = req.headers.origin;
+    if (origin !== undefined && !allowOrigin(origin)) return void res.writeHead(403).end();
+    const site = req.headers['sec-fetch-site'];
+    if (site !== undefined && site !== 'same-origin' && site !== 'none') return void res.writeHead(403).end();
     void bridge().then(
       (b) => {
         if (!b) return void res.writeHead(503).end();
@@ -107,7 +123,7 @@ export function mcpBridgePlugin(): Plugin {
         return null;
       },
     );
-    server.middlewares.use(bridgeConfigMiddleware(() => bridge));
+    server.middlewares.use(bridgeConfigMiddleware(() => bridge, (origin) => isLoopbackOrigin(origin, studioPort())));
   };
 
   return {

@@ -66,8 +66,12 @@ MCP server ──ws (agent token, no Origin)──▶ bridge ◀──ws (sessio
   - `Host` must be loopback, which stops DNS rebinding.
   - There are two random 256-bit tokens, compared in constant time. The page
     gets the session token from `/__holodeck/mcp-bridge`. That endpoint
-    answers loopback clients with a loopback `Host` only and sends no CORS
-    headers.
+    answers only loopback clients with a loopback `Host`, and only the
+    studio's own pages: a foreign `Origin`, or a `Sec-Fetch-Site` of
+    `cross-site` / `same-site`, gets 403. It strips the CORS headers that
+    Vite's own `server.cors` adds before plugin middlewares run (by default
+    Vite allows every localhost origin). `bridge/vite-plugin.test.ts` checks
+    this against a real Vite server.
   - Session sockets must carry the studio's own `Origin`. Agent sockets must
     carry none, so no web page can act as the agent even if it learns the
     token.
@@ -81,6 +85,12 @@ MCP server ──ws (agent token, no Origin)──▶ bridge ◀──ws (sessio
   dispatches the action, which the editor commits as one history entry, so
   Mod+Z undoes the whole tool call. The session then autosaves it like any
   user edit.
+- **One edit at a time.** The tab queues `apply` and `connect`. When two
+  MCP servers edit one tab, the second edit waits, sees the new etag and
+  gets `conflict` instead of overwriting the first. An apply that the user
+  changes again in the same render still succeeds: the tab finds it in the
+  editor history. If the tab cannot confirm a commit within 5 s, it answers
+  `timeout` and asks the agent to read the state before redoing the edit.
 - **Refusals.** The tab refuses `apply` in these cases:
   - the etag is stale: the user edited meanwhile (`conflict`, so read again);
   - the Viewer tab is active (`viewer`);

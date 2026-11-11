@@ -591,6 +591,13 @@ describe.skipIf(!chromiumPath)('scene_render tool (fake studio build)', () => {
 
 const studioBuilt = existsSync(join(defaultStudioDist(), 'index.html'));
 
+// CI's studio job has both (after its build and Chrome steps): a missing one
+// there must fail, not skip the browser tests silently (holodeck#280).
+it.runIf(!!process.env.CI)('CI has a Chromium and the studio build for the browser tests', () => {
+  expect(chromiumPath, 'set HOLODECK_CHROMIUM (CI: the runner\'s Google Chrome)').not.toBeNull();
+  expect(studioBuilt, `build the studio first: no ${join(defaultStudioDist(), 'index.html')}`).toBe(true);
+});
+
 describe.skipIf(!chromiumPath || !studioBuilt)('scene_render against the real studio build', () => {
   it('renders the playground starter, or says WebGPU is missing (never a blank image)', async () => {
     const h = await harness();
