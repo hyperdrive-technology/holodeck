@@ -1,17 +1,19 @@
-# Pre-1.0 CI policy (Des, 2026-11-03): nothing runs automatically (no push/schedule triggers).
-# PR jobs run only when the PR has the `ci` label (adding it starts a run; every push then runs).
-# Every event on a `ci` PR runs in full, adding an unrelated label included: a skipped run would
-# publish the required check names as skipped (= passing) and could mask a failure (GPT review,
-# holodeck-sdk#45 / wormhole#26).
-# or on demand with
-# `gh workflow run <this file> --ref <branch>` (~/dev/hyperdrive/scripts/ci-run.sh). Minor changes
-# are checked locally instead and recorded with ~/dev/hyperdrive/scripts/ci-local-status.sh, which
-# also satisfies required checks whose jobs were skipped. Policy: ~/dev/hyperdrive/AGENTS.md.
+# Pre-1.0 CI policy (Des, 2026-11-03; heavy CI last, 2026-11-11): nothing runs automatically.
+# A run starts only when a label is added to a PR that has the `ci` label (types: [labeled]), so a
+# push never starts CI: the run is a deliberate act on one head, once, after both reviews pass
+# (~/dev/hyperdrive/scripts/ci-run.sh adds or re-applies the label). A push after a run leaves the
+# new head without checks until CI is triggered again. Every labelled event on a `ci` PR runs in
+# full, an unrelated label included: a skipped run would publish the required check names as
+# skipped (= passing) and could mask a failure (GPT review, holodeck-sdk#45 / wormhole#26).
+# Also on demand with `gh workflow run <this file> --ref <branch>` (advisory: dispatch runs do not
+# gate merge). Before any of that, run the local ladder: scripts/dev-check.sh (TESTING.md). Minor
+# changes are checked locally only and recorded with ~/dev/hyperdrive/scripts/ci-local-status.sh.
+# Policy: ~/dev/hyperdrive/AGENTS.md "Dev loop & shift-left".
 name: CI
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [labeled]
   workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -42,19 +44,12 @@ jobs:
         # entry), and depends on @holodeck/sdk from the npm registry, which is not
         # published. Add it once it is revived.
         #
-        # scope: the paths whose change can affect the leg (scripts/ci-scope.mjs). It must
-        # list every directory the package's tests read, not just its own:
-        # editor-2.5d-react's models-contract test needs one GLB per blender/parts/*.py
-        # and its logo/objects tests load packages/library-cloud/assets/models. The other
-        # two read only their own package (checked 2026-11-03 with rg for ../../ reads).
-        # scripts/ci-scope.test.mjs parses these patterns and pins the cross-reads.
+        # Each leg's scope (the paths whose change can affect it, cross-reads included) is
+        # JOBS[<package>] in scripts/ci-scope.mjs, shared with scripts/dev-check.mjs.
         include:
           - package: editor-2.5d-react
-            scope: '^(packages/(editor-2\.5d-react|library-cloud)|blender)/'
           - package: editor-2d-react
-            scope: '^packages/editor-2d-react/'
           - package: viewer-3d-react
-            scope: '^packages/viewer-3d-react/'
     timeout-minutes: 30
     steps:
       # The packages depend on the SDK via `file:../../../holodeck-sdk/ts`, so the
@@ -102,7 +97,7 @@ jobs:
         run: |
           if ! command -v node >/dev/null; then echo "no node on the image yet: run"; echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           node holodeck/scripts/ci-scope.mjs --cwd holodeck --event "$EVENT" --base "$BASE_SHA" --sdk-ref "$SDK_REF" \
-            --paths '${{ matrix.scope }}'
+            --job '${{ matrix.package }}'
 
       - name: Checkout holodeck-sdk (${{ steps.sdk.outputs.ref }})
         if: steps.scope.outputs.run == 'true'
@@ -216,12 +211,9 @@ jobs:
           echo "Using holodeck-sdk ref: $ref"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
-      # All five packages run, or none. They have hidden test-time links that
-      # package.json does not show: assets-aws tests import provider-aws
-      # DEFAULT_PART_HINTS, and library-cloud/assets-aws conformance tests consume the
-      # editor-2.5d-react contracts. Choosing per package skipped those tests, so any
-      # change to one of them or to editor-2.5d-react selects the whole set. Shared
-      # inputs and unowned root files select it too (scripts/ci-scope.mjs).
+      # All five packages run, or none (hidden test-time links between them; see
+      # JOBS['small-packages'] in scripts/ci-scope.mjs). Shared inputs and unowned root
+      # files select them too.
       - name: Does this change touch the small packages?
         id: scope
         env:
@@ -235,7 +227,7 @@ jobs:
           fi
           out=$(mktemp)
           GITHUB_OUTPUT="$out" node holodeck/scripts/ci-scope.mjs --cwd holodeck --event "$EVENT" --base "$BASE_SHA" \
-            --sdk-ref "$SDK_REF" --paths "^packages/(${PACKAGES// /|}|editor-2\.5d-react)/"
+            --sdk-ref "$SDK_REF" --job small-packages
           if grep -qx 'run=true' "$out"; then selected=$PACKAGES; else selected=""; fi
           echo "Selected: ${selected:-none}"
           echo "packages=$selected" >> "$GITHUB_OUTPUT"
@@ -340,7 +332,8 @@ jobs:
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       # The studio consumes editor-2.5d-react and the provider/library packages (file:
-      # deps), so a change to any of them, or to the studio, runs it (scripts/ci-scope.mjs).
+      # deps), so a change to any of them, or to the studio, runs it (JOBS.studio in
+      # scripts/ci-scope.mjs).
       - name: Does this change touch the studio, the MCP server or a package they consume?
         id: scope
         env:
@@ -350,7 +343,7 @@ jobs:
         run: |
           if ! command -v node >/dev/null; then echo "no node on the image yet: run"; echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           node holodeck/scripts/ci-scope.mjs --cwd holodeck --event "$EVENT" --base "$BASE_SHA" --sdk-ref "$SDK_REF" \
-            --paths '^apps/studio/' --paths '^packages/(editor-2\.5d-react|provider-http|provider-aws|library-cloud|mcp)/'
+            --job studio
 
       - name: Checkout holodeck-sdk (${{ steps.sdk.outputs.ref }})
         if: steps.scope.outputs.run == 'true'
@@ -386,48 +379,19 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
-      - name: Build editor-2.5d-react
-        if: steps.scope.outputs.run == 'true'
-        working-directory: holodeck/packages/editor-2.5d-react
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm build
-
-      # Provider packages the studio installs (holodeck#101); file: deps, copied at install.
-      - name: Build provider-http, provider-aws and library-cloud
-        if: steps.scope.outputs.run == 'true'
-        run: |
-          for p in provider-http provider-aws library-cloud; do
-            (cd holodeck/packages/$p && pnpm install --frozen-lockfile && pnpm build)
-          done
-
-      # Install, type check, unit tests (InMemoryTransport clients), build, smoke-dist.
-      - name: MCP server (packages/mcp)
+      # Every command below is a phase of scripts/ci-studio.sh, which scripts/dev-check.sh
+      # runs locally too. deps = install + build of the four packages the studio and the
+      # MCP server install as file: deps (copied at install time, so built first).
+      - name: Build editor-2.5d-react, provider-http, provider-aws and library-cloud
         if: steps.scope.outputs.run == 'true'
         working-directory: holodeck
-        env:
-          HOLODECK_SKIP_RENDER_TESTS: '1'
-        run: scripts/ci-package.sh mcp
+        run: scripts/ci-studio.sh --only deps
 
-      - name: Install
+      # Install, type check, unit tests (vitest + fake-indexeddb), production build.
+      - name: Studio install, type check, unit tests, build
         if: steps.scope.outputs.run == 'true'
-        working-directory: holodeck/apps/studio
-        run: pnpm install --frozen-lockfile
-
-      - name: Type check
-        if: steps.scope.outputs.run == 'true'
-        working-directory: holodeck/apps/studio
-        run: pnpm type-check
-
-      - name: Unit tests
-        if: steps.scope.outputs.run == 'true'
-        working-directory: holodeck/apps/studio
-        run: pnpm exec vitest run
-
-      - name: Build
-        if: steps.scope.outputs.run == 'true'
-        working-directory: holodeck/apps/studio
-        run: pnpm build
+        working-directory: holodeck
+        run: scripts/ci-studio.sh --only install,typecheck,test,build
 
       - name: Use the runner's preinstalled Chrome for e2e
         if: steps.scope.outputs.run == 'true'
@@ -439,17 +403,18 @@ jobs:
       # Install, type check, unit tests (InMemoryTransport clients), build, smoke-dist.
       # After the studio build and the Chrome step: scene_render's tests drive the real
       # apps/studio/dist in HOLODECK_CHROMIUM with SwiftShader WebGPU (a missing adapter
-      # fails on CI instead of skipping, as in the studio's webgpu e2e).
+      # fails on CI instead of skipping, as in the studio's webgpu e2e). This used to run
+      # twice (also before the studio build, render tests skipped); once covers both.
       - name: MCP server (packages/mcp)
         if: steps.scope.outputs.run == 'true'
         working-directory: holodeck
-        run: scripts/ci-package.sh mcp
+        run: scripts/ci-studio.sh --only mcp
 
       - name: E2E (Playwright over the production build)
         if: steps.scope.outputs.run == 'true'
-        working-directory: holodeck/apps/studio
+        working-directory: holodeck
         timeout-minutes: 15
-        run: pnpm exec playwright test
+        run: scripts/ci-studio.sh --only e2e
 
       - name: Upload e2e report
         if: failure() && steps.scope.outputs.run == 'true'

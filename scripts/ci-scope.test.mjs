@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { decide, INERT_PATHS, OWNED_PATHS, parseArgs, SHARED_PATHS } from './ci-scope.mjs';
+import { decide, INERT_PATHS, JOBS, OWNED_PATHS, parseArgs, SHARED_PATHS } from './ci-scope.mjs';
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'ci-scope.mjs');
 const FLOW = ['^packages/flow-runtime/'];
@@ -94,6 +94,14 @@ test('parseArgs collects repeated --paths and rejects unknown or valueless flags
   assert.throws(() => parseArgs(['--event']), /needs a value/);
 });
 
+test('parseArgs --job takes paths and --no-shared from JOBS', () => {
+  assert.deepEqual(parseArgs(['--job', 'viewer-3d-react']).paths, JOBS['viewer-3d-react'].paths);
+  assert.equal(parseArgs(['--job', 'viewer-3d-react']).shared, true);
+  assert.equal(parseArgs(['--event', 'pull_request', '--job', 'blender-drift']).shared, false);
+  assert.throws(() => parseArgs(['--job', 'nope']), /unknown job nope/);
+  assert.throws(() => parseArgs(['--job', 'studio', '--paths', 'x']), /exclusive/);
+});
+
 // --- CLI against a real git repo -------------------------------------------
 
 const roots = [];
@@ -168,22 +176,25 @@ test('CLI: the small-packages all-or-none pattern selects on a coupled package',
   assert.equal(cli(root, ['--event', 'pull_request', '--base', base, '--paths', pattern]).output, 'run=true\n');
 });
 
-// --- The workflow's real scope patterns --------------------------------------
+// --- The real job scopes (JOBS) and the workflows that use them -------------
 
-/** `package:` → `scope:` from the ci.yml matrix include list (plain regex parse; no YAML dep). */
-function matrixScopes() {
-  const yml = readFileSync(join(dirname(SCRIPT), '../.github/workflows/ci.yml'), 'utf8');
-  const scopes = {};
-  for (const m of yml.matchAll(/- package: (\S+)\n\s+scope: '([^']+)'/g)) scopes[m[1]] = m[2];
-  return scopes;
-}
+const WORKFLOWS = join(dirname(SCRIPT), '../.github/workflows');
+const workflow = (name) => readFileSync(join(WORKFLOWS, name), 'utf8');
+const runs = (job, file) => decide({ event: 'pull_request', changed: [file], paths: JOBS[job].paths, shared: JOBS[job].shared !== false }).run;
 
-test('ci.yml matrix scopes cover every directory each leg reads', () => {
-  const scopes = matrixScopes();
-  assert.deepEqual(Object.keys(scopes).sort(), ['editor-2.5d-react', 'editor-2d-react', 'viewer-3d-react']);
-  const runs = (pkg, file) => decide({ event: 'pull_request', changed: [file], paths: [scopes[pkg]] }).run;
-  // Own package.
-  for (const pkg of Object.keys(scopes)) assert.equal(runs(pkg, `packages/${pkg}/src/a.ts`), true, pkg);
+test('every scope step in the workflows names a JOBS entry, and every entry is used once', () => {
+  const ci = workflow('ci.yml');
+  const drift = workflow('blender-drift.yml');
+  for (const [name, yml] of [['ci.yml', ci], ['blender-drift.yml', drift]]) assert.ok(!yml.includes('--paths'), `${name} passes inline --paths`);
+  // The matrix passes its package name as the job; the other jobs name theirs.
+  assert.ok(ci.includes("--job '${{ matrix.package }}'"));
+  const legs = [...ci.matchAll(/^\s+- package: (\S+)$/gm)].map((m) => m[1]);
+  const named = [...`${ci}\n${drift}`.matchAll(/--job ([\w.-]+)$/gm)].map((m) => m[1]);
+  assert.deepEqual([...legs, ...named].sort(), Object.keys(JOBS).sort());
+});
+
+test('package legs cover every directory each reads', () => {
+  for (const pkg of ['editor-2.5d-react', 'editor-2d-react', 'viewer-3d-react']) assert.equal(runs(pkg, `packages/${pkg}/src/a.ts`), true, pkg);
   // editor-2.5d-react cross-reads: models-contract (blender/parts) and logo/objects (library-cloud GLBs).
   assert.equal(runs('editor-2.5d-react', 'blender/parts/valve.py'), true);
   assert.equal(runs('editor-2.5d-react', 'packages/library-cloud/assets/models/billboard.glb'), true);
@@ -193,12 +204,19 @@ test('ci.yml matrix scopes cover every directory each leg reads', () => {
   assert.equal(runs('viewer-3d-react', 'blender/parts/valve.py'), false);
 });
 
-test('ci.yml studio job (studio + MCP server) runs for the studio, the MCP server and what they consume', () => {
-  const yml = readFileSync(join(dirname(SCRIPT), '../.github/workflows/ci.yml'), 'utf8');
-  const job = yml.slice(yml.indexOf('\n  studio:'));
-  const paths = [...job.slice(0, job.indexOf('Checkout holodeck-sdk')).matchAll(/--paths '([^']+)'/g)].map((m) => m[1]);
-  assert.ok(job.includes('scripts/ci-package.sh mcp'), 'the studio job runs the MCP package gate');
-  const runs = (file) => decide({ event: 'pull_request', changed: [file], paths }).run;
+test('small-packages runs all five on a change to any of them or to editor-2.5d-react', () => {
+  const ci = workflow('ci.yml');
+  const packages = ci.match(/PACKAGES: (.+)/)[1].trim().split(/\s+/);
+  assert.deepEqual(packages.sort(), ['assets-aws', 'flow-runtime', 'library-cloud', 'provider-aws', 'provider-http']);
+  for (const p of [...packages, 'editor-2.5d-react']) assert.equal(runs('small-packages', `packages/${p}/src/a.ts`), true, p);
+  assert.equal(runs('small-packages', 'packages/viewer-3d-react/src/a.ts'), false);
+  assert.equal(runs('small-packages', 'apps/studio/src/a.ts'), false);
+});
+
+test('studio job (studio + MCP server) runs for the studio, the MCP server and what they consume', () => {
+  const ci = workflow('ci.yml');
+  const job = ci.slice(ci.indexOf('\n  studio:'));
+  assert.ok(job.includes('scripts/ci-studio.sh --only mcp'), 'the studio job runs the MCP package gate');
   for (const file of [
     'apps/studio/src/host/document-checks.ts',
     'packages/mcp/src/server.ts',
@@ -206,7 +224,22 @@ test('ci.yml studio job (studio + MCP server) runs for the studio, the MCP serve
     'packages/provider-http/src/a.ts',
     'packages/provider-aws/src/a.ts',
     'packages/library-cloud/src/a.ts',
-  ]) assert.equal(runs(file), true, file);
-  assert.equal(runs('packages/flow-runtime/src/a.ts'), false);
-  assert.equal(runs('packages/mcp-extra/src/a.ts'), false);
+  ]) assert.equal(runs('studio', file), true, file);
+  assert.equal(runs('studio', 'packages/flow-runtime/src/a.ts'), false);
+  assert.equal(runs('studio', 'packages/mcp-extra/src/a.ts'), false);
+});
+
+test('blender-drift runs for Blender inputs only, not shared CI plumbing', () => {
+  for (const file of [
+    'blender/parts/valve.py',
+    'packages/library-cloud/assets/models/billboard.glb',
+    'packages/editor-2.5d-react/assets/models/valve.glb',
+    'packages/editor-2.5d-react/scripts/build-parts.mjs',
+    'packages/editor-2.5d-react/src/models/valve-glb.test.ts',
+    '.github/workflows/blender-drift.yml',
+    'scripts/ci-scope.mjs',
+  ]) assert.equal(runs('blender-drift', file), true, file);
+  for (const file of ['.github/workflows/ci.yml', 'scripts/smoke-dist.mjs', 'package.json', 'packages/editor-2.5d-react/src/index.ts']) {
+    assert.equal(runs('blender-drift', file), false, file);
+  }
 });
