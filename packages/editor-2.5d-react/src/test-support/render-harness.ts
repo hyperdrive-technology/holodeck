@@ -46,14 +46,30 @@ export function launchRenderBrowser(): Promise<Browser> {
   return chromium.launch({ executablePath: CHROMIUM, headless: true, args: RENDER_ARGS });
 }
 
-/** Collects console errors, page errors and failed requests for failure messages. */
+/** Most lines collectPageLog keeps; one more line then says the rest were dropped. */
+export const PAGE_LOG_LIMIT = 500;
+
+/**
+ * Collects console errors, page errors and failed requests for failure messages. Keeps the
+ * first PAGE_LOG_LIMIT lines (the first errors are the useful ones): a page that logs an error
+ * every frame (a lost WebGPU device, a render loop throwing) otherwise grew this array until the
+ * test worker ran out of heap (4 GB OOM in a dev-check full run, 2026-11-11).
+ */
 export function collectPageLog(page: Page): string[] {
   const logs: string[] = [];
+  let dropped = false;
+  const push = (line: string) => {
+    if (logs.length < PAGE_LOG_LIMIT) logs.push(line);
+    else if (!dropped) {
+      dropped = true;
+      logs.push(`… more than ${PAGE_LOG_LIMIT} page log lines; the rest were dropped`);
+    }
+  };
   page.on('console', (msg) => {
-    if (msg.type() === 'error' || msg.type() === 'warning') logs.push(`${msg.type()}: ${msg.text()}`);
+    if (msg.type() === 'error' || msg.type() === 'warning') push(`${msg.type()}: ${msg.text()}`);
   });
-  page.on('pageerror', (err) => logs.push(`pageerror: ${err.message}`));
-  page.on('requestfailed', (req) => logs.push(`failed: ${req.url()} ${req.failure()?.errorText}`));
+  page.on('pageerror', (err) => push(`pageerror: ${err.message}`));
+  page.on('requestfailed', (req) => push(`failed: ${req.url()} ${req.failure()?.errorText}`));
   return logs;
 }
 

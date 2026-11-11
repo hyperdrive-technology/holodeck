@@ -190,7 +190,10 @@ export function plan({ mode, e2e = false, changed, phases, studio, chromium = nu
 
   // Environment shared by every step: CI's package jobs have no Blender; the browser is the
   // local Chrome when one exists (render tests then run as on CI), else render tests skip.
-  const baseEnv = { HOLODECK_SKIP_BLENDER: '1' };
+  // npm_config_confirm_modules_purge=false: steps run without a TTY, where pnpm would otherwise
+  // abort an install that has to rebuild node_modules (AGENTS.md's `CI=true pnpm install`
+  // works around the same prompt, but CI=true also switches tests to their stricter CI branches).
+  const baseEnv = { HOLODECK_SKIP_BLENDER: '1', npm_config_confirm_modules_purge: 'false' };
   const browser = effective !== 'fast' && chromium;
   if (browser) baseEnv.HOLODECK_CHROMIUM = chromium;
   else baseEnv.HOLODECK_SKIP_RENDER_TESTS = '1';
