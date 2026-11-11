@@ -95,4 +95,69 @@ and `.dev-check/last.json` records the run for `~/dev/hyperdrive/scripts/ci-loca
 
 ## Timings
 
-TIMINGS_PLACEHOLDER
+Measured 2026-11-11/12. Mac = M1 Pro, 10 cores, 16 GB, shared with other agent sessions (load
+varied 4-150; numbers are from quiet moments). boat = boat-large (8 vCPU), the size CI's legs
+can use.
+
+### Before → after, whole-repo gates
+
+| What | Before (main 52db468) | After (this branch) |
+|---|---|---|
+| Every CI command, one after another, boat-large | 718 s (sum; editor-2.5d-react 526 s of it) | `dev-check full`: 681 s wall (a5236ae; editor-2.5d-react test 548 s) |
+| Local whole-repo check on the Mac | none (per-package by hand) | `HOLODECK_SKIP_RENDER_TESTS=1 dev-check full`: **62 s** (7d3caa7, every non-browser CI step incl. Blender rebuild) |
+| provider-http tests | 39 s (`secrets.property` 36 s) | 5.6 s (cases run concurrently per secret) |
+| mcp package gate | 60 s (incl. real-studio render) | 22 s on boat |
+| editor-2.5d-react unit files (81) | one at a time, behind the render suites | parallel threads, ~45 s with build on the Mac |
+
+The editor-2.5d-react render suites are the critical path everywhere. They run one file at a time,
+each in a fresh child process. That is main's isolation; the branch's interim `singleFork`
+regressed it, see below. holds-render's 52 independent cases run 4 at a time on a Mac and 2 at a
+time on Linux (340 s → 50-80 s on a Mac).
+
+### Sample diffs (Mac, warm, `--base HEAD` + one edited file)
+
+| Diff | `fast` | `push` | `full` |
+|---|---|---|---|
+| leaf: `packages/editor-2d-react/src/utils.ts` | 3 s (type check + 15 related tests) | 4 s (26 tests) | = `full` |
+| shared: `packages/library-cloud/src/themes.ts` | 2 s (6 related tests) | selects editor-2.5d-react, the small packages, studio, mcp, Blender (≈ `full`) | 62 s without browser |
+| editor source: `packages/editor-2.5d-react/src/iso/pose.ts` | 9 s (211 related tests) | editor-2.5d-react incl. render tests | |
+| config: `packages/viewer-3d-react/vitest.config.ts` | escalates to `full` | escalates to `full` | 62 s without browser |
+
+### Slowest test files (main, boat-large, 2026-11-11)
+
+| File | Time |
+|---|---|
+| editor-2.5d-react `src/editor/holds-render.test.ts` (52 cases) | 219 s |
+| editor-2.5d-react `src/editor/pipe-cutaway-render.test.ts` | 72 s |
+| editor-2.5d-react `src/export/export-render.test.ts` | 64 s |
+| editor-2.5d-react `src/editor/editing-ux-render.test.ts` | 44 s (Mac, quiet: 24 s) |
+| editor-2.5d-react `src/editor/embed-render.test.ts` | 43 s |
+| provider-http `src/secrets.property.test.ts` | 36 s (now ~1.5 s) |
+| editor-2.5d-react `src/editor/follow-render.test.ts` | 27 s |
+| editor-2.5d-react `src/objects/objects-render.test.ts` | 22 s |
+| editor-2.5d-react `src/registry/registry-render.test.ts` | 19 s |
+| editor-2.5d-react `src/editor/pan-render.test.ts` | 16 s |
+| editor-2.5d-react `src/iso/vessels-render.test.ts` | 14 s |
+| editor-2.5d-react `src/editor/routing-brewhouse-render.test.ts` | 8 s |
+| editor-2.5d-react `src/iso/scene-render.test.ts` | 7 s |
+| flow-runtime `src/quality.property.test.ts` | 5 s |
+| editor-2.5d-react `src/iso/tank-tuner.test.ts` | 5 s |
+| editor-2.5d-react `src/editor/routing-render.test.ts` | 5 s |
+| editor-2.5d-react `src/editor/editor-render.test.ts` | 4 s |
+| provider-http `src/provider.poll.test.ts` | 4 s |
+| editor-2.5d-react `src/iso/parts-render.test.ts` | 3 s |
+| editor-2.5d-react `src/test-support/render-harness.test.ts` | 2 s |
+
+Every other test file is under 1 s.
+
+### Lessons (keep them from coming back)
+
+- `singleFork: true` for the browser project ran every render file in one long-lived child. Their
+  leftovers piled up: embed/editing-ux/follow-render took 788 s on boat-large (114 s on main)
+  and the child hit the 4 GB heap limit on a Mac. Pinned by `src/test-support/browser-tests.test.ts`.
+- Render tests on a Mac hang at random while other sessions run WebGPU e2e on the same GPU
+  (holodeck#300). `HOLODECK_SKIP_RENDER_TESTS=1 dev-check full` still covers everything else;
+  the boat CI run covers the browser steps.
+- On the Mac, a `timeout <n> pnpm exec vitest run` with a hung render file was seen running past
+  its cap (twice, 2026-11-11); whether pnpm passes the signal to vitest's children is unverified.
+  The CI job timeout is the backstop (holodeck#301).
