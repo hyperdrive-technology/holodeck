@@ -14,8 +14,8 @@
  * scene meanwhile the tab refuses (`conflict`) and the server recomputes.
  */
 
-import { EDIT_REJECTED_PREFIX, type EditorState, type IsoMetrics, type IsoSceneFile, type ProcessEditorHandle } from '@holodeck/editor-2.5d-react';
-import { HOLODECK_KINDS, type ConnectionState, type HolodeckProvider, type ProviderConnection, type SignalNode } from '@holodeck/sdk';
+import { EDIT_REJECTED_PREFIX, editorReducer, type EditorState, type IsoMetrics, type IsoSceneFile, type ProcessEditorHandle } from '@holodeck/editor-2.5d-react';
+import { HOLODECK_KINDS, type ConnectionState, type ContributionRegistry, type HolodeckProvider, type ProviderConnection, type SignalNode } from '@holodeck/sdk';
 import { connectionConfigProblems } from '../connections/credentials';
 import {
   BridgeError,
@@ -135,31 +135,37 @@ export function createPlaygroundBridgeHandler(deps: PlaygroundBridgeDeps): Playg
     const editor = deps.editor()!;
     const scene = params.scene as unknown as IsoSceneFile;
     if (scene.id !== deps.doc().body.id) throw new BridgeError(`the scene is for document "${String(scene.id)}", not the playground`, 'invalid');
-    const before = editor.getState();
+    // Dry run first on the editor's current state (the reducer is pure): a
+    // refusal is reported at once and deterministically, even when it repeats
+    // the notice already on screen (comparing notices could not tell).
+    const trial = editorReducer(editor.getState(), { type: 'apply-scene', scene });
+    if (trial.scene !== scene) {
+      throw new BridgeError('the canvas refused the edit', 'invalid_edit', trial.notice?.startsWith(EDIT_REJECTED_PREFIX) ? [trial.notice] : []);
+    }
     editor.dispatch({ type: 'apply-scene', scene });
     // The editor commits on its next render (keeping this very object as its
     // scene) and reports it through onChange; the session then makes it the
     // working copy and autosaves it. Done when the working copy is our object.
+    // The dry run passed, so a miss here means the canvas changed in between.
     const deadline = now() + APPLY_TIMEOUT_MS;
     for (;;) {
       if (deps.doc().body === scene) return result();
-      const after = editor.getState();
-      if (after.scene !== scene && after.notice !== before.notice && after.notice?.startsWith(EDIT_REJECTED_PREFIX)) {
-        throw new BridgeError('the canvas refused the edit', 'invalid_edit', [after.notice]);
-      }
-      if (now() > deadline) throw new BridgeError('the canvas did not commit the edit in time', 'timeout');
+      if (now() > deadline) throw new BridgeError('the canvas did not commit the edit in time', 'timeout', ['read the scene again (playground_state) and redo the edit']);
       await tick();
     }
   };
 
   const connect = (params: ConnectParams): EditResult => {
     if (!isObj(params) || !isObj(params.connection)) throw new BridgeError('connect needs a connection', 'invalid');
+    if (params.etag !== undefined && typeof params.etag !== 'string') throw new BridgeError('etag must be a string', 'invalid');
     checkEditable(params.etag);
     const c = params.connection;
     if (typeof c.id !== 'string' || !c.id || typeof c.provider !== 'string') throw new BridgeError('a connection needs id and provider', 'invalid');
+    if (c.label !== undefined && typeof c.label !== 'string') throw new BridgeError('a connection label must be a string', 'invalid');
+    if (c.config !== undefined && !isObj(c.config)) throw new BridgeError('a connection config must be an object', 'invalid');
     const provider = deps.providers().find((p) => p.id === c.provider);
     if (!provider) throw new BridgeError(`no provider "${c.provider}" is installed`, 'not_found', [`installed: ${deps.providers().map((p) => p.id).join(', ')}`]);
-    const connection: ProviderConnection = { id: c.id, provider: c.provider, ...(c.label ? { label: String(c.label) } : {}), ...(c.config ? { config: c.config } : {}) };
+    const connection: ProviderConnection = { id: c.id, provider: c.provider, ...(c.label ? { label: c.label } : {}), ...(c.config ? { config: c.config } : {}) };
     const problems = connectionConfigProblems(connection, provider);
     if (problems.length) throw new BridgeError('the connection config is refused', 'invalid', problems);
     const isNew = !(deps.doc().connections ?? []).some((x) => x.id === c.id);
@@ -216,6 +222,6 @@ export async function blobToBase64(blob: Blob): Promise<string> {
 }
 
 /** Installed providers, from the host registry. */
-export function installedProviders(registry: { list: <T>(kind: string) => T[] }): HolodeckProvider[] {
+export function installedProviders(registry: Pick<ContributionRegistry, 'list'>): readonly HolodeckProvider[] {
   return registry.list<HolodeckProvider>(HOLODECK_KINDS.provider);
 }

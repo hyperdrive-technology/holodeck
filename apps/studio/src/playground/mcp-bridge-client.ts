@@ -80,6 +80,7 @@ export function startBridgeClient(options: BridgeClientOptions): BridgeClient {
     try {
       const res = await fetchImpl(BRIDGE_CONFIG_PATH, { cache: 'no-store', credentials: 'same-origin' });
       const json = res.ok && (res.headers.get('content-type') ?? '').includes('application/json');
+      if (closed) return;
       if (!json) {
         // Never a bridge here, or it went away with the dev server: stop. A
         // 503 (bridge still starting) is worth another try.
@@ -90,6 +91,7 @@ export function startBridgeClient(options: BridgeClientOptions): BridgeClient {
       }
       config = await res.json();
     } catch {
+      if (closed) return;
       return state === 'connecting' ? setState('off') : retry();
     }
     if (closed) return;
