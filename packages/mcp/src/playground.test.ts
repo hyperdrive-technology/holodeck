@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { PNG } from 'pngjs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { MAX_IMAGE_BYTES } from './limits';
 import { parseBridgeFile, PlaygroundBridge, PLAYGROUND_PATH } from './playground';
 import { createPlaygroundDocument, PLAYGROUND_CONNECTION_ID } from './studio';
 import { harness, tempDir, type Harness } from './test-support';
@@ -269,6 +270,22 @@ describe('playground_state / playground_screenshot', () => {
     expect(bridge.requests.at(-1)).toEqual({ method: 'screenshot', params: { scale: 2 } });
     const written = await readFile(join(h.dir, 'shots/live.png'));
     expect(PNG.sync.read(written).width).toBe(4);
+  });
+
+  it('a screenshot over MAX_IMAGE_BYTES is too_large inline; with `out` it is written and only metadata returns', async () => {
+    // Not a real PNG: the size rule never decodes it.
+    const big = Buffer.alloc(MAX_IMAGE_BYTES + 1, 7);
+    const original = bridge.handler;
+    bridge.handler = (method, params) =>
+      method === 'screenshot' ? { mimeType: 'image/png', data: big.toString('base64'), width: 4000, height: 3000 } : original(method, params);
+    const inline = await h.call('playground_screenshot', { scale: 4 });
+    expect(inline.isError).toBe(true);
+    expect(inline.data.error?.code).toBe('too_large');
+    expect(inline.text).toMatch(/pass `out`/);
+    const written = await h.call('playground_screenshot', { scale: 4, out: 'shots/big.png' });
+    expect(written.isError, written.text).toBe(false);
+    expect(written.data).toMatchObject({ inline: false, bytes: big.byteLength, out: 'shots/big.png' });
+    expect((await readFile(join(h.dir, 'shots/big.png'))).byteLength).toBe(big.byteLength);
   });
 
   it('screenshot refuses to write at tier read', async () => {
