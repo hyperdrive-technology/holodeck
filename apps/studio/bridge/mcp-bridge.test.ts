@@ -239,20 +239,22 @@ describe('bridgeConfigMiddleware', () => {
   });
 
   it('serves the studio’s own pages (no Origin, or its own; same-origin / none fetches)', async () => {
-    for (const headers of [{}, { origin: 'http://localhost:5173' }, { 'sec-fetch-site': 'same-origin' }, { 'sec-fetch-site': 'none' }]) {
+    const own: Array<Record<string, string>> = [{}, { origin: 'http://localhost:5173' }, { 'sec-fetch-site': 'same-origin' }, { 'sec-fetch-site': 'none' }];
+    for (const headers of own) {
       expect(await run({ url: BRIDGE_CONFIG_PATH, headers }, bridge), JSON.stringify(headers)).toMatchObject({ status: 200 });
     }
   });
 
   it('refuses other pages, even on localhost: a foreign Origin, or a cross-site / same-site fetch (holodeck#277)', async () => {
-    for (const headers of [
+    const others: Array<Record<string, string>> = [
       { origin: 'http://localhost:6006' },
       { origin: 'http://evil.localhost:5173' },
       { origin: 'null' },
       { origin: 'https://evil.example' },
       { 'sec-fetch-site': 'cross-site' },
       { 'sec-fetch-site': 'same-site' },
-    ]) {
+    ];
+    for (const headers of others) {
       const out = (await run({ url: BRIDGE_CONFIG_PATH, headers }, bridge)) as Res;
       expect(out.status, JSON.stringify(headers)).toBe(403);
       expect(out.body ?? '').not.toContain(bridge.sessionToken);

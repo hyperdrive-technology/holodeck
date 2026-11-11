@@ -121,6 +121,7 @@ function harness(overrides: Partial<PlaygroundBridgeDeps> = {}) {
     browse,
     tick,
     dispatched,
+    render,
     getEditorState: () => editorState,
     setEditorState: (next: EditorState) => void (editorState = next),
     state: async (params?: unknown) => (await handle('state', params)) as SessionState,
@@ -381,15 +382,69 @@ describe('apply', () => {
     expect((result.document as IsoDoc).body.name).toBe('Renamed');
   });
 
-  // Known gap (see the final report): the rejection is detected by the
-  // notice CHANGING, so the same rejection twice in a row (an agent retrying
-  // the same apply) waits out APPLY_TIMEOUT_MS and reports `timeout`.
+  // The dry run reports a rejection at once, even the same one twice in a
+  // row (an agent retrying the same apply), which watching the notice change
+  // could not tell apart.
   it('reports a repeated identical rejection as invalid_edit too', async () => {
     const h = harness();
     const { etag } = await h.state();
     h.setEditorState(createEditorState(emptyScene('not-yet-loaded')));
     expect((await bridgeError(h.handle('apply', { etag, scene: renamed() }))).code).toBe('invalid_edit');
     expect((await bridgeError(h.handle('apply', { etag, scene: renamed() }))).code).toBe('invalid_edit');
+  });
+
+  it('two overlapping applies on one etag: the second waits for the first, then gets conflict (holodeck#278)', async () => {
+    const h = harness();
+    // A real canvas renders on a later frame, so the second request arrives
+    // while the first still waits for its commit.
+    h.tick.mockImplementation(async () => {
+      await new Promise<void>((done) => setTimeout(done, 0));
+      h.render();
+      h.live.clock += FRAME_MS;
+    });
+    const { etag } = await h.state();
+    const first = h.handle('apply', { etag, scene: renamed('Agent one') });
+    const second = h.handle('apply', { etag, scene: renamed('Agent two') });
+    expect(((await first) as EditResult).document).toMatchObject({ body: { name: 'Agent one' } });
+    const error = await bridgeError(second);
+    expect(error.code).toBe('conflict');
+    // Only the first scene reached the canvas: nothing was overwritten.
+    expect(h.dispatched).toHaveLength(1);
+    expect(h.live.doc.body.name).toBe('Agent one');
+  });
+
+  it('a failed edit does not block the queue: the next one runs', async () => {
+    const h = harness();
+    const { etag } = await h.state();
+    const bad = h.handle('apply', { etag: 'stale', scene: renamed('Bad') });
+    const good = h.handle('apply', { etag, scene: renamed('Good') });
+    expect((await bridgeError(bad)).code).toBe('conflict');
+    expect(((await good) as EditResult).document).toMatchObject({ body: { name: 'Good' } });
+  });
+
+  it('an edit the user changes again in the same render still succeeds, never a misleading timeout (holodeck#279)', async () => {
+    const h = harness();
+    const { etag } = await h.state();
+    const scene = renamed('Agent');
+    // The user's action is dispatched right after the agent's, before React renders.
+    const dispatch = h.editor.dispatch;
+    let once = true;
+    h.editor.dispatch = (action) => {
+      dispatch(action);
+      if (once) {
+        once = false;
+        dispatch({ type: 'apply-scene', scene: renamed('Agent, then the user') });
+      }
+    };
+    const start = h.live.clock;
+    const result = (await h.handle('apply', { etag, scene })) as EditResult;
+    expect(result.document).toBe(h.live.doc);
+    expect(h.live.doc.body.name).toBe('Agent, then the user');
+    expect(result.etag).toBe((await h.state()).etag);
+    // One render, not the 5 s timeout.
+    expect(h.live.clock - start).toBeLessThan(APPLY_TIMEOUT_MS);
+    // Both are undo steps: the agent's edit is in the history.
+    expect(h.getEditorState().past.at(-1)?.name).toBe('Agent');
   });
 
   it('times out when the canvas never commits (fake clock)', async () => {
@@ -399,6 +454,7 @@ describe('apply', () => {
     const start = h.live.clock;
     const error = await bridgeError(h.handle('apply', { etag, scene: renamed() }));
     expect(error.code).toBe('timeout');
+    expect(error.problems[0]).toMatch(/before redoing/);
     // It waited the full timeout (one frame past it), one tick per frame, and no longer.
     expect(h.live.clock - start).toBeGreaterThan(APPLY_TIMEOUT_MS);
     expect(h.live.clock - start).toBeLessThanOrEqual(APPLY_TIMEOUT_MS + 2 * FRAME_MS);

@@ -142,15 +142,33 @@ export function createPlaygroundBridgeHandler(deps: PlaygroundBridgeDeps): Playg
     if (trial.scene !== scene) {
       throw new BridgeError('the canvas refused the edit', 'invalid_edit', trial.notice?.startsWith(EDIT_REJECTED_PREFIX) ? [trial.notice] : []);
     }
+    const before = editor.getState().revision;
     editor.dispatch({ type: 'apply-scene', scene });
     // The editor commits on its next render (keeping this very object as its
     // scene) and reports it through onChange; the session then makes it the
     // working copy and autosaves it. Done when the working copy is our object.
     // The dry run passed, so a miss here means the canvas changed in between.
+    //
+    // A user action dispatched right after ours renders in the same batch: the
+    // working copy then becomes "our scene + the user's change" and is never
+    // our object (holodeck#279). Our commit is then the history entry pushed
+    // right after `before` (commit() pushes a clone of the scene it replaces),
+    // so look there, and answer once the working copy caught up with the editor.
+    const sceneJson = JSON.stringify(scene);
+    const committedThenChanged = (): boolean => {
+      const current = editor.getState();
+      const pushed = current.revision - before;
+      if (pushed < 2 || deps.doc().body !== current.scene) return false;
+      return current.past.slice(-pushed).some((entry) => JSON.stringify(entry) === sceneJson);
+    };
     const deadline = now() + APPLY_TIMEOUT_MS;
     for (;;) {
-      if (deps.doc().body === scene) return result();
-      if (now() > deadline) throw new BridgeError('the canvas did not commit the edit in time', 'timeout', ['read the scene again (playground_state) and redo the edit']);
+      if (deps.doc().body === scene || committedThenChanged()) return result();
+      if (now() > deadline) {
+        throw new BridgeError('the canvas did not confirm the edit in time; it may or may not have been applied', 'timeout', [
+          'read the scene again (playground_state) to see whether the edit is there before redoing it',
+        ]);
+      }
       await tick();
     }
   };
@@ -195,14 +213,25 @@ export function createPlaygroundBridgeHandler(deps: PlaygroundBridgeDeps): Playg
     return { mimeType: 'image/png', data: await blobToBase64(image.blob), width: image.width, height: image.height };
   };
 
+  // Edits run one at a time (holodeck#278): two MCP servers on one tab could
+  // otherwise both pass the etag check while the first apply waits for its
+  // render, and the second scene (computed from the old copy) would replace
+  // the first. Queued, the second sees the new etag and gets `conflict`.
+  let edits: Promise<unknown> = Promise.resolve();
+  const serial = <T>(run: () => T | Promise<T>): Promise<T> => {
+    const next = edits.then(run, run);
+    edits = next.catch(() => undefined);
+    return next;
+  };
+
   return async (method, params) => {
     switch (method) {
       case 'state':
         return state(params as StateParams | undefined);
       case 'apply':
-        return apply(params as ApplyParams);
+        return serial(() => apply(params as ApplyParams));
       case 'connect':
-        return connect(params as ConnectParams);
+        return serial(() => connect(params as ConnectParams));
       case 'browse':
         return browse(params as BrowseParams);
       case 'screenshot':

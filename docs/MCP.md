@@ -85,6 +85,12 @@ MCP server ──ws (agent token, no Origin)──▶ bridge ◀──ws (sessio
   dispatches the action, which the editor commits as one history entry, so
   Mod+Z undoes the whole tool call. The session then autosaves it like any
   user edit.
+- **One edit at a time.** The tab queues `apply` and `connect`. When two
+  MCP servers edit one tab, the second edit waits, sees the new etag and
+  gets `conflict` instead of overwriting the first. An apply that the user
+  changes again in the same render still succeeds: the tab finds it in the
+  editor history. If the tab cannot confirm a commit within 5 s, it answers
+  `timeout` and asks the agent to read the state before redoing the edit.
 - **Refusals.** The tab refuses `apply` in these cases:
   - the etag is stale: the user edited meanwhile (`conflict`, so read again);
   - the Viewer tab is active (`viewer`);
