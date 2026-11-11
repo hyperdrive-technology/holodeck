@@ -1,0 +1,392 @@
+{
+  "format": "holodeck.document.v1",
+  "id": "sample-process-line",
+  "name": "Process line",
+  "engine": "holodeck.iso",
+  "engineVersion": "1.0.0",
+  "requires": {
+    "holodeck.iso": "^1.0",
+    "holodeck.process": "^0.1",
+    "holodeck.sim": "^1.0"
+  },
+  "connections": [
+    {
+      "id": "sim",
+      "provider": "holodeck.sim",
+      "label": "Simulated plant"
+    }
+  ],
+  "body": {
+    "format": "holodeck.iso.scene.v1",
+    "id": "sample-process-line",
+    "name": "Process line",
+    "gridCellSize": 1,
+    "objects": [
+      {
+        "id": "plant-area",
+        "object": "area",
+        "x": 7,
+        "y": -1,
+        "width": 24,
+        "height": 14,
+        "z": -1,
+        "params": {
+          "fill": "#f1f5f9",
+          "outline": "#94a3b8",
+          "outlineStyle": "dashed"
+        }
+      },
+      {
+        "id": "feed-tank",
+        "object": "tank",
+        "x": 0,
+        "y": 0,
+        "params": {
+          "level": 0.5
+        },
+        "bindings": {
+          "level": {
+            "connection": "sim",
+            "source": "sine:20:15:90",
+            "transform": {
+              "kind": "scale",
+              "inMin": 0,
+              "inMax": 100,
+              "outMin": 0,
+              "outMax": 1,
+              "clamp": true
+            }
+          },
+          "alarm": {
+            "connection": "sim",
+            "source": "sine:20:15:90",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 85,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "feed-pipe",
+        "object": "pipe",
+        "x": 1,
+        "y": 0,
+        "toX": 8,
+        "toY": 0,
+        "attach": {
+          "from": {
+            "object": "feed-tank",
+            "port": "east"
+          }
+        }
+      },
+      {
+        "id": "xv-101",
+        "object": "process:valve-ball",
+        "x": 3,
+        "y": 0,
+        "onPipe": "feed-pipe",
+        "at": 0.29,
+        "params": {
+          "open": true
+        },
+        "bindings": {
+          "open": {
+            "connection": "sim",
+            "source": "square:12"
+          }
+        }
+      },
+      {
+        "id": "tv-101",
+        "object": "process:valve-control",
+        "x": 6,
+        "y": 0,
+        "onPipe": "feed-pipe",
+        "at": 0.71,
+        "params": {
+          "position": 40
+        },
+        "bindings": {
+          "position": {
+            "connection": "sim",
+            "source": "sine:16:0:100"
+          },
+          "fault": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 92,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "feed-elbow",
+        "object": "elbow",
+        "x": 8,
+        "y": 0,
+        "params": {
+          "bend": "auto"
+        }
+      },
+      {
+        "id": "exchanger-pipe",
+        "object": "pipe",
+        "x": 8,
+        "y": 0,
+        "toX": 8,
+        "toY": -2.5
+      },
+      {
+        "id": "e-101",
+        "object": "process:heat-exchanger-shell-tube",
+        "x": 9.1,
+        "y": -3,
+        "params": {
+          "tubeInTemp": 20,
+          "tubeOutTemp": 72
+        },
+        "bindings": {
+          "tubeInTemp": {
+            "connection": "sim",
+            "source": "sine:30:15:25"
+          },
+          "tubeOutTemp": {
+            "connection": "sim",
+            "source": "sine:20:60:85"
+          }
+        }
+      },
+      {
+        "id": "m-101",
+        "object": "process:motor",
+        "x": 13,
+        "y": -3,
+        "params": {
+          "running": true,
+          "speed": 100
+        },
+        "bindings": {
+          "running": {
+            "connection": "sim",
+            "source": "square:10"
+          },
+          "speed": {
+            "connection": "sim",
+            "source": "sine:8:40:100"
+          },
+          "fault": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 95,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "tt-101",
+        "object": "process:transmitter",
+        "x": 10,
+        "y": 1,
+        "params": {
+          "value": 72,
+          "unit": "°C"
+        },
+        "bindings": {
+          "value": {
+            "connection": "sim",
+            "source": "sine:20:60:85"
+          },
+          "alarm": {
+            "connection": "sim",
+            "source": "sine:20:60:85",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 82,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "mcc-1",
+        "object": "process:cabinet",
+        "x": 15,
+        "y": 1,
+        "bindings": {
+          "fault": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 92,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "feed-label",
+        "object": "label",
+        "size": 0.55,
+        "x": 0,
+        "y": 3,
+        "params": {
+          "text": "Feed",
+          "unit": "%",
+          "format": "int",
+          "bold": true
+        },
+        "bindings": {
+          "value": {
+            "connection": "sim",
+            "source": "sine:20:15:90"
+          },
+          "alarm": {
+            "connection": "sim",
+            "source": "sine:20:15:90",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 85,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "tv-label",
+        "object": "label",
+        "size": 0.5,
+        "x": 6,
+        "y": 2,
+        "params": {
+          "text": "TV-101",
+          "unit": "%",
+          "format": "int",
+          "bold": true
+        },
+        "bindings": {
+          "value": {
+            "connection": "sim",
+            "source": "sine:16:0:100"
+          }
+        }
+      },
+      {
+        "id": "tt-label",
+        "object": "label",
+        "size": 0.5,
+        "x": 10,
+        "y": 2.5,
+        "params": {
+          "text": "TT-101",
+          "unit": "°C",
+          "format": "int",
+          "bold": true
+        },
+        "bindings": {
+          "value": {
+            "connection": "sim",
+            "source": "sine:20:60:85"
+          },
+          "alarm": {
+            "connection": "sim",
+            "source": "sine:20:60:85",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 82,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "e-label",
+        "object": "label",
+        "size": 0.5,
+        "x": 9,
+        "y": -5,
+        "params": {
+          "text": "E-101",
+          "bold": true
+        }
+      },
+      {
+        "id": "m-label",
+        "object": "label",
+        "size": 0.5,
+        "x": 13,
+        "y": -4.5,
+        "params": {
+          "text": "M-101",
+          "bold": true
+        }
+      },
+      {
+        "id": "mcc-label",
+        "object": "label",
+        "size": 0.5,
+        "x": 15,
+        "y": 2.5,
+        "params": {
+          "text": "MCC-1",
+          "bold": true
+        }
+      },
+      {
+        "id": "title-label",
+        "object": "label",
+        "size": 0.8,
+        "x": 7,
+        "y": -7,
+        "params": {
+          "text": "Process parts (simulated)",
+          "bold": true
+        }
+      }
+    ]
+  }
+}
