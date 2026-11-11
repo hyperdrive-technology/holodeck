@@ -73,8 +73,9 @@ and `.dev-check/last.json` records the run for `~/dev/hyperdrive/scripts/ci-loca
   name must be listed in `BROWSER_TESTS` in `packages/editor-2.5d-react/vitest.config.ts`
   (`src/test-support/browser-tests.test.ts` fails otherwise).
 - editor-2.5d-react runs two vitest projects at once (`vitest.workspace.ts`): `unit`, every
-  plain-Node file in parallel worker threads, and `browser`, the browser files one at a time in a
-  single child process.
+  plain-Node file in parallel worker threads, and `browser`, the browser files one at a time, each in a
+  fresh child process (never `singleFork`: one long-lived child accumulated every file's leftovers
+  and ran 7x slower; pinned by `src/test-support/browser-tests.test.ts`).
 - Performance budgets in unit tests measure the thread's CPU time, fastest of a few runs
   (`src/test-support/cpu-time.ts`), never wall time: the files run in parallel and several agent
   sessions share the machine, so wall time measured the load, not the code.

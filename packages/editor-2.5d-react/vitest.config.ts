@@ -29,5 +29,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     testTimeout: 60_000,
+    // The browser project's pool (vitest.workspace.ts): one child process at a time. A root-level
+    // pool limit; the unit project uses the threads pool and keeps its parallelism.
+    poolOptions: { forks: { maxForks: 1, minForks: 1 } },
   },
 });
