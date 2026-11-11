@@ -63,5 +63,8 @@ test('the Reset dialog loads the process-parts sample and every process GLB rend
   // Vite emits each GLB with a content hash: `<slug>-<hash>.glb`.
   expect([...glbs.keys()].sort()).toEqual([...PROCESS_MODELS].sort());
   for (const [slug, status] of glbs) expect(status, slug).toBe(200);
-  await testInfo.attach('process-sample', { body: await page.getByTestId('canvas').screenshot(), contentType: 'image/png' });
+  // Written under test-results/ (kept for every run, not only failures) and attached to the report.
+  const shot = testInfo.outputPath('process-sample.png');
+  await page.getByTestId('canvas').screenshot({ path: shot });
+  await testInfo.attach('process-sample', { path: shot, contentType: 'image/png' });
 });
