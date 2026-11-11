@@ -39,3 +39,26 @@ export function imageResult(png: Uint8Array, payload: Record<string, unknown>, h
   if (meta.isError) return meta;
   return { content: [{ type: 'image', data: Buffer.from(png).toString('base64'), mimeType: 'image/png' }, ...meta.content], structuredContent: payload };
 }
+
+/**
+ * Several images (each preceded by a one-line caption) plus metadata. Their
+ * combined size is held to `MAX_IMAGE_BYTES`, like one image.
+ */
+export function imagesResult(images: readonly { png: Uint8Array; caption: string }[], payload: Record<string, unknown>, hints: readonly string[] = []): CallToolResult {
+  const total = images.reduce((sum, i) => sum + i.png.byteLength, 0);
+  if (total > MAX_IMAGE_BYTES) {
+    return errorResult(new ToolError(`the images are ${total} bytes together, over the ${MAX_IMAGE_BYTES}-byte limit for inline images`, hints, 'too_large'));
+  }
+  const meta = okResult(payload);
+  if (meta.isError) return meta;
+  return {
+    content: [
+      ...images.flatMap((i) => [
+        { type: 'text' as const, text: i.caption },
+        { type: 'image' as const, data: Buffer.from(i.png).toString('base64'), mimeType: 'image/png' },
+      ]),
+      ...meta.content,
+    ],
+    structuredContent: payload,
+  };
+}

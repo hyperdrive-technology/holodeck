@@ -30,3 +30,25 @@ export const MAX_TEXT_LENGTH = 4096;
 export const MAX_PARTS_PAGE = 500;
 /** Largest grid coordinate a tool accepts (the editor's own limit is larger; this keeps scenes sane). */
 export const MAX_COORD = 10_000;
+
+// --- Blender part builds (blender_* / part_*) --------------------------------
+
+/** Longest part name (`blender/parts/<name>.py`, `assets/models/<name>.glb`). */
+export const MAX_PART_NAME_LENGTH = 48;
+/** Largest part script `blender_build_part` writes: 256 KiB (the biggest shipped part is ~12 KiB). */
+export const MAX_PART_SOURCE_BYTES = 256 * 1024;
+/** Largest GLB read or installed: 16 MiB (shipped parts are ~50 KB). */
+export const MAX_PART_GLB_BYTES = 16 * 1024 * 1024;
+/** Default triangle budget of `part_validate` (shipped parts: 520-840). */
+export const DEFAULT_PART_TRIANGLES = 5_000;
+/** Highest triangle budget a caller may ask for. */
+export const MAX_PART_TRIANGLES = 100_000;
+/** Default wall-clock limit of one Blender run (a part builds in a few seconds). */
+export const DEFAULT_BLENDER_TIMEOUT_MS = 120_000;
+/** Bounds a caller may set on that limit. */
+export const MIN_BLENDER_TIMEOUT_MS = 5_000;
+export const MAX_BLENDER_TIMEOUT_MS = 600_000;
+/** Blender output kept in memory per run (the tail; older output is dropped). */
+export const MAX_BLENDER_LOG_BYTES = 64 * 1024;
+/** Lines of that tail a tool result carries. */
+export const MAX_BLENDER_LOG_LINES = 60;
