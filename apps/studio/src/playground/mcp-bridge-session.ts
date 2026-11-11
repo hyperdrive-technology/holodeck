@@ -143,7 +143,7 @@ export function createPlaygroundBridgeHandler(deps: PlaygroundBridgeDeps): Playg
       throw new BridgeError('the canvas refused the edit', 'invalid_edit', trial.notice?.startsWith(EDIT_REJECTED_PREFIX) ? [trial.notice] : []);
     }
     const before = editor.getState().revision;
-    editor.dispatch({ type: 'apply-scene', scene });
+    editor.dispatch({ type: 'apply-scene', scene, expectRevision: before });
     // The editor commits on its next render (keeping this very object as its
     // scene) and reports it through onChange; the session then makes it the
     // working copy and autosaves it. Done when the working copy is our object.
@@ -164,6 +164,12 @@ export function createPlaygroundBridgeHandler(deps: PlaygroundBridgeDeps): Playg
     const deadline = now() + APPLY_TIMEOUT_MS;
     for (;;) {
       if (deps.doc().body === scene || committedThenChanged()) return result();
+      // A user commit queued ahead of ours moved the editor on, and the reducer
+      // refused our (older) scene instead of overwriting it (GPT review of #276).
+      const current = editor.getState();
+      if (current.revision > before && current.scene !== scene && !current.past.slice(-(current.revision - before)).some((e) => JSON.stringify(e) === sceneJson)) {
+        throw new BridgeError('the playground scene changed while the edit was waiting', 'conflict', ['read it again (playground_state) and redo the edit']);
+      }
       if (now() > deadline) {
         throw new BridgeError('the canvas did not confirm the edit in time; it may or may not have been applied', 'timeout', [
           'read the scene again (playground_state) to see whether the edit is there before redoing it',

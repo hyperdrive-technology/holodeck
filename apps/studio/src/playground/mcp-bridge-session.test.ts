@@ -258,7 +258,7 @@ describe('apply', () => {
     const { etag } = await h.state();
     const scene = renamed();
     const result = (await h.handle('apply', { etag, scene })) as EditResult;
-    expect(h.dispatched).toEqual([{ type: 'apply-scene', scene }]);
+    expect(h.dispatched).toEqual([{ type: 'apply-scene', scene, expectRevision: expect.any(Number) }]);
     // The working copy is now the editor's commit of this very object.
     expect(h.live.doc.body).toBe(scene);
     expect(result.document).toBe(h.live.doc);
@@ -445,6 +445,25 @@ describe('apply', () => {
     expect(h.live.clock - start).toBeLessThan(APPLY_TIMEOUT_MS);
     // Both are undo steps: the agent's edit is in the history.
     expect(h.getEditorState().past.at(-1)?.name).toBe('Agent');
+  });
+
+  it('a user commit queued ahead of the edit is not overwritten: conflict (GPT review of holodeck#276)', async () => {
+    const h = harness();
+    const { etag } = await h.state();
+    const scene = renamed('Agent');
+    // The user's commit is already queued when the agent's action is dispatched.
+    const dispatch = h.editor.dispatch;
+    let once = true;
+    h.editor.dispatch = (action) => {
+      if (once) {
+        once = false;
+        dispatch({ type: 'apply-scene', scene: renamed('User') });
+      }
+      dispatch(action);
+    };
+    const error = await bridgeError(h.handle('apply', { etag, scene }));
+    expect(error.code).toBe('conflict');
+    expect(h.live.doc.body.name).toBe('User');
   });
 
   it('times out when the canvas never commits (fake clock)', async () => {

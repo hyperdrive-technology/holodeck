@@ -230,8 +230,13 @@ export type EditorAction =
    * placements' part types). Ignored in run mode like every edit. The editor
    * keeps the given object as its scene (as `load` does), so a host can tell
    * when it was committed; don't mutate it afterwards.
+   *
+   * `expectRevision`: refused (a notice, no change) when the editor is no
+   * longer at that `revision`, i.e. another commit (a user edit still queued
+   * behind this action) landed first and the scene was computed from older
+   * state, so applying it would silently drop that commit.
    */
-  | { type: 'apply-scene'; scene: IsoSceneFile }
+  | { type: 'apply-scene'; scene: IsoSceneFile; expectRevision?: number }
   | { type: 'set-read-only'; readOnly: boolean }
   | { type: 'cancel' };
 
@@ -1171,6 +1176,9 @@ function reduce(state: EditorState, action: EditorAction): EditorState {
     case 'apply-scene':
       if (action.scene.id !== state.scene.id) {
         return { ...state, notice: `${EDIT_REJECTED_PREFIX}: the scene is for document "${action.scene.id}", not "${state.scene.id}"` };
+      }
+      if (action.expectRevision !== undefined && action.expectRevision !== state.revision) {
+        return { ...state, notice: `${EDIT_REJECTED_PREFIX}: the scene changed since this edit was computed` };
       }
       // Any gesture in progress is dropped (commit clears drag / resize); the
       // host refuses an apply mid-gesture before it gets here.
