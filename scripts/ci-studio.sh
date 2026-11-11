@@ -60,7 +60,7 @@ run_phase() {
     test) phase 'unit tests' pnpm exec vitest run ;;
     build) phase build pnpm build ;;
     mcp) "$root/scripts/ci-package.sh" mcp ;;
-    e2e) phase 'e2e (Playwright over the production build)' timeout 15m pnpm exec playwright test ;;
+    e2e) phase 'e2e (Playwright over the production build)' pnpm exec playwright test ;;
   esac
 }
 

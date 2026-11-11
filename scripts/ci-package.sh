@@ -34,6 +34,16 @@ dir="$root/packages/$pkg"
 [[ -f "$dir/package.json" ]] || { echo "ci-package: no package at packages/$pkg" >&2; exit 2; }
 cd "$dir"
 
+# GNU timeout (Linux CI; Homebrew coreutils on macOS as timeout or gtimeout). Without one the
+# command runs uncapped: a local run is watched by a person, CI always has it.
+with_timeout() {
+  local limit="$1"
+  shift
+  if command -v timeout >/dev/null; then timeout "$limit" "$@"
+  elif command -v gtimeout >/dev/null; then gtimeout "$limit" "$@"
+  else "$@"; fi
+}
+
 has_script() { node -e 'process.exit(require("./package.json").scripts?.[process.argv[1]] ? 0 : 1)' "$1"; }
 
 # The phases that apply to this package, in run order (opt-ins: see the header).
@@ -72,14 +82,14 @@ run_phase() {
     install) phase install pnpm install --frozen-lockfile ;;
     typecheck) phase 'type check' pnpm type-check ;;
     # 15-minute cap on the tests alone (render tests can hang on a wedged GPU process).
-    test) phase test timeout 15m pnpm exec vitest run ;;
+    test) phase test with_timeout 15m pnpm exec vitest run ;;
     build) phase build pnpm build ;;
     smoke-dist) phase 'smoke-test built package' node ../../scripts/smoke-dist.mjs . ;;
     smoke-package) phase 'smoke-test the Holodeck package entry' node --no-deprecation scripts/smoke-holodeck-package.mjs ;;
     bundle-check) phase 'browser bundle check' node scripts/browser-bundle-check.mjs ;;
     vite-consumer)
       [[ -n "${HOLODECK_CHROMIUM:-}" ]] || { echo "::error::$pkg: check:vite-consumer needs HOLODECK_CHROMIUM" >&2; exit 1; }
-      phase 'vite consumer check (GLB URLs resolve)' timeout 15m pnpm check:vite-consumer
+      phase 'vite consumer check (GLB URLs resolve)' with_timeout 15m pnpm check:vite-consumer
       ;;
   esac
 }

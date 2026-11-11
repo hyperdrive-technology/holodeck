@@ -60,6 +60,9 @@ export const INERT_PATHS = [
   '^[^/]+\\.md$',
   '^LICENSE$',
   '^\\.github/(CODEOWNERS|dependabot\\.yml|actionlint\\.yaml)$',
+  // Local-only: the pre-push hook and ignore rules feed no CI job.
+  '^\\.githooks/',
+  '^\\.gitignore$',
 ];
 
 /**

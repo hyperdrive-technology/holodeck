@@ -60,11 +60,11 @@ test('unowned root files fail closed: they run every job', () => {
 });
 
 test('docs, root Markdown, LICENSE and repo metadata are inert', () => {
-  const changed = ['docs/a/b.md', 'docs/img.png', 'README.md', 'TODO.md', 'LICENSE', '.github/CODEOWNERS', '.github/dependabot.yml', '.github/actionlint.yaml'];
+  const changed = ['docs/a/b.md', 'docs/img.png', 'README.md', 'TODO.md', 'LICENSE', '.github/CODEOWNERS', '.github/dependabot.yml', '.github/actionlint.yaml', '.githooks/pre-push', '.gitignore'];
   assert.equal(decide({ event: 'pull_request', changed, paths: FLOW }).run, false);
   // Markdown inside a package is that package's file, not inert-everywhere.
   assert.equal(decide({ event: 'pull_request', changed: ['packages/flow-runtime/README.md'], paths: FLOW }).run, true);
-  assert.equal(OWNED_PATHS.length + INERT_PATHS.length, 7);
+  assert.equal(OWNED_PATHS.length + INERT_PATHS.length, 9);
 });
 
 test('--no-shared also ignores unowned root files (Blender does not read them)', () => {

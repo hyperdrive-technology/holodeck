@@ -27,8 +27,13 @@ export const HELPER = join(BLENDER_DIR, 'holodeck_bpy.py');
 export const DEFAULT_OUT_DIR = join(PKG_DIR, 'assets/models');
 const MAC_BLENDER = '/Applications/Blender.app/Contents/MacOS/Blender';
 
-/** Absolute Blender binary, or null when none is installed. */
+/**
+ * Absolute Blender binary, or null when none is installed. HOLODECK_SKIP_BLENDER=1 reports none:
+ * scripts/dev-check.mjs sets it for the package tests (CI's package jobs have no Blender either)
+ * and runs the Blender rebuild checks once, in their own step, like blender-drift.yml.
+ */
 export function findBlender() {
+  if (process.env.HOLODECK_SKIP_BLENDER === '1') return null;
   if (process.env.BLENDER) return existsSync(process.env.BLENDER) ? process.env.BLENDER : null;
   if (existsSync(MAC_BLENDER)) return MAC_BLENDER;
   const which = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['blender'], { encoding: 'utf8' });
