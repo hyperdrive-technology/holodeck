@@ -8,7 +8,7 @@
  * Harness: holds.html / holds-main.tsx. No sleeps: frames and render state.
  */
 import type { Browser, Page } from 'playwright';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { CHROMIUM } from '../test-support/chromium';
 import { animationFrames, launchRenderBrowser, startHarness, waitForRendered, type Harness } from '../test-support/render-harness';
 
@@ -21,10 +21,17 @@ beforeAll(async () => {
   browser = await launchRenderBrowser();
 }, 60_000);
 
+/** Every parked request's release: an attempt abandoned at its timeout would otherwise leave
+ * a route handler waiting forever, and browser.close() waits for it. */
+const releases = new Set<() => void>();
+
 afterAll(async () => {
+  for (const release of releases) release();
   await browser?.close();
   await harness?.close();
-});
+  // Closing the browser after 52 pages and the dev server with their keep-alive sockets went
+  // past the default 10 s hook timeout at load average 80 (concurrent cases, 2026-11-11).
+}, 60_000);
 
 // 1x1 PNG.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
@@ -54,6 +61,7 @@ async function open(component: Component, boundary: Boundary, extra = '', fail =
   const page = await browser.newPage({ viewport: { width: 1000, height: 600 }, deviceScaleFactor: 1 });
   let release!: () => void;
   const released = new Promise<void>((resolve) => { release = resolve; });
+  releases.add(() => release());
   let requested!: () => void;
   const requestSeen = new Promise<void>((resolve) => { requested = resolve; });
   // The asset request is parked until the test releases it.
@@ -81,7 +89,16 @@ const committed = (page: Page) => page.evaluate(() => (window as any).__holds.co
 const renderedEarly = (page: Page) => page.evaluate(() => (window as any).__holds.renderedEarly as boolean);
 const isModel = (c: Component) => c === 'bare' || c === 'owned' || c === 'mixed';
 
-describe.skipIf(!CHROMIUM)('render-signal holds: component x boundary x scenario', () => {
+// The 52 cases are independent (own page, own parked route) and mostly wait: page load, parked
+// requests, RETRY_GRACE_MS. In sequence they took ~340 s, half the package's browser time, so up
+// to HOLDS_CONCURRENCY pages run at once in the one browser (dev-loop shift-left, 2026-11-11).
+// Linux = CI's SwiftShader (software WebGPU on 4 vCPU): fewer pages at once. Unmeasured on CI
+// at the time of writing; lower it (or set 1) if the boat run shows stalls.
+const HOLDS_CONCURRENCY = process.platform === 'linux' ? 2 : 4;
+
+vi.setConfig({ maxConcurrency: HOLDS_CONCURRENCY });
+
+describe.skipIf(!CHROMIUM).concurrent('render-signal holds: component x boundary x scenario', () => {
   for (const component of COMPONENTS) {
     for (const boundary of BOUNDARIES) {
       for (const scenario of SCENARIOS) {

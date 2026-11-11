@@ -4,7 +4,12 @@
  * $GITHUB_OUTPUT (or stdout without it) and explains the decision in the log.
  *
  *   node scripts/ci-scope.mjs --event "$EVENT" --base "$BASE_SHA" \
- *     --sdk-ref "$SDK_REF" --paths '^packages/flow-runtime/' [--paths ...] [--no-shared]
+ *     --sdk-ref "$SDK_REF" --job <name>
+ *   node scripts/ci-scope.mjs ... --paths '^packages/flow-runtime/' [--paths ...] [--no-shared]
+ *
+ * --job <name> takes the job's paths (and its --no-shared) from JOBS below, the one table of
+ * "which paths affect which CI job". The workflows pass --job; scripts/dev-check.mjs reads the
+ * same table to pick local steps, so CI and the local ladder cannot disagree about scope.
  *
  * Why step-level and not `on.paths`: the package jobs are required checks on
  * main, and a required check from a path-filtered workflow never reports on PRs
@@ -55,7 +60,45 @@ export const INERT_PATHS = [
   '^[^/]+\\.md$',
   '^LICENSE$',
   '^\\.github/(CODEOWNERS|dependabot\\.yml|actionlint\\.yaml)$',
+  // Local-only: the pre-push hook and ignore rules feed no CI job.
+  '^\\.githooks/',
+  '^\\.gitignore$',
 ];
+
+/**
+ * Every scoped CI job and the paths whose change can affect it (regexes on repo-relative paths).
+ * A job's paths must list every directory its tests read, not just its own package:
+ * - editor-2.5d-react: models-contract needs one GLB per blender/parts/*.py, and the logo/objects
+ *   tests load packages/library-cloud/assets/models.
+ * - small-packages: all five packages run, or none. assets-aws tests import provider-aws
+ *   DEFAULT_PART_HINTS, and library-cloud/assets-aws conformance tests consume the
+ *   editor-2.5d-react contracts, so a change to any of them (or to editor-2.5d-react) selects all.
+ * - studio: the studio and the MCP server consume the BUILT editor-2.5d-react, provider-http,
+ *   provider-aws and library-cloud (file: deps), and the MCP server bundles apps/studio/src.
+ * - blender-drift (shared: false): only the Blender scripts, the GLBs and their build tooling feed
+ *   the rebuild; other workflows, scripts/ and root config do not.
+ * The other two package legs read only their own package (checked 2026-11-03 with rg for ../../
+ * reads). scripts/ci-scope.test.mjs pins the cross-reads and that the workflows use --job.
+ */
+export const JOBS = {
+  'editor-2.5d-react': { paths: ['^(packages/(editor-2\\.5d-react|library-cloud)|blender)/'] },
+  'editor-2d-react': { paths: ['^packages/editor-2d-react/'] },
+  'viewer-3d-react': { paths: ['^packages/viewer-3d-react/'] },
+  'small-packages': { paths: ['^packages/(flow-runtime|provider-http|library-cloud|provider-aws|assets-aws|editor-2\\.5d-react)/'] },
+  studio: { paths: ['^apps/studio/', '^packages/(editor-2\\.5d-react|provider-http|provider-aws|library-cloud|mcp)/'] },
+  'blender-drift': {
+    shared: false,
+    paths: [
+      '^blender/',
+      '^packages/library-cloud/',
+      '^packages/editor-2\\.5d-react/assets/models/',
+      '^packages/editor-2\\.5d-react/scripts/build-parts\\.mjs$',
+      '^packages/editor-2\\.5d-react/src/models/',
+      '^\\.github/workflows/blender-drift\\.yml$',
+      '^scripts/ci-scope\\.mjs$',
+    ],
+  },
+};
 
 /**
  * @param {{ event: string, sdkRef?: string, changed?: string[] | null, paths: string[], shared?: boolean }} input
@@ -78,9 +121,11 @@ export function decide({ event, sdkRef = 'main', changed, paths, shared = true }
   return { run: false, reason: `none of the ${changed.length} changed file(s) match ${paths.join(' | ')}: skip` };
 }
 
-/** Parse `--name value` pairs and the `--no-shared` switch; `--paths` may repeat. */
+/** Parse `--name value` pairs and the `--no-shared` switch; `--paths` may repeat; `--job` names a JOBS entry. */
 export function parseArgs(argv) {
   const out = { event: '', base: '', sdkRef: 'main', paths: [], cwd: '.', shared: true };
+  /** --job fills paths/shared from JOBS; applied after the loop so flag order does not matter. */
+  let job;
   for (let i = 0; i < argv.length; i += 2) {
     if (argv[i] === '--no-shared') {
       out.shared = false;
@@ -94,7 +139,15 @@ export function parseArgs(argv) {
     else if (flag === '--sdk-ref') out.sdkRef = value;
     else if (flag === '--paths') out.paths.push(value);
     else if (flag === '--cwd') out.cwd = value;
+    else if (flag === '--job') job = value;
     else throw new Error(`unknown flag ${flag}`);
+  }
+  if (job !== undefined) {
+    const spec = JOBS[job];
+    if (!spec) throw new Error(`unknown job ${job} (known: ${Object.keys(JOBS).join(', ')})`);
+    if (out.paths.length) throw new Error('--job and --paths are exclusive');
+    out.paths = [...spec.paths];
+    if (spec.shared === false) out.shared = false;
   }
   return out;
 }

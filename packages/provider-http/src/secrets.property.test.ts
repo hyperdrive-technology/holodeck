@@ -152,19 +152,28 @@ describe('secrets never leak (property over sites × auth schemes × secret shap
   it(`holds for ${cases.length} combinations`, async () => {
     const failures: string[] = [];
     let exposedChars = 0;
-    for (const [s, site, auth, mode] of cases) {
+    // The routes read the module-level `secret`, so the cases run one secret at a time, but all
+    // the cases of one secret run concurrently: each case sleeps 150-200 ms while its session
+    // polls/streams, and in sequence the 183 cases took ~32 s (dev-loop shift-left, 2026-11-11).
+    for (const s of SECRETS) {
       secret = s;
-      const exposure: Exposure = { text: [] };
-      await exercise(site, auth, mode, exposure);
-      const all = exposure.text.join('\n');
-      exposedChars += all.length;
-      for (const form of forms(s)) {
-        if (all.includes(form)) {
-          const line = exposure.text.find((t) => t.includes(form)) ?? '';
-          failures.push(`${mode} ${site} ${auth.scheme} secret=${JSON.stringify(s)} form=${JSON.stringify(form)}: ${line.slice(0, 200)}`);
-          break;
-        }
-      }
+      await Promise.all(
+        cases
+          .filter(([caseSecret]) => caseSecret === s)
+          .map(async ([, site, auth, mode]) => {
+            const exposure: Exposure = { text: [] };
+            await exercise(site, auth, mode, exposure);
+            const all = exposure.text.join('\n');
+            exposedChars += all.length;
+            for (const form of forms(s)) {
+              if (all.includes(form)) {
+                const line = exposure.text.find((t) => t.includes(form)) ?? '';
+                failures.push(`${mode} ${site} ${auth.scheme} secret=${JSON.stringify(s)} form=${JSON.stringify(form)}: ${line.slice(0, 200)}`);
+                break;
+              }
+            }
+          }),
+      );
     }
     // The provider did say things (errors, statuses, logs): the property is not vacuous.
     expect(exposedChars).toBeGreaterThan(10_000);
@@ -175,17 +184,21 @@ describe('secrets never leak (property over sites × auth schemes × secret shap
     const failures: string[] = [];
     let exposedChars = 0;
     for (const s of SECRETS) {
-      for (const site of Object.keys(SITES).filter((x) => !x.startsWith('sse-'))) {
-        secret = s;
+      secret = s;
+      const runs = Object.keys(SITES)
+        .filter((x) => !x.startsWith('sse-'))
         // `browser: true` + followRedirects rejects at connect; the other half exercises scope/cap rejections.
-        for (const browser of [true, false]) {
+        .flatMap((site) => [true, false].map((browser) => ({ site, browser })));
+      // Concurrent per secret, like the property above.
+      await Promise.all(
+        runs.map(async ({ site, browser }) => {
           const exposure: Exposure = { text: [] };
           await exercise(site, AUTHS[2], 'poll', exposure, { maxChannels: 1, pathPrefix: `/${site}`, browser });
           const all = exposure.text.join('\n');
           exposedChars += all.length;
           for (const form of forms(s)) if (all.includes(form)) failures.push(`${site} browser=${browser} form=${form}`);
-        }
-      }
+        }),
+      );
     }
     expect(exposedChars).toBeGreaterThan(1000);
     expect(failures).toEqual([]);

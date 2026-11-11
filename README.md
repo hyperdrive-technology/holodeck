@@ -19,7 +19,7 @@ The CLI is incomplete and excluded from CI: its build entry is missing, its lock
 
 ## Quick start
 
-Use **Node 26.13.0** (see [.node-version](.node-version)) and **pnpm 12.16.1**, matching CI (each package pins it in `packageManager`; pnpm 12 fails an install on dependency build scripts not approved in the package's `pnpm-workspace.yaml` `allowBuilds`). Packages install independently; the repository root is not a pnpm workspace and has no working aggregate build or test command.
+Use **Node 26.13.0** (see [.node-version](.node-version)) and **pnpm 12.16.1**, matching CI (each package pins it in `packageManager`; pnpm 12 fails an install on dependency build scripts not approved in the package's `pnpm-workspace.yaml` `allowBuilds`). Packages install independently; the repository root is not a pnpm workspace. The aggregate check command is `scripts/dev-check.sh [fast|push|full]`, which runs CI's per-package gates for what your change touches (see [TESTING.md](TESTING.md)).
 
 Clone the SDK and Holodeck into sibling directories named `holodeck-sdk` and `holodeck`. The React packages use `file:../../../holodeck-sdk/ts`; build the SDK before installing a package because pnpm copies its built files at install time.
 
@@ -38,7 +38,7 @@ pnpm build
 pnpm parts
 ```
 
-`pnpm parts` opens the local equipment preview. The test command above matches CI's GPU-test exclusions. See [CONTRIBUTING.md](CONTRIBUTING.md) for browser render tests, other packages, and refreshing the SDK dependency after changes.
+`pnpm parts` opens the local equipment preview. The test command above skips the browser render tests. Before a push or PR, run `scripts/dev-check.sh` from the repo root instead: [TESTING.md](TESTING.md) has the check ladder, budgets and timings. See [CONTRIBUTING.md](CONTRIBUTING.md) for browser render tests, other packages, and refreshing the SDK dependency after changes.
 
 ## Repository map
 
@@ -53,7 +53,8 @@ pnpm parts
 | [packages/cli](packages/cli) | `@holodeck/cli`: incomplete command-line tooling |
 | [blender](blender/README.md) | Python scripts that build fixed-shape equipment as GLB models |
 | [docs](docs) | Design notes and dated audits |
-| [.github/workflows/ci.yml](.github/workflows/ci.yml) | Per-package type checks, tests, and builds |
+| [.github/workflows/ci.yml](.github/workflows/ci.yml) | Per-package type checks, tests, builds and smoke checks (opt-in, labelled PRs only) |
+| [TESTING.md](TESTING.md) | Local check ladder (`scripts/dev-check.sh`), budgets, timings, when to shift left |
 
 ## Extensions and documentation
 

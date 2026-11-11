@@ -1,12 +1,14 @@
-# Pre-1.0 CI policy (Des, 2026-11-03): nothing runs automatically (no push/schedule triggers).
-# PR jobs run only when the PR has the `ci` label (adding it starts a run; every push then runs).
-# Every event on a `ci` PR runs in full, adding an unrelated label included: a skipped run would
-# publish the required check names as skipped (= passing) and could mask a failure (GPT review,
-# holodeck-sdk#45 / wormhole#26).
-# or on demand with
-# `gh workflow run <this file> --ref <branch>` (~/dev/hyperdrive/scripts/ci-run.sh). Minor changes
-# are checked locally instead and recorded with ~/dev/hyperdrive/scripts/ci-local-status.sh, which
-# also satisfies required checks whose jobs were skipped. Policy: ~/dev/hyperdrive/AGENTS.md.
+# Pre-1.0 CI policy (Des, 2026-11-03; heavy CI last, 2026-11-11): nothing runs automatically.
+# A run starts only when a label is added to a PR that has the `ci` label (types: [labeled]), so a
+# push never starts CI: the run is a deliberate act on one head, once, after both reviews pass
+# (~/dev/hyperdrive/scripts/ci-run.sh adds or re-applies the label). A push after a run leaves the
+# new head without checks until CI is triggered again. Every labelled event on a `ci` PR runs in
+# full, an unrelated label included: a skipped run would publish the required check names as
+# skipped (= passing) and could mask a failure (GPT review, holodeck-sdk#45 / wormhole#26).
+# Also on demand with `gh workflow run <this file> --ref <branch>` (advisory: dispatch runs do not
+# gate merge). Before any of that, run the local ladder: scripts/dev-check.sh (TESTING.md). Minor
+# changes are checked locally only and recorded with ~/dev/hyperdrive/scripts/ci-local-status.sh.
+# Policy: ~/dev/hyperdrive/AGENTS.md "Dev loop & shift-left".
 name: Blender drift
 
 # Rebuilds the committed GLBs from their Blender scripts with headless Blender
@@ -17,8 +19,8 @@ name: Blender drift
 #   library-cloud      src/cloud-glb.test.ts     26 cloud archetypes
 #   editor-2.5d-react  src/models/valve-glb.test.ts   valve.glb
 #
-# Runs on PRs/pushes that touch the scripts, the GLBs or the build tooling,
-# weekly (catches a drifting runner image), and on demand. Blender is the
+# Runs on a labelled `ci` PR whose diff touches the scripts, the GLBs or the build tooling,
+# and on demand (workflow_dispatch). Blender is the
 # official Linux build pinned to the version the GLBs are authored with
 # (blender/README.md: 5.2.2 LTS), checksum-verified and cached; not apt's,
 # which lags and would change the exporter output.
@@ -39,7 +41,7 @@ name: Blender drift
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [labeled]
   workflow_dispatch:
 
 concurrency:
@@ -82,8 +84,8 @@ jobs:
           echo "Using holodeck-sdk ref: $ref"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
-      # Push, weekly and manual runs always rebuild. On a PR, rebuild only when the diff
-      # touches the same paths the push trigger lists (scripts/ci-scope.mjs; --no-shared:
+      # Manual runs always rebuild. On a PR, rebuild only when the diff touches the
+      # Blender inputs (JOBS['blender-drift'] in scripts/ci-scope.mjs, shared: false:
       # other workflows and scripts/ do not feed the GLBs). Otherwise every later step is
       # skipped and the job passes. This used to be a separate `changes` job; folding it in
       # saves a sandbox start and ~15 s of serial wait per PR (boat: 12 starts/minute).
@@ -96,10 +98,8 @@ jobs:
           SDK_REF: ${{ steps.sdk.outputs.ref }}
         run: |
           if ! command -v node >/dev/null; then echo "no node on the image yet: run"; echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          node holodeck/scripts/ci-scope.mjs --cwd holodeck --event "$EVENT" --base "$BASE_SHA" --sdk-ref "$SDK_REF" --no-shared \
-            --paths '^blender/' --paths '^packages/library-cloud/' --paths '^packages/editor-2\.5d-react/assets/models/' \
-            --paths '^packages/editor-2\.5d-react/scripts/build-parts\.mjs$' --paths '^packages/editor-2\.5d-react/src/models/' \
-            --paths '^\.github/workflows/blender-drift\.yml$' --paths '^scripts/ci-scope\.mjs$'
+          node holodeck/scripts/ci-scope.mjs --cwd holodeck --event "$EVENT" --base "$BASE_SHA" --sdk-ref "$SDK_REF" \
+            --job blender-drift
 
       - name: Checkout holodeck-sdk (${{ steps.sdk.outputs.ref }})
         if: steps.scope.outputs.run == 'true'

@@ -138,3 +138,6 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .pnpm-store/
+
+# Local check ladder output (scripts/dev-check.sh)
+.dev-check/

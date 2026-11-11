@@ -22,7 +22,7 @@ From the Holodeck repository root, choose one of these package directories:
 | Flow blocks, runtime, `holodeck.flow.local` | `packages/flow-runtime` | Colocated `src/**/*.test.ts` (Node, no browser); `pnpm smoke` after `pnpm build` |
 | Blender parts | `blender/parts` and 2.5D assets | GLB contract tests under `packages/editor-2.5d-react/src/models/` |
 
-For each affected React package, run this sequence from its directory:
+From the repo root, `scripts/dev-check.sh` picks and runs the checks your diff needs (`fast` before every push, `push` before a PR, `full` before merging; see [TESTING.md](TESTING.md)). To run one package by hand, from its directory:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -31,7 +31,7 @@ HOLODECK_SKIP_RENDER_TESTS=1 pnpm exec vitest run
 pnpm build
 ```
 
-The [CI workflow](.github/workflows/ci.yml) runs these checks separately for the three React packages and `flow-runtime` on pull requests and pushes to `main`, after installing and building the SDK. It sets `HOLODECK_SKIP_RENDER_TESTS=1` because hosted runners lack the GPU/WebGPU environment required by the render tests. CI does not run package lint scripts, Storybook, or a built-package import smoke test; built-package import and asset coverage is tracked in [#7](https://github.com/hyperdrive-technology/holodeck/issues/7).
+The [CI workflow](.github/workflows/ci.yml) runs the same gate per package (`scripts/ci-package.sh <package>`: install, type check, tests, build, built-package smoke checks) and the studio/MCP gate (`scripts/ci-studio.sh`), after installing and building the SDK. Pre-1.0 it runs only when a `ci`-labelled PR is labelled, once, on the final reviewed head; `scripts/dev-check.sh` runs the same scripts locally. CI runs the editor's render tests on the runner's Chrome with SwiftShader WebGPU. It does not run package lint scripts or Storybook.
 
 The root manifest is a legacy CLI scaffold, not an aggregate runner. `packages/cli` is also excluded from CI: its `src/index.ts` build entry is absent, its `package-lock.json` contains no resolved dependencies, and its SDK dependency targets the registry. Restoring the CLI requires its own setup and verification; its advertised commands are not the supported onboarding path.
 
