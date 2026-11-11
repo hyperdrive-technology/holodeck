@@ -92,7 +92,9 @@ const isModel = (c: Component) => c === 'bare' || c === 'owned' || c === 'mixed'
 // The 52 cases are independent (own page, own parked route) and mostly wait: page load, parked
 // requests, RETRY_GRACE_MS. In sequence they took ~340 s, half the package's browser time, so up
 // to HOLDS_CONCURRENCY pages run at once in the one browser (dev-loop shift-left, 2026-11-11).
-const HOLDS_CONCURRENCY = 4;
+// Linux = CI's SwiftShader (software WebGPU on 4 vCPU): fewer pages at once. Unmeasured on CI
+// at the time of writing; lower it (or set 1) if the boat run shows stalls.
+const HOLDS_CONCURRENCY = process.platform === 'linux' ? 2 : 4;
 
 vi.setConfig({ maxConcurrency: HOLDS_CONCURRENCY });
 
