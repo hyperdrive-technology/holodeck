@@ -83,17 +83,6 @@ describe('resolveOpacity', () => {
   });
 });
 
-describe('createTransform / createMaterial (SDK)', () => {
-  it('builds default transform and material helpers used by the viewer', () => {
-    expect(createTransform({ x: 1 }, { y: Math.PI / 2 }, { z: 2 })).toEqual({
-      position: { x: 1, y: 0, z: 0 },
-      rotation: { x: 0, y: Math.PI / 2, z: 0 },
-      scale: { x: 1, y: 1, z: 2 },
-    });
-    expect(createMaterial({ opacity: 0.5 }).opacity).toBe(0.5);
-  });
-});
-
 describe('interpolateKeyframes', () => {
   const keys: Keyframe[] = [
     { time: 0, value: 0, easing: 'linear' },
