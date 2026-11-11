@@ -52,6 +52,11 @@ material outside `hd.*`. Note that GLTFLoader removes `.` from node names
 
 ## Adding a part
 
+Agents can do the steps below through the Holodeck MCP server
+(`blender_build_part`, `part_validate`, `blender_preview`, `part_install`;
+tier `exec` plus `HOLODECK_MCP_ALLOW_BLENDER=1`). See
+[`docs/MCP.md`](../docs/MCP.md#blender-parts-phase-1).
+
 1. Create `parts/<part>.py`. Copy the header of `parts/valve.py`, which adds the
    `sys.path` entry and imports `holodeck_bpy as hd`, then define `build()` and
    end with `hd.run_part(build, "<part>")`.

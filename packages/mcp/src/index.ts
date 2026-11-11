@@ -13,3 +13,8 @@ export { DOCUMENT_SUFFIX, Workspace, etagOf } from './workspace';
 export * from './limits';
 export { SceneRenderer, findChromium, serveStatic, isUniform, RENDER_ARGS } from './render';
 export type { RendererOptions } from './render';
+export { validatePartGlb, footprintOf } from './glb';
+export type { PartStats, PartValidation } from './glb';
+export { PartWorkbench, ALLOW_BLENDER_ENV, REPO_ENV } from './part-workbench';
+export type { BlenderOptions } from './part-workbench';
+export { findBlender } from './blender';
