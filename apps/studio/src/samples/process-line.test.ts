@@ -57,7 +57,9 @@ describe('Process line sample', () => {
     const pipe = byId('exchanger-pipe');
     const exchanger = byId('e-101');
     expect(exchanger.rotation ?? 0).toBe(0);
-    const [nx, ny, nz] = PROCESS_MODELS[slug(exchanger)]!.ports['tube-in']!;
+    const tubeIn = PROCESS_MODELS[slug(exchanger)]!.ports['tube-in']!;
+    const [nx, ny, nz] = tubeIn.at;
+    expect(tubeIn.facing).toBe('+z');
     const [cx, , cz] = gridToWorld(exchanger.x, exchanger.y);
     const [ex, , ez] = gridToWorld(pipe.toX!, pipe.toY!);
     expect(ex).toBeCloseTo(cx + nx, 9);
@@ -91,8 +93,14 @@ describe('Process line sample', () => {
         expect(overlap, `${a.id} / ${b.id}`).toBe(false);
       }
     }
+    // A pipe may start at one of the part's own grid ports (a filter's outlet node is its centre).
+    const portNodes = (id: string) => {
+      const o = byId(id);
+      const def = PROCESS_PART_DEFINITIONS.find((p) => p.id === o.object)!;
+      return Object.values(def.ports ?? {}).map((p) => `${o.x + p.x},${o.y + p.y}`);
+    };
     for (const box of boxes) {
-      for (const pipe of pipes) {
+      for (const pipe of pipes.filter((p) => !portNodes(box.id).some((n) => n === `${p.x},${p.y}` || n === `${p.toX},${p.toY}`))) {
         const [x0, x1] = [Math.min(pipe.x, pipe.toX!), Math.max(pipe.x, pipe.toX!)];
         const [y0, y1] = [Math.min(pipe.y, pipe.toY!), Math.max(pipe.y, pipe.toY!)];
         // Strict: a pipe that ends on a part's face (the exchanger's tube-in flange) touches, it does not cross.

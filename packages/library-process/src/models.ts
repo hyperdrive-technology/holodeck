@@ -11,6 +11,24 @@ export type ProcessModelKind = 'inline' | 'floor' | 'mounted';
 /** `[x, y, z]` in the model's own three.js frame (Y up, 1 unit = 1 grid cell). */
 export type ModelPoint = readonly [number, number, number];
 
+/** Outward normal of a nozzle face, in the model frame. */
+export type ModelFacing = '+x' | '-x' | '+y' | '-y' | '+z' | '-z';
+
+/**
+ * One `port.<name>` nozzle. The GLB empty carries only the position; the
+ * facing, mouth shape and bore come from the script's docstring and live
+ * here, so hosts (and later 3D routing) need not guess them.
+ */
+export interface ProcessModelPort {
+  /** Flange face centre. */
+  at: ModelPoint;
+  facing: ModelFacing;
+  /** Absent = round. `rect`: a duct mouth (blower discharge, cyclone inlet). */
+  mouth?: 'round' | 'rect';
+  /** Bore radius when not the standard pipe radius (0.2), e.g. 0.1 small-bore dosing lines. */
+  radius?: number;
+}
+
 /**
  * The node and placement contract of one GLB, mirrored from the final
  * `c.check(...)` call of its Blender script (blender/parts/process/<slug>.py),
@@ -29,8 +47,8 @@ export interface ProcessModelContract {
   yMin: number;
   /** Inline parts: face-to-face length along X (`port.in` at -length/2, `port.out` at +length/2). */
   length?: number;
-  /** `port.<name>` empties (nozzle flange faces) and their positions. */
-  ports: Readonly<Record<string, ModelPoint>>;
+  /** `port.<name>` empties (nozzle flange faces): position, facing, mouth. */
+  ports: Readonly<Record<string, ProcessModelPort>>;
   /** `anim.<name>` pivots (moving meshes are their children) and their positions. */
   anim: Readonly<Record<string, ModelPoint>>;
   /** Whether the model has an `hd.accent` piece (the per-instance state colour). */

@@ -68,7 +68,8 @@ A part definition needs no React `component`. Without one it renders through `Da
   own animator settings (over the animator's defaults, under `placement.animation[param].settings`,
   and only while that animator is the one in use). Built-in animators: `spin` (with `enableParam`,
   e.g. a motor shaft that turns from `speed` only while `running`), `fill`, `bob`, `visible`,
-  `pulse`, `travel` (linear stroke, e.g. a control-valve stem) and `turn` (angle between `fromDeg`
+  `pulse`, `travel` (linear stroke, e.g. a control-valve stem; with `cycleHz` it reciprocates, e.g. a
+  metering-pump plunger, and it also takes `enableParam`) and `turn` (angle between `fromDeg`
   and `toDeg`, e.g. a quarter-turn lever or a gauge needle). Animators receive every resolved param
   as `ctx.params`.
 - `alarmParam`: a declared boolean param that turns `hd.accent` into the theme's `colors.alarm`

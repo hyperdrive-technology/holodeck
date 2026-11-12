@@ -147,7 +147,9 @@ describe.each(parts)('%s', (_id, part) => {
     for (const [name, port] of Object.entries(part.ports ?? {})) {
       const nozzle = model.ports[name];
       expect(nozzle, `port.${name} exists in the GLB`).toBeDefined();
-      const [x, y, z] = nozzle!;
+      const [x, y, z] = nozzle!.at;
+      // The grid heading is the nozzle's facing (n = -z, e = +x, s = +z, w = -x).
+      expect(nozzle!.facing, `port.${name} faces its grid heading`).toBe({ n: '-z', e: '+x', s: '+z', w: '-x' }[port.dir]);
       // The nozzle face lies on the pipe leaving the port node in `dir`, within one cell,
       // at the pipe axis height (local Y 0 for inline parts, pipeWorldY() for floor parts).
       const [dx, dz] = HEADING[port.dir];

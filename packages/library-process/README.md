@@ -20,8 +20,18 @@ Target catalogue, authoring rules and waves: [docs/assets/process-catalog.md](..
 | `process:valve-three-way` | Valves | `position` 0-100 %, `fault`, `color` | stem `anim.stem` rises 0.06 at 100 % (`travel`); `branch` port on +Z |
 | `process:valve-check` | Valves | `color` | none |
 | `process:valve-relief` | Valves | `lifted` (alarm tint), `mountHeight`, `color` | lever `anim.handle` tilts 20° about Z (`turn`) |
-| `process:motor` | Rotating equipment | `running`, `speed` 0-100 %, `fault`, `color` | shaft `anim.shaft` spins about X while `running` (`spin`) |
+| `process:motor` | Rotating equipment | `running` (green band), `speed` 0-100 %, `fault`, `color` | shaft `anim.shaft` spins about X while `running` (`spin`) |
+| `process:pump-lobe` | Rotating equipment | `running`, `speed`, `fault`, `color` | shaft about X while `running` (`spin`) |
+| `process:pump-inline` | Rotating equipment | `running`, `speed`, `fault`, `color` | shaft about Y while `running`; sits on a pipe |
+| `process:pump-dosing` | Rotating equipment | `running`, `stroke` 0-100 %, `fault`, `color` | plunger `anim.stem` reciprocates 0.04 along +X while `running` (`travel`, `cycleHz`) |
+| `process:blower` | Rotating equipment | `running`, `speed`, `fault`, `color` | impeller `anim.blades` about Z while `running` |
+| `process:compressor` | Rotating equipment | `running`, `load` 0-100 %, `fault`, `color` | none; grid port `out` (east) |
 | `process:heat-exchanger-shell-tube` | Heat transfer | `tubeInTemp`, `tubeOutTemp`, `shellInTemp`, `shellOutTemp` (°C) | none (readings for labels) |
+| `process:boiler` | Heat transfer | `firing` (orange burner), `pressure` (reading), `unit`, `fault`, `color` | none |
+| `process:cooling-tower` | Heat transfer | `running`, `speed`, `fault`, `color` | fan `anim.blades` about Y while `running`; grid port `out` (east) |
+| `process:filter` | Separation | `blocked` (alarm tint), `dp` (reading), `unit`, `color` | none; grid port `out` (east) |
+| `process:strainer-y` | Separation | `blocked`, `dp`, `unit`, `color` | none; sits on a pipe, basket toward +Z (1×2) |
+| `process:cyclone` | Separation | `dp` (reading), `unit` | none (no state colour) |
 | `process:transmitter` | Instruments | `value` (reading), `unit`, `alarm`, `mountHeight`, `color` | none |
 | `process:gauge-pressure` | Instruments | `value` 0-100 %, `alarm`, `mountHeight`, `color` | needle `anim.needle` sweeps 270° clockwise (`turn` about Z) |
 | `process:flowmeter-mag` | Instruments | `value` (reading), `unit`, `fault`, `color` | none |
@@ -68,8 +78,9 @@ await host.installPackage(manifest, processPackage, {
 
 `PROCESS_PART_DEFINITIONS` holds the raw, asset-relative definitions;
 `createProcessParts(assetUrl)` returns independent copies with resolved URLs.
-`PROCESS_MODELS` is each GLB's node contract (kind, envelope, `port.*` and
-`anim.*` positions, state-colour piece), mirrored from its Blender script, and
+`PROCESS_MODELS` is each GLB's node contract (kind, envelope, `port.*`
+nozzles with position, facing, mouth shape and bore, `anim.*` pivots,
+state-colour piece), mirrored from its Blender script, and
 `processModelPath(slug)` its asset path. Studio bundles the GLBs with Vite
 `?url` imports (`apps/studio/src/host/process-package.ts`).
 
@@ -95,8 +106,9 @@ the catalogue's Package section).
    `assets/models/<slug>.glb`. The tests now fail: every GLB needs a contract
    and a definition.
 2. Add `<slug>` to `src/models.json`, copying the script's final
-   `c.check(...)` (kind, footprint, height, `y_min`, length, ports, anim) and
-   whether it uses `hd.accent`.
+   `c.check(...)` (kind, footprint, height, `y_min`, length, anim) and each
+   port's position plus, from the docstring, its facing, mouth (`rect` ducts)
+   and bore radius when not 0.2, and whether it uses `hd.accent`.
 3. Add the definition to `src/parts.json`: id `process:<slug>`, label,
    catalogue family as `category`, hint, whole-cell footprint, params (the
    catalogue's "Params" column), and for inline parts `origin`,

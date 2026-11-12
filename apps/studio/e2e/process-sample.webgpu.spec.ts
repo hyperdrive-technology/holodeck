@@ -17,7 +17,9 @@ const FIRST_RENDER_MS = 300_000;
 // Every @holodeck/library-process model: the sample uses all of them (process-line.test.ts pins that).
 const PROCESS_MODELS = [
   'valve-ball', 'valve-butterfly', 'valve-control', 'valve-actuated', 'valve-solenoid', 'valve-three-way', 'valve-check', 'valve-relief',
-  'motor', 'heat-exchanger-shell-tube', 'transmitter', 'gauge-pressure', 'flowmeter-mag', 'level-radar', 'beacon', 'cabinet', 'vfd', 'junction-box',
+  'motor', 'pump-lobe', 'pump-inline', 'pump-dosing', 'blower', 'compressor',
+  'heat-exchanger-shell-tube', 'boiler', 'cooling-tower', 'filter', 'strainer-y', 'cyclone',
+  'transmitter', 'gauge-pressure', 'flowmeter-mag', 'level-radar', 'beacon', 'cabinet', 'vfd', 'junction-box',
 ];
 test.setTimeout(600_000);
 test.use({ viewport: { width: 1080, height: 560 } });
@@ -63,7 +65,7 @@ test('the Reset dialog loads the process-parts sample and every process GLB rend
   await page.getByRole('button', { name: /Reset/ }).click();
   await page.getByTestId('reset-dialog').getByRole('button', { name: 'Load the process-parts sample' }).click();
   await expect(page.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved');
-  await expect(editor).toHaveAttribute('data-object-count', '34');
+  await expect(editor).toHaveAttribute('data-object-count', '47');
   await rendered(page);
 
   // Vite emits each GLB with a content hash: `<slug>-<hash>.glb`.

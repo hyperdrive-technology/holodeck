@@ -15,7 +15,9 @@ const context = { host: 'test', assetUrl: (path: string) => new URL(path, assetB
 const engine = { id: 'holodeck.iso', label: 'Iso contract', apiVersion: '1.0.0', documentFormat: 'holodeck.iso.scene.v1', kinds: ISO_KINDS };
 const expectedIds = [
   'valve-ball', 'valve-butterfly', 'valve-control', 'valve-actuated', 'valve-solenoid', 'valve-three-way', 'valve-check', 'valve-relief',
-  'motor', 'heat-exchanger-shell-tube',
+  'motor', 'pump-lobe', 'pump-inline', 'pump-dosing', 'blower', 'compressor',
+  'heat-exchanger-shell-tube', 'boiler', 'cooling-tower',
+  'filter', 'strainer-y', 'cyclone',
   'transmitter', 'gauge-pressure', 'flowmeter-mag', 'level-radar', 'beacon',
   'cabinet', 'vfd', 'junction-box',
 ].map((s) => `process:${s}`);

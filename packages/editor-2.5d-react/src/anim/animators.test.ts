@@ -138,6 +138,42 @@ describe('travel', () => {
   });
 });
 
+describe('travel cycleHz / enableParam (reciprocating plunger)', () => {
+  const settings = { axis: 'x', distance: 0.04, scale: 100, cycleHz: 2, enableParam: 'running' };
+
+  it('strokes out and back along the axis at cycleHz, scaled by the value', () => {
+    const node = new Object3D();
+    node.position.set(0.12, 0.52, 0);
+    // Peak of a 2 Hz stroke at t = 0.25 s: the full 0.04 at stroke 100 %.
+    TRAVEL_ANIMATOR.apply(ctx(node, 100, { elapsed: 0.25, settings, params: { running: true } }));
+    expect(node.position.x).toBeCloseTo(0.16, 9);
+    expect(node.position.y).toBe(0.52);
+    // Back at the authored position at t = 0.5 s; half the stroke length at 50 %.
+    TRAVEL_ANIMATOR.apply(ctx(node, 100, { elapsed: 0.5, settings, params: { running: true } }));
+    expect(node.position.x).toBeCloseTo(0.12, 9);
+    TRAVEL_ANIMATOR.apply(ctx(node, 50, { elapsed: 0.25, settings, params: { running: true } }));
+    expect(node.position.x).toBeCloseTo(0.14, 9);
+  });
+
+  it('rests at the authored position while the gate is off, in either mode', () => {
+    const node = new Object3D();
+    TRAVEL_ANIMATOR.apply(ctx(node, 100, { elapsed: 0.25, settings, params: { running: true } }));
+    expect(node.position.x).toBeGreaterThan(0);
+    TRAVEL_ANIMATOR.apply(ctx(node, 100, { elapsed: 0.25, settings, params: { running: false } }));
+    expect(node.position.x).toBe(0);
+    TRAVEL_ANIMATOR.apply(ctx(node, 100, { settings: { distance: 0.5, scale: 100, enableParam: 'running' }, params: {} }));
+    expect(node.position.y).toBe(0);
+  });
+
+  it('keeps the static (valve) behaviour when cycleHz is 0 or invalid', () => {
+    for (const cycleHz of [0, -1, 'x']) {
+      const node = new Object3D();
+      TRAVEL_ANIMATOR.apply(ctx(node, 1, { elapsed: 0.25, settings: { distance: 0.3, cycleHz } }));
+      expect(node.position.y).toBeCloseTo(0.3);
+    }
+  });
+});
+
 describe('turn', () => {
   it('maps value 0..scale to fromDeg..toDeg about the axis, added to the authored rotation', () => {
     const node = new Object3D();
@@ -309,6 +345,9 @@ describe('planAnimations / applyAnimations', () => {
     // A placement that swaps the animator does not inherit settings written for spin.
     const swapped = planAnimations(motor, { speed: { animator: 'turn' } }, lookup);
     expect(swapped[0]?.settings).toEqual({ axis: 'y', fromDeg: 0, toDeg: 90, scale: 1 });
+    expect(planAnimations({ animNodes: { p: { node: 'anim.stem', animator: 'travel' } } }, undefined, lookup)[0]?.settings).toEqual({
+      axis: 'y', distance: 0.1, scale: 1, cycleHz: 0, enableParam: '',
+    });
   });
 
   it('hands every resolved param to the animator (spin gated by running)', () => {

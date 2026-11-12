@@ -31,6 +31,15 @@ export function fractionOf(value: unknown, scale: unknown): number {
 }
 
 /**
+ * `settings.enableParam` gate shared by `spin` and `travel`: open when the
+ * setting is empty / not a string, else while that resolved param is truthy.
+ */
+export function gateOpen(settings: Record<string, unknown>, params: Readonly<Record<string, unknown>> | undefined): boolean {
+  const gate = settings.enableParam;
+  return typeof gate !== 'string' || gate === '' || !!params?.[gate];
+}
+
+/**
  * Rotate about an axis at `value` rpm * `rpmScale`. With `enableParam` set
  * (e.g. `running`), the node only turns while that param is truthy, so a
  * motor whose speed reference stays at 100 % stops when it is switched off.
@@ -46,8 +55,7 @@ export const SPIN_ANIMATOR: IsoAnimator = {
     enableParam: { type: 'string', label: 'Only while param is on', default: '' },
   },
   apply({ node, value, dt, settings, params }) {
-    const gate = settings.enableParam;
-    if (typeof gate === 'string' && gate !== '' && !params?.[gate]) return;
+    if (!gateOpen(settings, params)) return;
     const rpm = num(value, 0) * num(settings.rpmScale, 1);
     node.rotation[axisOf(settings.axis)] += (rpm * Math.PI * 2 * dt) / 60;
   },
@@ -61,6 +69,13 @@ const TRAVEL_BASE = 'hdTravelBase';
  * authored position. A control-valve stem modelled closed rises by its
  * stroke as `position` goes 0 -> 100 % (`scale: 100`). Restoring: value 0,
  * `false` or garbage puts the node back where it was authored.
+ *
+ * Reciprocating (`cycleHz` > 0): the node strokes out and back at that
+ * rate, `distance * fraction` at the far end (a metering-pump plunger whose
+ * `stroke` param sets the length), smoothly from the authored position:
+ * offset = full * (1 - cos(2 pi f t)) / 2. With `enableParam` set (e.g.
+ * `running`) it only moves while that param is truthy and rests at the
+ * authored position otherwise; the gate applies to the static mode too.
  */
 export const TRAVEL_ANIMATOR: IsoAnimator = {
   id: 'travel',
@@ -70,12 +85,18 @@ export const TRAVEL_ANIMATOR: IsoAnimator = {
     axis: { type: 'enum', label: 'Axis', default: 'y', options: ['x', 'y', 'z'] },
     distance: { type: 'number', label: 'Travel at full scale', default: 0.1, min: -10, max: 10, step: 0.01, unit: 'cells' },
     scale: { type: 'number', label: 'Full-scale value', default: 1, min: 0.001, max: 100000, step: 1 },
+    // 0 = follow the value (a valve stem); > 0 = stroke out and back this many times a second.
+    cycleHz: { type: 'number', label: 'Strokes per second', default: 0, min: 0, max: 20, step: 0.1, unit: 'Hz' },
+    enableParam: { type: 'string', label: 'Only while param is on', default: '' },
   },
-  apply({ node, value, settings }) {
+  apply({ node, value, elapsed, settings, params }) {
     const base = (node.userData[TRAVEL_BASE] ??= node.position.clone()) as Vector3;
     const axis = axisOf(settings.axis);
     node.position.copy(base);
-    node.position[axis] += fractionOf(value, settings.scale) * num(settings.distance, 0.1);
+    if (!gateOpen(settings, params)) return;
+    const full = fractionOf(value, settings.scale) * num(settings.distance, 0.1);
+    const hz = num(settings.cycleHz, 0);
+    node.position[axis] += hz > 0 ? (full * (1 - Math.cos(2 * Math.PI * hz * elapsed))) / 2 : full;
   },
 };
 

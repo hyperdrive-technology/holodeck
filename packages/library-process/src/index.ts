@@ -8,7 +8,9 @@ export {
   PROCESS_MODELS,
   PROCESS_MODEL_SLUGS,
   processModelPath,
+  type ModelFacing,
   type ModelPoint,
+  type ProcessModelPort,
   type ProcessModelContract,
   type ProcessModelKind,
 } from './models';

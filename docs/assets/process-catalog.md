@@ -27,13 +27,13 @@ classes.
 | `heat-exchanger.glb` (plate) | Blender | `blender/parts/heat-exchanger.py` | no (brewery extension only) | no ports, no anim nodes |
 | `valve.glb` (globe + doughnut wheel) | Blender | `blender/parts/valve.py` | no | older shape than the code valve; wheel dwarfs the body |
 | `fermenter`, `brite-tank`, `kettle`, `mash-tun` `.glb` | Blender | `blender/parts/*.py` | no | unused: Tank presets replaced them |
-| Pilot six plus wave-1 batches A (valves) and D (instruments, electrical): 18 parts, see the status columns below | Blender | `blender/parts/process/*.py` → `@holodeck/library-process` | yes ("Process parts" in the palette) | animated levers, stems, shaft and gauge needle; `fault` / `alarm` / state colours tint `hd.accent`; sample `apps/studio/samples/process-line.holodeck.json` |
+| Pilot six plus wave-1 batches A (valves), B (rotating), C (heat transfer, separation) and D (instruments, electrical): 28 parts, see the status columns below | Blender | `blender/parts/process/*.py` → `@holodeck/library-process` | yes ("Process parts" in the palette) | animated levers, stems, shaft and gauge needle; `fault` / `alarm` / state colours tint `hd.accent`; sample `apps/studio/samples/process-line.holodeck.json` |
 | 26 cloud archetypes, 54 AWS services | Blender + SVG | `library-cloud`, `assets-aws` | yes | not process assets; the packaging model to copy |
 
-So a standalone Studio user can place twenty-seven process parts, two of which
-are annotations: the nine above plus eighteen from `@holodeck/library-process`.
-There is still no pump in the palette (only the brewery's off-scale `pump.glb`),
-no solids handling and no vessel beyond Tank and Mixer.
+So a standalone Studio user can place thirty-seven process parts, two of which
+are annotations: the nine above plus twenty-eight from `@holodeck/library-process`.
+The end-suction centrifugal pump is still only the brewery's off-scale
+`pump.glb`, and there is no solids handling and no vessel beyond Tank and Mixer.
 
 ## Package
 
@@ -60,9 +60,12 @@ How the definitions use the editor contract (`IsoPartDefinition`):
   `turn` (quarter-turn levers: `fromDeg: 90, toDeg: 0` on `open`; relief
   lever `axis: 'z'`, 0 to 20 on `lifted`; gauge needle `axis: 'z'`, 0 to
   -270 over 0..100 % on `value`), `travel` (stems: `distance: 0.08` / `0.06`,
-  `scale: 100` on `position`), `spin` (motor shaft: `axis: 'x'`, gated by
-  `enableParam: 'running'`, on `speed`). `blades` (louvres moving together)
-  still needs an animator.
+  `scale: 100` on `position`; the dosing-pump plunger reciprocates with
+  `axis: 'x', distance: 0.04, cycleHz: 1.5`, gated by `running`, on `stroke`),
+  `spin` (shafts and fans, gated by `enableParam: 'running'`, on `speed`:
+  motor and lobe pump about X, inline pump and cooling-tower fan about Y,
+  blower impeller about Z). Damper louvres (`blades` moving together, not
+  spinning) still need an animator.
 - State colour: `alarmParam` (`fault`, `alarm`, or `lifted` on the relief
   valve) tints `hd.accent` with the theme's alarm colour; `stateColors` tint
   it while a boolean is on (solenoid `energised`, drive `running`); a `color`
@@ -70,8 +73,12 @@ How the definitions use the editor contract (`IsoPartDefinition`):
 - The stack light's three tiers share one `hd.accent` material, so it shows
   one colour: the highest lit of `red` / `amber` / `green`. Independent tier
   colours need per-mesh accent materials at runtime (follow-up).
+- `src/models.json` records every nozzle's position, facing (`+x` ... `-z`),
+  mouth (`rect` for the blower discharge and the cyclone inlet) and bore when
+  not the standard pipe (dosing pump: 0.1); the GLB empties carry position
+  only.
 - Grid ports are declared only where a pipe leaving a grid node meets the
-  GLB nozzle (a test checks it). The heat exchanger's nozzles are off the
+  GLB nozzle and faces its heading (a test checks both). The heat exchanger's nozzles are off the
   grid (`tube-in` at x = -1.10 on a 3 x 1 footprint) or elevated, so it has
   no grid ports yet: move `tube-in` to x = -1.0 (and consider a 3 x 2
   footprint so a face lands on a node) to make it routable.
@@ -149,11 +156,11 @@ routing or parametric code, not a GLB.
 | --- | --- | --- | --- |
 | `pump-centrifugal` end suction | pump | running, speed, fault | partial (`pump.glb`, brewery only, off-scale) |
 | `motor` foot-mounted | motor | running, speed, fault | have (`library-process`) |
-| `pump-lobe` positive displacement | pump | running, speed | wave 1 |
-| `pump-inline` vertical inline | pump | running, speed | wave 1 |
-| `pump-dosing` diaphragm metering | pump | running, stroke | wave 1 |
-| `blower` centrifugal fan | fan | running, speed | wave 1 |
-| `compressor` screw package | (none) | running, load | wave 1 |
+| `pump-lobe` positive displacement | pump | running, speed | have (`library-process`) |
+| `pump-inline` vertical inline | pump | running, speed | have (`library-process`) |
+| `pump-dosing` diaphragm metering | pump | running, stroke | have (`library-process`); vertical small-bore ports, no grid ports |
+| `blower` centrifugal fan | fan | running, speed | have (`library-process`); elevated round inlet, rectangular top duct |
+| `compressor` screw package | (none) | running, load | have (`library-process`) |
 | `fan-axial` duct fan | fan | running, speed | wave 2 |
 | `pump-submersible` | pump | running | wave 2 |
 | `pump-vacuum` liquid ring | pump | running | wave 2 |
@@ -167,8 +174,8 @@ routing or parametric code, not a GLB.
 | --- | --- | --- | --- |
 | `heat-exchanger-plate` | heat-exchanger | temperatures | partial (GLB, brewery only, no ports) |
 | `heat-exchanger-shell-tube` | heat-exchanger | temperatures | have (`library-process`); no grid ports yet (see Package) |
-| `boiler` | (none) | firing, pressure | wave 1 |
-| `cooling-tower` | (none) | fan running | wave 1 |
+| `boiler` | (none) | firing, pressure | have (`library-process`); feed nozzle off the grid, no grid ports |
+| `cooling-tower` | (none) | fan running | have (`library-process`) |
 | `chiller` / `heat-pump` | heat-pump | running | wave 2 |
 | `air-cooler` fin fan | (none) | fan running | wave 2 |
 | `heater-inline` electric | (none) | on | wave 2 |
@@ -178,9 +185,9 @@ routing or parametric code, not a GLB.
 
 | Part | OpenBridge class | Params | Status |
 | --- | --- | --- | --- |
-| `filter` cartridge / bag housing | filter | differential pressure, blocked | wave 1 |
-| `strainer-y` inline | filter | blocked | wave 1 |
-| `cyclone` | (none) | (none) | wave 1 |
+| `filter` cartridge / bag housing | filter | differential pressure, blocked | have (`library-process`) |
+| `strainer-y` inline | filter | blocked | have (`library-process`) |
+| `cyclone` | (none) | (none) | have (`library-process`); elevated rectangular inlet, no grid ports |
 | `separator` disc stack centrifuge | hydraulic-separator | running | wave 2 |
 | `conveyor-belt` | (none) | running, speed | wave 2 |
 | `conveyor-screw` | (none) | running | wave 2 |
@@ -257,7 +264,7 @@ not to Blender.
 
 | | Parts |
 | --- | --- |
-| Placeable today (process) | 27 |
+| Placeable today (process) | 37 |
 | Wave 1 (28 GLBs, 6 of them the pilot) | 28 |
 | Wave 2 | about 30 |
 | Wave 3 | about 15 |

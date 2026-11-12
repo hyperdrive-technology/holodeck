@@ -142,12 +142,17 @@ describe.each(PROCESS_PART_DEFINITIONS.map((part) => [slugOf(part), part] as con
       const node = found.get(name)!;
       expect(node, name).not.toBeInstanceOf(Mesh);
       expect(node.children, name).toHaveLength(0);
-      expect(node.getWorldPosition(new Vector3()).distanceTo(v(at)), name).toBeLessThan(EPS);
+      expect(node.getWorldPosition(new Vector3()).distanceTo(v(at.at)), name).toBeLessThan(EPS);
+      expect(['+x', '-x', '+y', '-y', '+z', '-z'], name).toContain(at.facing);
+      if (at.mouth !== undefined) expect(['round', 'rect'], name).toContain(at.mouth);
+      if (at.radius !== undefined) expect(at.radius, name).toBeGreaterThan(0);
     }
     if (contract.kind === 'inline') {
-      expect(contract.ports.in).toEqual([-contract.length! / 2, 0, 0]);
-      expect(contract.ports.out).toEqual([contract.length! / 2, 0, 0]);
+      expect(contract.ports.in).toEqual({ at: [-contract.length! / 2, 0, 0], facing: '-x' });
+      expect(contract.ports.out).toEqual({ at: [contract.length! / 2, 0, 0], facing: '+x' });
     }
+    // A process connection a mounted part stands on faces down.
+    if (contract.ports.process) expect(contract.ports.process).toEqual({ at: [0, 0, 0], facing: '-y' });
   });
 
   it('has exactly the declared anim.* pivots, each an empty with moving meshes beneath it', () => {
@@ -210,6 +215,23 @@ describe.each(PROCESS_PART_DEFINITIONS.map((part) => [slugOf(part), part] as con
         applyAnimations(plan, nodes, { ...on, [gate]: false }, 0.25, 0.5);
         expect(node.rotation[axis]).toBe(turned);
         node.rotation.copy(rest.rotation);
+        continue;
+      }
+
+      const hz = binding.settings.cycleHz;
+      if (typeof hz === 'number' && hz > 0) {
+        // Reciprocating travel: at the far end of a stroke (t = 0.5 / hz) the node is out by distance * fraction.
+        const axis = binding.settings.axis as 'x' | 'y' | 'z';
+        applyAnimations(plan, nodes, on, 0.016, 0.5 / hz);
+        expect(node.position[axis] - rest.position[axis]).toBeCloseTo(binding.settings.distance as number, 9);
+        envelope();
+        // Back at the authored position a full stroke later, and at rest while the gate is off.
+        applyAnimations(plan, nodes, on, 0.016, 1 / hz);
+        expect(node.position.distanceTo(rest.position)).toBeLessThan(1e-9);
+        const gate = binding.settings.enableParam as string;
+        expect(gate, 'a reciprocating part names its run gate').toBeTruthy();
+        applyAnimations(plan, nodes, { ...on, [gate]: false }, 0.016, 0.5 / hz);
+        expect(node.position.distanceTo(rest.position)).toBe(0);
         continue;
       }
 
@@ -330,6 +352,32 @@ describe('the pilot animations match their scripts', () => {
     expect([...materials]).toEqual(['hd.accent']);
     // Bottom to top: the stateColors order (red, amber, green) is a priority, not a tier map.
     expect(tiers.map((t) => t!.getWorldPosition(new Vector3()).y)).toEqual([...tiers.map((t) => t!.getWorldPosition(new Vector3()).y)].sort((a, b) => a - b));
+  });
+
+  it('pump-inline, blower and cooling-tower spin about Y, Z and Y; pump-lobe about X', async () => {
+    for (const [slug, node, axis] of [['pump-inline', 'anim.shaft', 'y'], ['blower', 'anim.blades', 'z'], ['cooling-tower', 'anim.blades', 'y'], ['pump-lobe', 'anim.shaft', 'x']] as const) {
+      const { nodes, plan } = await load(slug);
+      const n = nodes[node]!;
+      applyAnimations(plan, nodes, { speed: 100, running: false }, 1, 1);
+      expect(n.rotation[axis], slug).toBe(0);
+      applyAnimations(plan, nodes, { speed: 100, running: true }, 0.25, 1.25);
+      expect(n.rotation[axis], slug).not.toBe(0);
+      for (const other of (['x', 'y', 'z'] as const).filter((a) => a !== axis)) expect(n.rotation[other], `${slug} ${other}`).toBe(0);
+    }
+  });
+
+  it('pump-dosing: the plunger strokes 0.04 along +X while running, scaled by stroke', async () => {
+    const { nodes, plan } = await load('pump-dosing');
+    const stem = nodes['anim.stem']!;
+    const x0 = stem.position.x;
+    const hz = plan[0]!.settings.cycleHz as number;
+    applyAnimations(plan, nodes, { stroke: 100, running: true }, 0.016, 0.5 / hz);
+    expect(stem.position.x - x0).toBeCloseTo(0.04, 9);
+    applyAnimations(plan, nodes, { stroke: 50, running: true }, 0.016, 0.5 / hz);
+    expect(stem.position.x - x0).toBeCloseTo(0.02, 9);
+    applyAnimations(plan, nodes, { stroke: 100, running: false }, 0.016, 0.5 / hz);
+    expect(stem.position.x).toBe(x0);
+    expect(stem.position.y).toBeCloseTo(0.52, 6);
   });
 
   it('motor: the shaft spins about X from speed, only while running', async () => {

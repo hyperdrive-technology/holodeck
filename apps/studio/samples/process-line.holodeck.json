@@ -25,9 +25,9 @@
       {
         "id": "plant-area",
         "object": "area",
-        "x": 7,
+        "x": 14,
         "y": 0,
-        "width": 26,
+        "width": 40,
         "height": 18,
         "z": -1,
         "params": {
@@ -707,10 +707,277 @@
         }
       },
       {
+        "id": "p-101",
+        "object": "process:pump-lobe",
+        "x": 22,
+        "y": -4,
+        "params": {
+          "running": true,
+          "speed": 80
+        },
+        "bindings": {
+          "running": {
+            "connection": "sim",
+            "source": "square:10"
+          },
+          "speed": {
+            "connection": "sim",
+            "source": "sine:8:40:100"
+          }
+        }
+      },
+      {
+        "id": "fan-101",
+        "object": "process:blower",
+        "x": 25,
+        "y": -4,
+        "params": {
+          "running": true
+        },
+        "bindings": {
+          "running": {
+            "connection": "sim",
+            "source": "square:10"
+          },
+          "speed": {
+            "connection": "sim",
+            "source": "sine:8:40:100"
+          }
+        }
+      },
+      {
+        "id": "p-103",
+        "object": "process:pump-dosing",
+        "x": 28,
+        "y": -4,
+        "params": {
+          "running": true,
+          "stroke": 80
+        },
+        "bindings": {
+          "running": {
+            "connection": "sim",
+            "source": "square:6"
+          },
+          "stroke": {
+            "connection": "sim",
+            "source": "sine:20:30:100"
+          }
+        }
+      },
+      {
+        "id": "cy-101",
+        "object": "process:cyclone",
+        "x": 31,
+        "y": -4,
+        "params": {
+          "dp": 12
+        },
+        "bindings": {
+          "dp": {
+            "connection": "sim",
+            "source": "sine:15:8:16"
+          }
+        }
+      },
+      {
+        "id": "k-101",
+        "object": "process:compressor",
+        "x": 22,
+        "y": 0,
+        "params": {
+          "running": true,
+          "load": 60
+        },
+        "bindings": {
+          "running": {
+            "connection": "sim",
+            "source": "square:10"
+          },
+          "load": {
+            "connection": "sim",
+            "source": "sine:12:30:90"
+          },
+          "fault": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 95,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "air-pipe",
+        "object": "pipe",
+        "x": 23,
+        "y": 0,
+        "toX": 26,
+        "toY": 0,
+        "attach": {
+          "from": {
+            "object": "k-101",
+            "port": "out"
+          }
+        }
+      },
+      {
+        "id": "f-101",
+        "object": "process:filter",
+        "x": 27,
+        "y": 0,
+        "params": {
+          "dp": 0.4
+        },
+        "bindings": {
+          "dp": {
+            "connection": "sim",
+            "source": "ramp:40:0.2:1.5"
+          },
+          "blocked": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 95,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "filtrate-pipe",
+        "object": "pipe",
+        "x": 27,
+        "y": 0,
+        "toX": 33,
+        "toY": 0,
+        "attach": {
+          "from": {
+            "object": "f-101",
+            "port": "out"
+          }
+        }
+      },
+      {
+        "id": "s-101",
+        "object": "process:strainer-y",
+        "x": 29,
+        "y": 0,
+        "onPipe": "filtrate-pipe",
+        "at": 0.33,
+        "bindings": {
+          "blocked": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 92,
+                  "value": true
+                }
+              ]
+            }
+          },
+          "dp": {
+            "connection": "sim",
+            "source": "ramp:40:0.1:0.8"
+          }
+        }
+      },
+      {
+        "id": "p-102",
+        "object": "process:pump-inline",
+        "x": 31,
+        "y": 0,
+        "onPipe": "filtrate-pipe",
+        "at": 0.67,
+        "params": {
+          "running": true
+        },
+        "bindings": {
+          "running": {
+            "connection": "sim",
+            "source": "square:10"
+          },
+          "speed": {
+            "connection": "sim",
+            "source": "sine:8:40:100"
+          }
+        }
+      },
+      {
+        "id": "ct-101",
+        "object": "process:cooling-tower",
+        "x": 24,
+        "y": 5,
+        "params": {
+          "running": true
+        },
+        "bindings": {
+          "running": {
+            "connection": "sim",
+            "source": "square:10"
+          },
+          "speed": {
+            "connection": "sim",
+            "source": "sine:20:50:100"
+          }
+        }
+      },
+      {
+        "id": "cw-pipe",
+        "object": "pipe",
+        "x": 25,
+        "y": 5,
+        "toX": 28,
+        "toY": 5,
+        "attach": {
+          "from": {
+            "object": "ct-101",
+            "port": "out"
+          }
+        }
+      },
+      {
+        "id": "b-101",
+        "object": "process:boiler",
+        "x": 31,
+        "y": 5,
+        "params": {
+          "firing": true,
+          "pressure": 8
+        },
+        "bindings": {
+          "firing": {
+            "connection": "sim",
+            "source": "square:14"
+          },
+          "pressure": {
+            "connection": "sim",
+            "source": "sine:30:6:10"
+          }
+        }
+      },
+      {
         "id": "title-label",
         "object": "label",
         "size": 0.8,
-        "x": 7,
+        "x": 14,
         "y": -7,
         "params": {
           "text": "Process parts (simulated)",

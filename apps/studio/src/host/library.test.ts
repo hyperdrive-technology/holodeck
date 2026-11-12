@@ -29,8 +29,9 @@ describe('library', () => {
     expect(group?.packageName).toBe('Process parts');
     expect(group?.categories.map((c) => [c.category, c.items.map((i) => i.id)])).toEqual([
       ['Valves', ['valve-ball', 'valve-butterfly', 'valve-control', 'valve-actuated', 'valve-solenoid', 'valve-three-way', 'valve-check', 'valve-relief'].map((s) => `process:${s}`)],
-      ['Rotating equipment', ['process:motor']],
-      ['Heat transfer', ['process:heat-exchanger-shell-tube']],
+      ['Rotating equipment', ['motor', 'pump-lobe', 'pump-inline', 'pump-dosing', 'blower', 'compressor'].map((s) => `process:${s}`)],
+      ['Heat transfer', ['process:heat-exchanger-shell-tube', 'process:boiler', 'process:cooling-tower']],
+      ['Separation', ['process:filter', 'process:strainer-y', 'process:cyclone']],
       ['Instruments', ['transmitter', 'gauge-pressure', 'flowmeter-mag', 'level-radar', 'beacon'].map((s) => `process:${s}`)],
       ['Electrical', ['process:cabinet', 'process:vfd', 'process:junction-box']],
     ]);

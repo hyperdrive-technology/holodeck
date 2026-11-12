@@ -463,6 +463,304 @@
       }
     },
     "alarmParam": "fault",
+    "instanced": false,
+    "stateColors": [
+      {
+        "param": "running",
+        "color": "#22c55e"
+      }
+    ]
+  },
+  {
+    "id": "process:pump-lobe",
+    "label": "Lobe pump",
+    "category": "Rotating equipment",
+    "hint": "Skid-mounted rotary lobe pump with motor, coupling and opposed ports, 2×1",
+    "footprint": {
+      "w": 2,
+      "h": 1
+    },
+    "params": {
+      "running": {
+        "type": "boolean",
+        "label": "Running",
+        "default": false
+      },
+      "speed": {
+        "type": "number",
+        "label": "Speed",
+        "default": 100,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/pump-lobe.glb",
+    "animNodes": {
+      "speed": {
+        "node": "anim.shaft",
+        "animator": "spin",
+        "settings": {
+          "axis": "x",
+          "rpmScale": 0.6,
+          "enableParam": "running"
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "running",
+        "color": "#22c55e"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:pump-inline",
+    "label": "Inline pump",
+    "category": "Rotating equipment",
+    "hint": "Vertical inline centrifugal pump with a top motor; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 1,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "running": {
+        "type": "boolean",
+        "label": "Running",
+        "default": false
+      },
+      "speed": {
+        "type": "number",
+        "label": "Speed",
+        "default": 100,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/pump-inline.glb",
+    "animNodes": {
+      "speed": {
+        "node": "anim.shaft",
+        "animator": "spin",
+        "settings": {
+          "axis": "y",
+          "rpmScale": 0.6,
+          "enableParam": "running"
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "running",
+        "color": "#22c55e"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:pump-dosing",
+    "label": "Dosing pump",
+    "category": "Rotating equipment",
+    "hint": "Diaphragm metering pump with vertical small-bore connections",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "params": {
+      "running": {
+        "type": "boolean",
+        "label": "Running",
+        "default": false
+      },
+      "stroke": {
+        "type": "number",
+        "label": "Stroke",
+        "default": 100,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/pump-dosing.glb",
+    "animNodes": {
+      "stroke": {
+        "node": "anim.stem",
+        "animator": "travel",
+        "settings": {
+          "axis": "x",
+          "distance": 0.04,
+          "scale": 100,
+          "cycleHz": 1.5,
+          "enableParam": "running"
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "running",
+        "color": "#22c55e"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:blower",
+    "label": "Centrifugal blower",
+    "category": "Rotating equipment",
+    "hint": "Scroll-casing blower with an open inlet eye and a top duct outlet, 2×2",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {
+      "running": {
+        "type": "boolean",
+        "label": "Running",
+        "default": false
+      },
+      "speed": {
+        "type": "number",
+        "label": "Speed",
+        "default": 100,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/blower.glb",
+    "animNodes": {
+      "speed": {
+        "node": "anim.blades",
+        "animator": "spin",
+        "settings": {
+          "axis": "z",
+          "rpmScale": 0.6,
+          "enableParam": "running"
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "running",
+        "color": "#22c55e"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:compressor",
+    "label": "Screw compressor",
+    "category": "Rotating equipment",
+    "hint": "Packaged screw compressor with a low discharge, 2×1",
+    "footprint": {
+      "w": 2,
+      "h": 1
+    },
+    "ports": {
+      "out": {
+        "x": 1,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "running": {
+        "type": "boolean",
+        "label": "Running",
+        "default": false
+      },
+      "load": {
+        "type": "number",
+        "label": "Load",
+        "default": 0,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/compressor.glb",
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "running",
+        "color": "#22c55e"
+      }
+    ],
     "instanced": false
   },
   {
@@ -513,6 +811,234 @@
       }
     },
     "model": "models/heat-exchanger-shell-tube.glb",
+    "instanced": false
+  },
+  {
+    "id": "process:boiler",
+    "label": "Fire-tube boiler",
+    "category": "Heat transfer",
+    "hint": "Packaged horizontal fire-tube boiler with burner and stack, 3×2",
+    "footprint": {
+      "w": 3,
+      "h": 2
+    },
+    "params": {
+      "firing": {
+        "type": "boolean",
+        "label": "Firing",
+        "default": false
+      },
+      "pressure": {
+        "type": "number",
+        "label": "Pressure",
+        "default": 0,
+        "reading": true
+      },
+      "unit": {
+        "type": "string",
+        "label": "Unit",
+        "default": "bar"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/boiler.glb",
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "firing",
+        "color": "#f97316"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:cooling-tower",
+    "label": "Cooling tower",
+    "category": "Heat transfer",
+    "hint": "Induced-draft package cooling tower with an open fan stack, 2×2",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "ports": {
+      "out": {
+        "x": 1,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "running": {
+        "type": "boolean",
+        "label": "Running",
+        "default": false
+      },
+      "speed": {
+        "type": "number",
+        "label": "Speed",
+        "default": 100,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/cooling-tower.glb",
+    "animNodes": {
+      "speed": {
+        "node": "anim.blades",
+        "animator": "spin",
+        "settings": {
+          "axis": "y",
+          "rpmScale": 0.3,
+          "enableParam": "running"
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "running",
+        "color": "#22c55e"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:filter",
+    "label": "Cartridge filter",
+    "category": "Separation",
+    "hint": "Vertical cartridge / bag filter with a clamped dome lid",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "ports": {
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "blocked": {
+        "type": "boolean",
+        "label": "Blocked",
+        "default": false
+      },
+      "dp": {
+        "type": "number",
+        "label": "Differential pressure",
+        "default": 0,
+        "reading": true
+      },
+      "unit": {
+        "type": "string",
+        "label": "Unit",
+        "default": "bar"
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/filter.glb",
+    "alarmParam": "blocked",
+    "instanced": false
+  },
+  {
+    "id": "process:strainer-y",
+    "label": "Y-strainer",
+    "category": "Separation",
+    "hint": "Inline Y-strainer with a diagonal basket toward +Z; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 2
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 1,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "blocked": {
+        "type": "boolean",
+        "label": "Blocked",
+        "default": false
+      },
+      "dp": {
+        "type": "number",
+        "label": "Differential pressure",
+        "default": 0,
+        "reading": true
+      },
+      "unit": {
+        "type": "string",
+        "label": "Unit",
+        "default": "bar"
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/strainer-y.glb",
+    "alarmParam": "blocked",
+    "instanced": false
+  },
+  {
+    "id": "process:cyclone",
+    "label": "Cyclone",
+    "category": "Separation",
+    "hint": "Cyclone separator with a long cone on a four-leg frame",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "params": {
+      "dp": {
+        "type": "number",
+        "label": "Differential pressure",
+        "default": 0,
+        "reading": true
+      },
+      "unit": {
+        "type": "string",
+        "label": "Unit",
+        "default": "mbar"
+      }
+    },
+    "model": "models/cyclone.glb",
     "instanced": false
   },
   {

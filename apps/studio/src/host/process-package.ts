@@ -11,13 +11,23 @@
 import { processPackage, PROCESS_PACKAGE_MANIFEST } from '@holodeck/library-process/holodeck-package';
 import type { StudioPackage } from './document-checks';
 import beacon from '@holodeck/library-process/assets/models/beacon.glb?url';
+import blower from '@holodeck/library-process/assets/models/blower.glb?url';
+import boiler from '@holodeck/library-process/assets/models/boiler.glb?url';
 import cabinet from '@holodeck/library-process/assets/models/cabinet.glb?url';
+import compressor from '@holodeck/library-process/assets/models/compressor.glb?url';
+import coolingTower from '@holodeck/library-process/assets/models/cooling-tower.glb?url';
+import cyclone from '@holodeck/library-process/assets/models/cyclone.glb?url';
+import filter from '@holodeck/library-process/assets/models/filter.glb?url';
 import flowmeterMag from '@holodeck/library-process/assets/models/flowmeter-mag.glb?url';
 import gaugePressure from '@holodeck/library-process/assets/models/gauge-pressure.glb?url';
 import heatExchangerShellTube from '@holodeck/library-process/assets/models/heat-exchanger-shell-tube.glb?url';
 import junctionBox from '@holodeck/library-process/assets/models/junction-box.glb?url';
 import levelRadar from '@holodeck/library-process/assets/models/level-radar.glb?url';
 import motor from '@holodeck/library-process/assets/models/motor.glb?url';
+import pumpDosing from '@holodeck/library-process/assets/models/pump-dosing.glb?url';
+import pumpInline from '@holodeck/library-process/assets/models/pump-inline.glb?url';
+import pumpLobe from '@holodeck/library-process/assets/models/pump-lobe.glb?url';
+import strainerY from '@holodeck/library-process/assets/models/strainer-y.glb?url';
 import transmitter from '@holodeck/library-process/assets/models/transmitter.glb?url';
 import valveActuated from '@holodeck/library-process/assets/models/valve-actuated.glb?url';
 import valveBall from '@holodeck/library-process/assets/models/valve-ball.glb?url';
@@ -32,13 +42,23 @@ import vfd from '@holodeck/library-process/assets/models/vfd.glb?url';
 /** Asset-relative path (as in the package's parts.json) -> bundled URL. */
 export const PROCESS_ASSET_URLS: Readonly<Record<string, string>> = Object.freeze({
   'models/beacon.glb': beacon,
+  'models/blower.glb': blower,
+  'models/boiler.glb': boiler,
   'models/cabinet.glb': cabinet,
+  'models/compressor.glb': compressor,
+  'models/cooling-tower.glb': coolingTower,
+  'models/cyclone.glb': cyclone,
+  'models/filter.glb': filter,
   'models/flowmeter-mag.glb': flowmeterMag,
   'models/gauge-pressure.glb': gaugePressure,
   'models/heat-exchanger-shell-tube.glb': heatExchangerShellTube,
   'models/junction-box.glb': junctionBox,
   'models/level-radar.glb': levelRadar,
   'models/motor.glb': motor,
+  'models/pump-dosing.glb': pumpDosing,
+  'models/pump-inline.glb': pumpInline,
+  'models/pump-lobe.glb': pumpLobe,
+  'models/strainer-y.glb': strainerY,
   'models/transmitter.glb': transmitter,
   'models/valve-actuated.glb': valveActuated,
   'models/valve-ball.glb': valveBall,
