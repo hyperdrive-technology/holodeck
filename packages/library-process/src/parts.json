@@ -50,6 +50,59 @@
     "instanced": false
   },
   {
+    "id": "process:valve-butterfly",
+    "label": "Butterfly valve",
+    "category": "Valves",
+    "hint": "Wafer butterfly valve with a lever on a notched quadrant; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 0.5,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "open": {
+        "type": "number",
+        "label": "Open",
+        "default": 1,
+        "min": 0,
+        "max": 1,
+        "step": 0.01
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/valve-butterfly.glb",
+    "animNodes": {
+      "open": {
+        "node": "anim.handle",
+        "animator": "turn",
+        "settings": {
+          "axis": "y",
+          "fromDeg": 90,
+          "toDeg": 0,
+          "scale": 1
+        }
+      }
+    },
+    "instanced": false
+  },
+  {
     "id": "process:valve-control",
     "label": "Control valve",
     "category": "Valves",
@@ -106,6 +159,260 @@
       }
     },
     "alarmParam": "fault",
+    "instanced": false
+  },
+  {
+    "id": "process:valve-actuated",
+    "label": "Actuated ball valve",
+    "category": "Valves",
+    "hint": "Ball valve with a pneumatic rotary actuator and position indicator; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 1,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "open": {
+        "type": "number",
+        "label": "Open",
+        "default": 1,
+        "min": 0,
+        "max": 1,
+        "step": 0.01
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/valve-actuated.glb",
+    "animNodes": {
+      "open": {
+        "node": "anim.handle",
+        "animator": "turn",
+        "settings": {
+          "axis": "y",
+          "fromDeg": 90,
+          "toDeg": 0,
+          "scale": 1
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "instanced": false
+  },
+  {
+    "id": "process:valve-solenoid",
+    "label": "Solenoid valve",
+    "category": "Valves",
+    "hint": "Block-body solenoid valve with a coil and cable plug; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 0.5,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "energised": {
+        "type": "boolean",
+        "label": "Energised",
+        "default": false
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/valve-solenoid.glb",
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "energised",
+        "color": "#22c55e"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:valve-three-way",
+    "label": "Three-way valve",
+    "category": "Valves",
+    "hint": "Three-way control valve with an electric actuator and a side branch; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 1,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      },
+      "branch": {
+        "x": 0,
+        "y": 0,
+        "dir": "s"
+      }
+    },
+    "params": {
+      "position": {
+        "type": "number",
+        "label": "Position",
+        "default": 0,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/valve-three-way.glb",
+    "animNodes": {
+      "position": {
+        "node": "anim.stem",
+        "animator": "travel",
+        "settings": {
+          "axis": "y",
+          "distance": 0.06,
+          "scale": 100
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "instanced": false
+  },
+  {
+    "id": "process:valve-check",
+    "label": "Check valve",
+    "category": "Valves",
+    "hint": "Swing check valve with a bolted cover and a flow arrow; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 1,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/valve-check.glb",
+    "instanced": false
+  },
+  {
+    "id": "process:valve-relief",
+    "label": "Relief valve",
+    "category": "Valves",
+    "hint": "Angle pressure relief valve with a spring bonnet and lifting lever",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "floor": true,
+    "heightParam": "mountHeight",
+    "params": {
+      "lifted": {
+        "type": "boolean",
+        "label": "Lifted",
+        "default": false
+      },
+      "mountHeight": {
+        "type": "number",
+        "label": "Mount height",
+        "default": 0,
+        "min": 0,
+        "max": 10,
+        "step": 0.01,
+        "unit": "cells"
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/valve-relief.glb",
+    "animNodes": {
+      "lifted": {
+        "node": "anim.handle",
+        "animator": "turn",
+        "settings": {
+          "axis": "z",
+          "fromDeg": 0,
+          "toDeg": 20,
+          "scale": 1
+        }
+      }
+    },
+    "alarmParam": "lifted",
     "instanced": false
   },
   {
@@ -235,6 +542,15 @@
         "label": "Alarm",
         "default": false
       },
+      "mountHeight": {
+        "type": "number",
+        "label": "Mount height",
+        "default": 0,
+        "min": 0,
+        "max": 10,
+        "step": 0.01,
+        "unit": "cells"
+      },
       "color": {
         "type": "color",
         "label": "State colour",
@@ -243,6 +559,220 @@
     },
     "model": "models/transmitter.glb",
     "alarmParam": "alarm",
+    "instanced": false,
+    "heightParam": "mountHeight"
+  },
+  {
+    "id": "process:gauge-pressure",
+    "label": "Pressure gauge",
+    "category": "Instruments",
+    "hint": "Bottom-entry pressure gauge with a 270° dial",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "floor": true,
+    "heightParam": "mountHeight",
+    "params": {
+      "value": {
+        "type": "number",
+        "label": "Pressure",
+        "default": 0,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "alarm": {
+        "type": "boolean",
+        "label": "Alarm",
+        "default": false
+      },
+      "mountHeight": {
+        "type": "number",
+        "label": "Mount height",
+        "default": 0,
+        "min": 0,
+        "max": 10,
+        "step": 0.01,
+        "unit": "cells"
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/gauge-pressure.glb",
+    "animNodes": {
+      "value": {
+        "node": "anim.needle",
+        "animator": "turn",
+        "settings": {
+          "axis": "z",
+          "fromDeg": 0,
+          "toDeg": -270,
+          "scale": 100
+        }
+      }
+    },
+    "alarmParam": "alarm",
+    "instanced": false
+  },
+  {
+    "id": "process:flowmeter-mag",
+    "label": "Magnetic flowmeter",
+    "category": "Instruments",
+    "hint": "Inline electromagnetic flowmeter with a transmitter head; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 1,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "value": {
+        "type": "number",
+        "label": "Flow",
+        "default": 0,
+        "reading": true
+      },
+      "unit": {
+        "type": "string",
+        "label": "Unit",
+        "default": "m³/h"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/flowmeter-mag.glb",
+    "alarmParam": "fault",
+    "instanced": false
+  },
+  {
+    "id": "process:level-radar",
+    "label": "Radar level transmitter",
+    "category": "Instruments",
+    "hint": "Vessel-top radar level transmitter with a downward horn",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "floor": true,
+    "heightParam": "mountHeight",
+    "params": {
+      "value": {
+        "type": "number",
+        "label": "Level",
+        "default": 0,
+        "reading": true
+      },
+      "unit": {
+        "type": "string",
+        "label": "Unit",
+        "default": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "mountHeight": {
+        "type": "number",
+        "label": "Mount height",
+        "default": 0.2,
+        "min": 0,
+        "max": 10,
+        "step": 0.01,
+        "unit": "cells"
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/level-radar.glb",
+    "alarmParam": "fault",
+    "instanced": false
+  },
+  {
+    "id": "process:beacon",
+    "label": "Stack light",
+    "category": "Instruments",
+    "hint": "Three-tier stack light on a short pole (one colour: the highest lit tier)",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "floor": true,
+    "heightParam": "mountHeight",
+    "params": {
+      "red": {
+        "type": "boolean",
+        "label": "Red",
+        "default": false
+      },
+      "amber": {
+        "type": "boolean",
+        "label": "Amber",
+        "default": false
+      },
+      "green": {
+        "type": "boolean",
+        "label": "Green",
+        "default": false
+      },
+      "mountHeight": {
+        "type": "number",
+        "label": "Mount height",
+        "default": 0,
+        "min": 0,
+        "max": 10,
+        "step": 0.01,
+        "unit": "cells"
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/beacon.glb",
+    "stateColors": [
+      {
+        "param": "red",
+        "color": "#ef4444"
+      },
+      {
+        "param": "amber",
+        "color": "#f59e0b"
+      },
+      {
+        "param": "green",
+        "color": "#22c55e"
+      }
+    ],
     "instanced": false
   },
   {
@@ -268,6 +798,78 @@
     },
     "model": "models/cabinet.glb",
     "alarmParam": "fault",
+    "instanced": false
+  },
+  {
+    "id": "process:vfd",
+    "label": "Variable frequency drive",
+    "category": "Electrical",
+    "hint": "Wall-mounted drive with a heatsink and keypad",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "floor": true,
+    "heightParam": "mountHeight",
+    "params": {
+      "running": {
+        "type": "boolean",
+        "label": "Running",
+        "default": false
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "mountHeight": {
+        "type": "number",
+        "label": "Mount height",
+        "default": 0,
+        "min": 0,
+        "max": 10,
+        "step": 0.01,
+        "unit": "cells"
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/vfd.glb",
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "running",
+        "color": "#22c55e"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:junction-box",
+    "label": "Junction box",
+    "category": "Electrical",
+    "hint": "Field junction box with a screwed lid and three glands",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "floor": true,
+    "heightParam": "mountHeight",
+    "params": {
+      "mountHeight": {
+        "type": "number",
+        "label": "Mount height",
+        "default": 0,
+        "min": 0,
+        "max": 10,
+        "step": 0.01,
+        "unit": "cells"
+      }
+    },
+    "model": "models/junction-box.glb",
     "instanced": false
   }
 ]

@@ -126,7 +126,8 @@ describe.each(PROCESS_PART_DEFINITIONS.map((part) => [slugOf(part), part] as con
       // Inline bodies straddle the pipe axis (local Y = 0) and span the face-to-face length.
       expect(bounds.min.y).toBeLessThan(0);
       expect(bounds.max.y).toBeGreaterThan(0);
-      expect(bounds.max.x - bounds.min.x).toBeCloseTo(contract.length!, 3);
+      // The body spans at least the face-to-face length (a lever may reach past a flange: butterfly).
+      expect(bounds.max.x - bounds.min.x).toBeGreaterThanOrEqual(contract.length! - EPS);
     }
   });
 
@@ -265,6 +266,70 @@ describe('the pilot animations match their scripts', () => {
     expect(stem.position.y - y0).toBeCloseTo(0.02, 9);
     applyAnimations(plan, nodes, { position: 0 }, 0.016, 0);
     expect(stem.position.y).toBeCloseTo(y0, 9);
+  });
+
+  it('valve-butterfly and valve-actuated: modelled open; open 0 turns the handle a quarter turn about Y', async () => {
+    for (const slug of ['valve-butterfly', 'valve-actuated']) {
+      const { nodes, plan } = await load(slug);
+      const handle = nodes['anim.handle']!;
+      applyAnimations(plan, nodes, { open: 1 }, 0.016, 0);
+      expect(handle.rotation.y, slug).toBeCloseTo(0, 9);
+      applyAnimations(plan, nodes, { open: 0 }, 0.016, 0);
+      expect(handle.rotation.y, slug).toBeCloseTo(Math.PI / 2, 9);
+      applyAnimations(plan, nodes, { open: 0.5 }, 0.016, 0);
+      expect(handle.rotation.y, slug).toBeCloseTo(Math.PI / 4, 9);
+      // An on/off signal bound to the 0..1 param animates too.
+      applyAnimations(plan, nodes, { open: false }, 0.016, 0);
+      expect(handle.rotation.y, slug).toBeCloseTo(Math.PI / 2, 9);
+    }
+  });
+
+  it('valve-three-way: the stem rises 0.06 along +Y at 100 %', async () => {
+    const { nodes, plan } = await load('valve-three-way');
+    const stem = nodes['anim.stem']!;
+    const y0 = stem.position.y;
+    applyAnimations(plan, nodes, { position: 100 }, 0.016, 0);
+    expect(stem.position.y - y0).toBeCloseTo(0.06, 9);
+    applyAnimations(plan, nodes, { position: 50 }, 0.016, 0);
+    expect(stem.position.y - y0).toBeCloseTo(0.03, 9);
+  });
+
+  it('valve-relief: lifted tilts the lever 20 degrees about +Z, seated is as authored', async () => {
+    const { nodes, plan } = await load('valve-relief');
+    const lever = nodes['anim.handle']!;
+    applyAnimations(plan, nodes, { lifted: true }, 0.016, 0);
+    expect(lever.rotation.z).toBeCloseTo((20 * Math.PI) / 180, 9);
+    expect(lever.rotation.x).toBe(0);
+    applyAnimations(plan, nodes, { lifted: false }, 0.016, 0);
+    expect(lever.rotation.z).toBeCloseTo(0, 9);
+  });
+
+  it('gauge-pressure: the needle sweeps 270 degrees clockwise (seen from +Z) over 0..100 %', async () => {
+    const { nodes, plan } = await load('gauge-pressure');
+    const needle = nodes['anim.needle']!;
+    applyAnimations(plan, nodes, { value: 0 }, 0.016, 0);
+    expect(needle.rotation.z).toBeCloseTo(0, 9);
+    applyAnimations(plan, nodes, { value: 100 }, 0.016, 0);
+    expect(needle.rotation.z).toBeCloseTo((-3 * Math.PI) / 2, 9);
+    applyAnimations(plan, nodes, { value: 50 }, 0.016, 0);
+    expect(needle.rotation.z).toBeCloseTo((-3 * Math.PI) / 4, 9);
+    applyAnimations(plan, nodes, { value: 150 }, 0.016, 0); // clamped at full scale
+    expect(needle.rotation.z).toBeCloseTo((-3 * Math.PI) / 2, 9);
+  });
+
+  it('beacon: the three lens tiers are separate meshes sharing the one hd.accent material', async () => {
+    const bytes = readFileSync(join(models, 'beacon.glb'));
+    const gltf = await new GLTFLoader().parseAsync(new Uint8Array(bytes).buffer, '');
+    const tiers = ['tier.0', 'tier.1', 'tier.2'].map((name) => {
+      let found: Mesh | undefined;
+      gltf.scene.traverse((node) => { if (authoredName(node) === name && node instanceof Mesh) found = node; });
+      return found;
+    });
+    expect(tiers.every(Boolean)).toBe(true);
+    const materials = new Set(tiers.map((t) => (t!.material as { name: string }).name));
+    expect([...materials]).toEqual(['hd.accent']);
+    // Bottom to top: the stateColors order (red, amber, green) is a priority, not a tier map.
+    expect(tiers.map((t) => t!.getWorldPosition(new Vector3()).y)).toEqual([...tiers.map((t) => t!.getWorldPosition(new Vector3()).y)].sort((a, b) => a - b));
   });
 
   it('motor: the shaft spins about X from speed, only while running', async () => {

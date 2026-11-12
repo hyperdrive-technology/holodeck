@@ -28,14 +28,15 @@ describe('library', () => {
     const group = groupLibrary(libraryItems(host)).find((g) => g.packageId === 'holodeck.process');
     expect(group?.packageName).toBe('Process parts');
     expect(group?.categories.map((c) => [c.category, c.items.map((i) => i.id)])).toEqual([
-      ['Valves', ['process:valve-ball', 'process:valve-control']],
+      ['Valves', ['valve-ball', 'valve-butterfly', 'valve-control', 'valve-actuated', 'valve-solenoid', 'valve-three-way', 'valve-check', 'valve-relief'].map((s) => `process:${s}`)],
       ['Rotating equipment', ['process:motor']],
       ['Heat transfer', ['process:heat-exchanger-shell-tube']],
-      ['Instruments', ['process:transmitter']],
-      ['Electrical', ['process:cabinet']],
+      ['Instruments', ['transmitter', 'gauge-pressure', 'flowmeter-mag', 'level-radar', 'beacon'].map((s) => `process:${s}`)],
+      ['Electrical', ['process:cabinet', 'process:vfd', 'process:junction-box']],
     ]);
     expect(groupLibrary(libraryItems(host), 'control valve').flatMap((g) => g.categories.flatMap((c) => c.items.map((i) => i.id)))).toEqual([
       'process:valve-control',
+      'process:valve-three-way', // "Three-way control valve" in its hint
     ]);
   });
 

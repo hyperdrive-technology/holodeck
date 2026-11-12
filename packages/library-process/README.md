@@ -13,18 +13,40 @@ Target catalogue, authoring rules and waves: [docs/assets/process-catalog.md](..
 | Part ID | Category | Params (bindable) | Moves |
 | --- | --- | --- | --- |
 | `process:valve-ball` | Valves | `open` (bool), `color` | lever `anim.handle` turns a quarter turn about Y (`turn`) |
+| `process:valve-butterfly` | Valves | `open` 0..1, `color` | lever `anim.handle`, quarter turn about Y (`turn`) |
 | `process:valve-control` | Valves | `position` 0-100 %, `fault`, `color` | stem `anim.stem` rises 0.08 at 100 % (`travel`) |
+| `process:valve-actuated` | Valves | `open` 0..1, `fault`, `color` | indicator `anim.handle`, quarter turn about Y (`turn`) |
+| `process:valve-solenoid` | Valves | `energised` (green coil), `fault`, `color` | none |
+| `process:valve-three-way` | Valves | `position` 0-100 %, `fault`, `color` | stem `anim.stem` rises 0.06 at 100 % (`travel`); `branch` port on +Z |
+| `process:valve-check` | Valves | `color` | none |
+| `process:valve-relief` | Valves | `lifted` (alarm tint), `mountHeight`, `color` | lever `anim.handle` tilts 20° about Z (`turn`) |
 | `process:motor` | Rotating equipment | `running`, `speed` 0-100 %, `fault`, `color` | shaft `anim.shaft` spins about X while `running` (`spin`) |
 | `process:heat-exchanger-shell-tube` | Heat transfer | `tubeInTemp`, `tubeOutTemp`, `shellInTemp`, `shellOutTemp` (°C) | none (readings for labels) |
-| `process:transmitter` | Instruments | `value` (reading), `unit`, `alarm`, `color` | none |
+| `process:transmitter` | Instruments | `value` (reading), `unit`, `alarm`, `mountHeight`, `color` | none |
+| `process:gauge-pressure` | Instruments | `value` 0-100 %, `alarm`, `mountHeight`, `color` | needle `anim.needle` sweeps 270° clockwise (`turn` about Z) |
+| `process:flowmeter-mag` | Instruments | `value` (reading), `unit`, `fault`, `color` | none |
+| `process:level-radar` | Instruments | `value` (reading), `unit`, `fault`, `mountHeight` (default 0.2), `color` | none |
+| `process:beacon` | Instruments | `red`, `amber`, `green`, `mountHeight`, `color` | none (one colour: the highest lit tier) |
 | `process:cabinet` | Electrical | `fault`, `color` | none |
+| `process:vfd` | Electrical | `running` (green bezel), `fault`, `mountHeight`, `color` | none |
+| `process:junction-box` | Electrical | `mountHeight` | none (no state colour) |
 
 State colour: every part with an `hd.accent` piece (lever, actuator cap, motor
-band, display bezel, beacon lens) declares `alarmParam` (`fault`, or `alarm`
-on the transmitter), which tints it with the theme's alarm colour while true,
-and a `color` param that takes a bound colour (for example a `threshold`
-transform from a status word). Precedence is alarm, then `color`, then the
-placement colour, then the model's own accent.
+band, display bezel, stack-light lenses) has a `color` param that takes a
+bound colour (for example a `threshold` transform from a status word); most
+also declare `alarmParam` (`fault`, `alarm`, or `lifted` on the relief valve),
+which tints it with the theme's alarm colour while true, and some declare
+`stateColors` (solenoid `energised`, drive `running`, stack-light tiers).
+Precedence is alarm, then state colours, then `color`, then the placement
+colour, then the model's own accent.
+
+The stack light's three tiers share one `hd.accent` material, so it shows one
+colour, the highest lit of red / amber / green; independent tier colours need
+per-mesh accent materials at runtime (a follow-up in the style layer).
+
+Mounted parts declare `heightParam: 'mountHeight'`: a per-placement lift whose
+default stands the part on the floor (0.2 for the radar, whose horn hangs below
+its flange). `0.52` puts it on top of a floor-level pipe.
 
 ## Install into a host
 
@@ -59,7 +81,9 @@ await host.installPackage(manifest, processPackage, {
   a drawn pipe snaps to them.
 - `animNodes[param].settings`: per-part settings for the built-in animators
   `turn`, `travel` and `spin` (with `enableParam` gating a spin on a boolean).
-- `alarmParam`: the boolean param that tints `hd.accent`.
+- `alarmParam`: the boolean param that tints `hd.accent` with the alarm colour;
+  `stateColors`: booleans that tint it with their own colour.
+- `heightParam`: the number param that lifts a mounted part per placement.
 
 Grid ports are only declared where a pipe leaving a grid node meets the GLB
 nozzle; the heat exchanger's nozzles are off the grid, so it has none yet (see

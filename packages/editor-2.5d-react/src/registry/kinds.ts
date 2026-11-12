@@ -77,6 +77,19 @@ export function isIsoPartDefinition(item: unknown): item is IsoPartDefinition {
     const spec = (item.params as Record<string, IsoPartParamSpec>)[item.alarmParam];
     if (!spec || spec.type !== 'boolean') return false;
   }
+  if (item.stateColors !== undefined) {
+    if (!Array.isArray(item.stateColors)) return false;
+    for (const entry of item.stateColors) {
+      if (!isObj(entry) || !isStr(entry.param) || !isHexColor(entry.color)) return false;
+      const spec = Object.prototype.hasOwnProperty.call(item.params, entry.param) ? (item.params as Record<string, IsoPartParamSpec>)[entry.param] : undefined;
+      if (!spec || spec.type !== 'boolean') return false;
+    }
+  }
+  if (item.heightParam !== undefined) {
+    if (!isStr(item.heightParam)) return false;
+    const spec = Object.prototype.hasOwnProperty.call(item.params, item.heightParam) ? (item.params as Record<string, IsoPartParamSpec>)[item.heightParam] : undefined;
+    if (!spec || spec.type !== 'number') return false;
+  }
   if (item.ports !== undefined) {
     if (!isObj(item.ports)) return false;
     for (const port of Object.values(item.ports)) {

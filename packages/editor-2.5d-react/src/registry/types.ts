@@ -263,6 +263,29 @@ export interface IsoPartDefinition extends Contribution {
    * `color` param and the placement colour; absent = no alarm tint.
    */
   alarmParam?: string;
+  /**
+   * Boolean params that tint `hd.accent` while true, after `alarmParam` and
+   * before a `color` param; the first true entry wins. A solenoid coil shows
+   * `energised`, a drive bezel `running`, a stack light its highest lit
+   * tier. `color` is a hex string (per part, not themed).
+   */
+  stateColors?: IsoPartStateColor[];
+  /**
+   * Name of a number param that lifts the model by that many world units
+   * above its `origin` (per placement, bindable): mounted instruments sit
+   * on the floor, a pipe top (`pipeWorldY() + radius`) or a vessel nozzle.
+   * The param's default is the floor-standing lift (a radar horn that hangs
+   * 0.2 below its flange declares 0.2).
+   */
+  heightParam?: string;
+}
+
+/** One `IsoPartDefinition.stateColors` entry. */
+export interface IsoPartStateColor {
+  /** A declared boolean param. */
+  param: string;
+  /** `#rgb` / `#rrggbb` / `#rrggbbaa`. */
+  color: string;
 }
 
 export interface IsoTheme extends Contribution {

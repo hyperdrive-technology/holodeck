@@ -14,7 +14,11 @@ import { expect, test, type Page } from '@playwright/test';
 // 250 ms and SwiftShader frames are slower than that on CI.
 const T0 = new Date('2026-01-01T00:00:02Z').getTime();
 const FIRST_RENDER_MS = 300_000;
-const PROCESS_MODELS = ['valve-ball', 'valve-control', 'motor', 'heat-exchanger-shell-tube', 'transmitter', 'cabinet'];
+// Every @holodeck/library-process model: the sample uses all of them (process-line.test.ts pins that).
+const PROCESS_MODELS = [
+  'valve-ball', 'valve-butterfly', 'valve-control', 'valve-actuated', 'valve-solenoid', 'valve-three-way', 'valve-check', 'valve-relief',
+  'motor', 'heat-exchanger-shell-tube', 'transmitter', 'gauge-pressure', 'flowmeter-mag', 'level-radar', 'beacon', 'cabinet', 'vfd', 'junction-box',
+];
 test.setTimeout(600_000);
 test.use({ viewport: { width: 1080, height: 560 } });
 const pageErrors: Error[] = [];
@@ -42,8 +46,10 @@ async function rendered(page: Page) {
 test('the Reset dialog loads the process-parts sample and every process GLB renders', async ({ page }, testInfo) => {
   const glbs = new Map<string, number>();
   page.on('response', (response) => {
-    const match = /\/(valve-ball|valve-control|motor|heat-exchanger-shell-tube|transmitter|cabinet)-[\w-]+\.glb$/.exec(new URL(response.url()).pathname);
-    if (match) glbs.set(match[1]!, response.status());
+    // Vite emits `<slug>-<hash>.glb` and a hash may itself contain '-', so match the known slugs, longest first.
+    const file = new URL(response.url()).pathname.split('/').pop() ?? '';
+    const slug = PROCESS_MODELS.filter((s) => file.startsWith(`${s}-`) && file.endsWith('.glb')).sort((a, b) => b.length - a.length)[0];
+    if (slug) glbs.set(slug, response.status());
   });
   await page.goto('/playground');
   const editor = page.getByTestId('process-editor');
@@ -57,7 +63,7 @@ test('the Reset dialog loads the process-parts sample and every process GLB rend
   await page.getByRole('button', { name: /Reset/ }).click();
   await page.getByTestId('reset-dialog').getByRole('button', { name: 'Load the process-parts sample' }).click();
   await expect(page.getByTestId('canvas')).toHaveAttribute('data-save-status', 'saved');
-  await expect(editor).toHaveAttribute('data-object-count', '18');
+  await expect(editor).toHaveAttribute('data-object-count', '34');
   await rendered(page);
 
   // Vite emits each GLB with a content hash: `<slug>-<hash>.glb`.

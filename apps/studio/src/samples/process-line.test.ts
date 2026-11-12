@@ -72,13 +72,17 @@ describe('Process line sample', () => {
     expect([pipe.x, pipe.y]).toEqual([elbow.x, elbow.y]);
   });
 
-  it('keeps the floor parts off the pipes and each other', () => {
-    const boxes = objects()
-      .filter((o) => o.object.startsWith('process:') && !o.onPipe)
-      .map((o) => {
-        const [fx, fz] = PROCESS_MODELS[slug(o)]!.footprint;
-        return { id: o.id, minX: o.x - fx / 2, maxX: o.x + fx / 2, minY: o.y - fz / 2, maxY: o.y + fz / 2 };
-      });
+  it('keeps the floor-standing parts off the pipes and each other', () => {
+    const pipes = objects().filter((o) => o.object === 'pipe');
+    // Inline parts sit on pipes by design; a part lifted by mountHeight stands on top of one.
+    const floorLift = (o: IsoPlacement) => PROCESS_PART_DEFINITIONS.find((p) => p.id === o.object)?.params.mountHeight?.default ?? 0;
+    const lifted = (o: IsoPlacement) => typeof o.params?.mountHeight === 'number' && o.params.mountHeight > (floorLift(o) as number);
+    const standing = objects().filter((o) => o.object.startsWith('process:') && PROCESS_MODELS[slug(o)]!.kind !== 'inline' && !lifted(o));
+    const boxes = standing.map((o) => {
+      const [fx, fz] = PROCESS_MODELS[slug(o)]!.footprint;
+      return { id: o.id, minX: o.x - fx / 2, maxX: o.x + fx / 2, minY: o.y - fz / 2, maxY: o.y + fz / 2 };
+    });
+    expect(boxes.length).toBeGreaterThan(8);
     for (let i = 0; i < boxes.length; i++) {
       for (let j = i + 1; j < boxes.length; j++) {
         const a = boxes[i]!;
@@ -87,8 +91,41 @@ describe('Process line sample', () => {
         expect(overlap, `${a.id} / ${b.id}`).toBe(false);
       }
     }
-    const feed = byId('feed-pipe');
-    for (const box of boxes) expect(box.minY > feed.y || box.maxY < feed.y || box.maxX < feed.x || box.minX > feed.toX!, box.id).toBe(true);
+    for (const box of boxes) {
+      for (const pipe of pipes) {
+        const [x0, x1] = [Math.min(pipe.x, pipe.toX!), Math.max(pipe.x, pipe.toX!)];
+        const [y0, y1] = [Math.min(pipe.y, pipe.toY!), Math.max(pipe.y, pipe.toY!)];
+        // Strict: a pipe that ends on a part's face (the exchanger's tube-in flange) touches, it does not cross.
+        const crosses = box.minX < x1 && box.maxX > x0 && box.minY < y1 && box.maxY > y0;
+        expect(crosses, `${box.id} / ${pipe.id}`).toBe(false);
+      }
+    }
+  });
+
+  it('meets the three-way valve with three pipe ends, one per port heading', () => {
+    const valve = byId('tv-102');
+    const ends = objects()
+      .filter((o) => o.object === 'pipe')
+      .flatMap((p) => [
+        [p.x, p.y, p.toX!, p.toY!],
+        [p.toX!, p.toY!, p.x, p.y],
+      ])
+      .filter(([x, y]) => x === valve.x && y === valve.y)
+      .map(([x, y, ox, oy]) => (ox! > x! ? 'e' : ox! < x! ? 'w' : oy! > y! ? 's' : 'n'))
+      .sort();
+    expect(ends).toEqual(['e', 's', 'w']);
+    const ports = PROCESS_PART_DEFINITIONS.find((p) => p.id === 'process:valve-three-way')!.ports!;
+    expect(Object.values(ports).map((p) => p.dir).sort()).toEqual(ends);
+  });
+
+  it('stands the pressure gauge on top of the feed pipe with its mount height', () => {
+    const gauge = byId('pi-101');
+    const pipe = byId('feed-pipe');
+    expect(gauge.y).toBe(pipe.y);
+    expect(gauge.x).toBeGreaterThan(pipe.x);
+    expect(gauge.x).toBeLessThan(pipe.toX!);
+    // pipeWorldY() (0.32) + the pipe radius (0.2): the process connection rests on the pipe crown.
+    expect(gauge.params?.mountHeight).toBeCloseTo(0.52, 9);
   });
 
   it('creates fresh copies', () => {

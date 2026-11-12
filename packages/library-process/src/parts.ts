@@ -40,6 +40,10 @@ export interface ProcessPartDefinition {
   animNodes?: Record<string, { node: string; animator: string; settings?: Record<string, unknown> }>;
   /** Boolean param that tints `hd.accent` with the theme's alarm colour. */
   alarmParam?: string;
+  /** Boolean params that tint `hd.accent` while true (first wins, after the alarm). */
+  stateColors?: Array<{ param: string; color: string }>;
+  /** Number param lifting the model per placement (mounted parts: floor, pipe top, nozzle). */
+  heightParam?: string;
   /** Never a routing obstacle (small mounted instruments). */
   floor?: boolean;
   instanced: false;

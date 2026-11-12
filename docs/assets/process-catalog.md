@@ -27,11 +27,11 @@ classes.
 | `heat-exchanger.glb` (plate) | Blender | `blender/parts/heat-exchanger.py` | no (brewery extension only) | no ports, no anim nodes |
 | `valve.glb` (globe + doughnut wheel) | Blender | `blender/parts/valve.py` | no | older shape than the code valve; wheel dwarfs the body |
 | `fermenter`, `brite-tank`, `kettle`, `mash-tun` `.glb` | Blender | `blender/parts/*.py` | no | unused: Tank presets replaced them |
-| Pilot: ball valve, control valve, motor, shell-and-tube heat exchanger, transmitter, control cabinet | Blender | `blender/parts/process/*.py` → `@holodeck/library-process` | yes ("Process parts" in the palette) | animated lever, stem and shaft; `fault` / `alarm` tint `hd.accent`; sample `apps/studio/samples/process-line.holodeck.json` |
+| Pilot six plus wave-1 batches A (valves) and D (instruments, electrical): 18 parts, see the status columns below | Blender | `blender/parts/process/*.py` → `@holodeck/library-process` | yes ("Process parts" in the palette) | animated levers, stems, shaft and gauge needle; `fault` / `alarm` / state colours tint `hd.accent`; sample `apps/studio/samples/process-line.holodeck.json` |
 | 26 cloud archetypes, 54 AWS services | Blender + SVG | `library-cloud`, `assets-aws` | yes | not process assets; the packaging model to copy |
 
-So a standalone Studio user can place fifteen process parts, two of which are
-annotations: the nine above plus the six pilot parts of `@holodeck/library-process`.
+So a standalone Studio user can place twenty-seven process parts, two of which
+are annotations: the nine above plus eighteen from `@holodeck/library-process`.
 There is still no pump in the palette (only the brewery's off-scale `pump.glb`),
 no solids handling and no vessel beyond Tank and Mixer.
 
@@ -57,21 +57,28 @@ How the definitions use the editor contract (`IsoPartDefinition`):
   the body centre (`w` / `e`), so a drawn pipe snaps to the valve like the
   code valve.
 - Animation: `animNodes` name a built-in animator plus per-part `settings`:
-  `turn` (quarter-turn lever: `fromDeg: 90, toDeg: 0` on `open`), `travel`
-  (stem: `distance: 0.08, scale: 100` on `position`), `spin` (motor shaft:
-  `axis: 'x'`, gated by `enableParam: 'running'`, on `speed`). Later parts
-  reuse them: `turn` for `needle` (gauge sweep) and `disc`, `travel` for
-  spools; `blades` (louvres moving together) still needs one.
-- State colour: `alarmParam` (`fault`, or `alarm` on the transmitter) tints
-  `hd.accent` with the theme's alarm colour; a `color` param takes a bound
-  colour (a threshold transform) like the cloud parts.
+  `turn` (quarter-turn levers: `fromDeg: 90, toDeg: 0` on `open`; relief
+  lever `axis: 'z'`, 0 to 20 on `lifted`; gauge needle `axis: 'z'`, 0 to
+  -270 over 0..100 % on `value`), `travel` (stems: `distance: 0.08` / `0.06`,
+  `scale: 100` on `position`), `spin` (motor shaft: `axis: 'x'`, gated by
+  `enableParam: 'running'`, on `speed`). `blades` (louvres moving together)
+  still needs an animator.
+- State colour: `alarmParam` (`fault`, `alarm`, or `lifted` on the relief
+  valve) tints `hd.accent` with the theme's alarm colour; `stateColors` tint
+  it while a boolean is on (solenoid `energised`, drive `running`); a `color`
+  param takes a bound colour (a threshold transform) like the cloud parts.
+- The stack light's three tiers share one `hd.accent` material, so it shows
+  one colour: the highest lit of `red` / `amber` / `green`. Independent tier
+  colours need per-mesh accent materials at runtime (follow-up).
 - Grid ports are declared only where a pipe leaving a grid node meets the
   GLB nozzle (a test checks it). The heat exchanger's nozzles are off the
   grid (`tube-in` at x = -1.10 on a 3 x 1 footprint) or elevated, so it has
   no grid ports yet: move `tube-in` to x = -1.0 (and consider a 3 x 2
   footprint so a face lands on a node) to make it routable.
-- Mounted parts (`transmitter`) stand on the floor for now; mounting on a
-  pipe or vessel nozzle needs a placement elevation.
+- Mounted parts (transmitter, gauge, radar, relief valve, stack light, drive,
+  junction box) have a `mountHeight` param (`heightParam`): the default stands
+  them on the floor (0.2 for the radar, whose horn hangs below its flange);
+  0.52 puts one on top of a floor pipe. They declare no grid ports.
 
 Nothing in the package knows about PLCs or Hyperdrive. Hyperdrive binds tags to
 the part params through the normal binding model.
@@ -122,13 +129,13 @@ routing or parametric code, not a GLB.
 | --- | --- | --- | --- |
 | `valve-gate` handwheel | digital-valve (manual) | open | partial (code valve, no state visual) |
 | `valve-ball` lever | digital-valve | open | have (`library-process`) |
-| `valve-butterfly` lever | digital-valve | open | wave 1 |
+| `valve-butterfly` lever | digital-valve | open | have (`library-process`) |
 | `valve-control` globe + pneumatic diaphragm | analog-valve | position 0-100 %, fault | have (`library-process`) |
-| `valve-actuated` ball + rotary actuator | digital-valve | open, fault | wave 1 |
-| `valve-solenoid` | digital-valve | energised | wave 1 |
-| `valve-three-way` actuated | analog / digital-threeway-valve | position, fault | wave 1 |
-| `valve-check` swing | non-return-valve, hydraulic-check-valve | (none) | wave 1 |
-| `valve-relief` angle, spring bonnet | (none) | lifted | wave 1 |
+| `valve-actuated` ball + rotary actuator | digital-valve | open, fault | have (`library-process`) |
+| `valve-solenoid` | digital-valve | energised | have (`library-process`) |
+| `valve-three-way` actuated | analog / digital-threeway-valve | position, fault | have (`library-process`); `branch` port on +Z |
+| `valve-check` swing | non-return-valve, hydraulic-check-valve | (none) | have (`library-process`) |
+| `valve-relief` angle, spring bonnet | (none) | lifted | have (`library-process`); mounted, no grid ports (outlet at Y 0.30) |
 | `valve-pressure-reducing` | pressure-reduction-valve | setpoint | wave 2 |
 | `valve-pressure-sustaining` | pressure-sustain-valve | setpoint | wave 2 |
 | `valve-diaphragm` hygienic | (none) | open | wave 2 |
@@ -200,11 +207,11 @@ Vessel work waits for #228, which changes the tank primitives and line rules.
 | Part | OpenBridge class | Params | Status |
 | --- | --- | --- | --- |
 | Label with reading | automation-readout, automation-badge | value, alarm | have |
-| `transmitter` head on a stem | transmitter, transmitter-stack | value, alarm | have (`library-process`); floor-standing until mounting lands |
-| `gauge-pressure` dial | gauge-* | value | wave 1 |
-| `flowmeter-mag` inline | transmitter | value | wave 1 |
-| `level-radar` top mount | transmitter | value | wave 1 |
-| `beacon` stack light | automation-badge (alarm) | state | wave 1 |
+| `transmitter` head on a stem | transmitter, transmitter-stack | value, alarm | have (`library-process`) |
+| `gauge-pressure` dial | gauge-* | value | have (`library-process`) |
+| `flowmeter-mag` inline | transmitter | value | have (`library-process`) |
+| `level-radar` top mount | transmitter | value | have (`library-process`) |
+| `beacon` stack light | automation-badge (alarm) | state | have (`library-process`); one colour for all tiers (highest lit) |
 | `flowmeter-coriolis` inline | transmitter | value | wave 2 |
 | `level-switch`, `sight-glass` | transmitter | state | wave 2 |
 | `analyser` probe (pH, conductivity) | transmitter | value | wave 2 |
@@ -229,8 +236,8 @@ not to Blender.
 | Part | OpenBridge class | Params | Status |
 | --- | --- | --- | --- |
 | `cabinet` control panel / MCC | (none) | fault | have (`library-process`) |
-| `vfd` drive | converter | running, fault | wave 1 |
-| `junction-box` | (none) | (none) | wave 1 |
+| `vfd` drive | converter | running, fault | have (`library-process`) |
+| `junction-box` | (none) | (none) | have (`library-process`) |
 | `transformer` | transformer | energised | wave 2 |
 | `generator` | gauge-generator, indicator-generator | running, load | wave 2 |
 | `battery` rack | electricity-battery, indicator-battery | charge | wave 2 |
@@ -250,7 +257,7 @@ not to Blender.
 
 | | Parts |
 | --- | --- |
-| Placeable today (process) | 15 |
+| Placeable today (process) | 27 |
 | Wave 1 (28 GLBs, 6 of them the pilot) | 28 |
 | Wave 2 | about 30 |
 | Wave 3 | about 15 |

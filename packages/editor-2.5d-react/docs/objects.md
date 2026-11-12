@@ -72,8 +72,12 @@ A part definition needs no React `component`. Without one it renders through `Da
   and `toDeg`, e.g. a quarter-turn lever or a gauge needle). Animators receive every resolved param
   as `ctx.params`.
 - `alarmParam`: a declared boolean param that turns `hd.accent` into the theme's `colors.alarm`
-  while true (a faulted motor band, a cabinet beacon). It beats `params.color`, which beats the
-  placement colour, which beats `colors.accent` (`partAccent`, src/registry/part-pose.ts).
+  while true (a faulted motor band, a cabinet beacon). Then `stateColors`
+  (`[{ param, color }]`, declared booleans; the first true one wins: an energised solenoid coil, a
+  running drive). Both beat `params.color`, which beats the placement colour, which beats
+  `colors.accent` (`partAccent` / `stateAccent`, src/registry/part-pose.ts).
+- `heightParam`: a declared number param that lifts the model by that many world units above its
+  `origin`, per placement (mounted instruments on the floor, a pipe top or a nozzle).
 
 ## Connectors
 

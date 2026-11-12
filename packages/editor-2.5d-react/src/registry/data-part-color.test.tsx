@@ -92,4 +92,20 @@ describe('data-only model colour bindings', () => {
     renderToStaticMarkup(<GlbPart placement={placement} params={{}} style={HOLODECK_STYLE} def={floor} selected={false} />);
     expect((model.mock.calls as unknown as Array<[{ position: number[] }]>)[0]?.[0].position).toEqual([2.5, 0, 3.5]);
   });
+
+  it('lifts a part by its heightParam and tints state colours (DataPart and GlbPart)', () => {
+    const def: IsoPartDefinition = {
+      id: 'pack:radar', label: 'R', footprint: { w: 1, h: 1 }, model: '/r.glb', heightParam: 'mountHeight',
+      params: { mountHeight: { type: 'number', label: 'Mount height', default: 0.2 }, on: { type: 'boolean', label: 'On', default: false } },
+      stateColors: [{ param: 'on', color: '#22c55e' }],
+    };
+    const placement = { id: 'r1', object: def.id, x: 0, y: 0 };
+    expect(renderToStaticMarkup(<DataPart placement={placement} params={resolveParams(def, placement)} style={HOLODECK_STYLE} def={def} selected={false} />)).toMatch(/position="0.5,0.2,0.5"/);
+    model.mockClear();
+    renderToStaticMarkup(<DataPart placement={placement} params={{ mountHeight: 0.52, on: true }} style={HOLODECK_STYLE} def={def} selected={false} />);
+    expect((model.mock.calls as unknown as Array<[{ accent: string }]>)[0]?.[0].accent).toBe('#22c55e');
+    model.mockClear();
+    renderToStaticMarkup(<GlbPart placement={placement} params={{ mountHeight: 0.52, on: true }} style={HOLODECK_STYLE} def={def} selected={false} />);
+    expect((model.mock.calls as unknown as Array<[{ accent: string; position: number[] }]>)[0]?.[0]).toMatchObject({ accent: '#22c55e', position: [0.5, 0.52, 0.5] });
+  });
 });

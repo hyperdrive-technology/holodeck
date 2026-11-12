@@ -34,7 +34,7 @@ export function DataPart({ placement, params, style, def, tuning }: IsoPartProps
   const [wx, , wz] = gridToWorld(placement.x, placement.y);
   const yaw = placement.rotation ?? 0;
   // Inline GLBs (`origin: 'pipe-axis'`) sit on the pipe axis for the current pipe radius.
-  const y = partOriginY(def, mergeFittingParams(tuning?.fittings).pipeRadius);
+  const y = partOriginY(def, mergeFittingParams(tuning?.fittings).pipeRadius, params);
   return (
     <group position={[wx, y, wz]} rotation={[0, yaw, 0]}>
       {def.model ? (

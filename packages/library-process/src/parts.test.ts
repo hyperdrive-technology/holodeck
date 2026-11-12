@@ -33,10 +33,12 @@ describe('process part definitions', () => {
     expect(new Set(PROCESS_PART_DEFINITIONS.map((p) => p.hint)).size).toBe(PROCESS_PART_DEFINITIONS.length);
   });
 
-  it('cover one part per pilot family, in catalog order', () => {
-    expect(PROCESS_PART_DEFINITIONS.map((p) => p.category)).toEqual([
-      'Valves', 'Valves', 'Rotating equipment', 'Heat transfer', 'Instruments', 'Electrical',
-    ]);
+  it('are grouped by catalog family, families in catalog order, in the same order as the model contracts', () => {
+    const seen = PROCESS_PART_DEFINITIONS.map((p) => p.category).filter((c, i, all) => all.indexOf(c) === i);
+    // Each family is one contiguous run (the palette groups by first-seen category).
+    const runs = PROCESS_PART_DEFINITIONS.map((p) => p.category).filter((c, i, all) => i === 0 || all[i - 1] !== c);
+    expect(runs).toEqual(seen);
+    expect(seen).toEqual(CATEGORIES.filter((c) => seen.includes(c)));
     expect(PROCESS_PART_DEFINITIONS.map(slugOf)).toEqual([...PROCESS_MODEL_SLUGS]);
   });
 
@@ -112,6 +114,26 @@ describe.each(parts)('%s', (_id, part) => {
     }
   });
 
+  it('mounted parts carry a per-placement mount height whose default stands them on the floor', () => {
+    if (model.kind !== 'mounted') {
+      expect(part.heightParam).toBeUndefined();
+      return;
+    }
+    expect(part.heightParam).toBe('mountHeight');
+    const spec = part.params.mountHeight!;
+    expect(spec).toMatchObject({ type: 'number', min: 0, unit: 'cells' });
+    // A horn that hangs below its flange (yMin < 0) is lifted so it rests on the floor.
+    expect(spec.default).toBeCloseTo(-model.yMin, 9);
+  });
+
+  it('state colours name declared booleans, and a part with one has an hd.accent piece', () => {
+    for (const state of part.stateColors ?? []) {
+      expect(part.params[state.param]).toMatchObject({ type: 'boolean', default: false });
+      expect(state.color).toMatch(/^#[\da-f]{6}$/i);
+      expect(model.accent).toBe(true);
+    }
+  });
+
   it('shows state on hd.accent: a colour param when the model has one, and the alarm param is a declared boolean', () => {
     expect('color' in part.params).toBe(model.accent);
     if (model.accent) expect(part.params.color).toMatchObject({ type: 'color', default: '' });
@@ -138,7 +160,9 @@ describe.each(parts)('%s', (_id, part) => {
     }
     if (model.kind === 'inline') {
       // Like the built-in valve: a pipe snaps to the body centre and leaves east or west (holodeck#47).
-      expect(part.ports).toEqual({ in: { x: 0, y: 0, dir: 'w' }, out: { x: 0, y: 0, dir: 'e' } });
+      expect(part.ports).toMatchObject({ in: { x: 0, y: 0, dir: 'w' }, out: { x: 0, y: 0, dir: 'e' } });
+      // Every on-axis GLB nozzle of an inline part is routable.
+      expect(Object.keys(part.ports!).sort()).toEqual(Object.keys(model.ports).sort());
     }
   });
 });

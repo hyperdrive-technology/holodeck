@@ -26,9 +26,9 @@
         "id": "plant-area",
         "object": "area",
         "x": 7,
-        "y": -1,
-        "width": 24,
-        "height": 14,
+        "y": 0,
+        "width": 26,
+        "height": 18,
         "z": -1,
         "params": {
           "fill": "#f1f5f9",
@@ -374,6 +374,336 @@
         "params": {
           "text": "MCC-1",
           "bold": true
+        }
+      },
+      {
+        "id": "return-pipe",
+        "object": "pipe",
+        "x": 0,
+        "y": 5,
+        "toX": 12,
+        "toY": 5
+      },
+      {
+        "id": "nv-101",
+        "object": "process:valve-check",
+        "x": 2,
+        "y": 5,
+        "onPipe": "return-pipe",
+        "at": 0.17
+      },
+      {
+        "id": "hv-102",
+        "object": "process:valve-butterfly",
+        "x": 4,
+        "y": 5,
+        "onPipe": "return-pipe",
+        "at": 0.33,
+        "params": {
+          "open": 1
+        },
+        "bindings": {
+          "open": {
+            "connection": "sim",
+            "source": "sine:14:0:1"
+          }
+        }
+      },
+      {
+        "id": "ft-101",
+        "object": "process:flowmeter-mag",
+        "x": 6,
+        "y": 5,
+        "onPipe": "return-pipe",
+        "at": 0.5,
+        "params": {
+          "value": 40
+        },
+        "bindings": {
+          "value": {
+            "connection": "sim",
+            "source": "sine:10:20:60"
+          },
+          "fault": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 95,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "sv-101",
+        "object": "process:valve-solenoid",
+        "x": 8,
+        "y": 5,
+        "onPipe": "return-pipe",
+        "at": 0.67,
+        "bindings": {
+          "energised": {
+            "connection": "sim",
+            "source": "square:5"
+          }
+        }
+      },
+      {
+        "id": "xv-102",
+        "object": "process:valve-actuated",
+        "x": 10,
+        "y": 5,
+        "onPipe": "return-pipe",
+        "at": 0.83,
+        "params": {
+          "open": 1
+        },
+        "bindings": {
+          "open": {
+            "connection": "sim",
+            "source": "square:9"
+          },
+          "fault": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 92,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "tv-102",
+        "object": "process:valve-three-way",
+        "x": 12,
+        "y": 5,
+        "params": {
+          "position": 50
+        },
+        "bindings": {
+          "position": {
+            "connection": "sim",
+            "source": "ramp:12:0:100"
+          },
+          "fault": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 95,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "branch-out",
+        "object": "pipe",
+        "x": 12,
+        "y": 5,
+        "toX": 15,
+        "toY": 5,
+        "attach": {
+          "from": {
+            "object": "tv-102",
+            "port": "out"
+          }
+        }
+      },
+      {
+        "id": "branch-down",
+        "object": "pipe",
+        "x": 12,
+        "y": 5,
+        "toX": 12,
+        "toY": 8,
+        "attach": {
+          "from": {
+            "object": "tv-102",
+            "port": "branch"
+          }
+        }
+      },
+      {
+        "id": "pi-101",
+        "object": "process:gauge-pressure",
+        "x": 5,
+        "y": 0,
+        "params": {
+          "value": 50,
+          "mountHeight": 0.52
+        },
+        "bindings": {
+          "value": {
+            "connection": "sim",
+            "source": "sine:20:15:90"
+          },
+          "alarm": {
+            "connection": "sim",
+            "source": "sine:20:15:90",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 85,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "psv-101",
+        "object": "process:valve-relief",
+        "x": 3,
+        "y": -4,
+        "bindings": {
+          "lifted": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 95,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "lt-101",
+        "object": "process:level-radar",
+        "x": 1,
+        "y": -4,
+        "params": {
+          "value": 50
+        },
+        "bindings": {
+          "value": {
+            "connection": "sim",
+            "source": "sine:20:15:90"
+          }
+        }
+      },
+      {
+        "id": "xl-101",
+        "object": "process:beacon",
+        "x": 16,
+        "y": 1,
+        "params": {
+          "green": true
+        },
+        "bindings": {
+          "red": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 92,
+                  "value": true
+                }
+              ]
+            }
+          },
+          "amber": {
+            "connection": "sim",
+            "source": "sine:20:60:85",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 82,
+                  "value": true
+                }
+              ]
+            }
+          },
+          "green": {
+            "connection": "sim",
+            "source": "square:10"
+          }
+        }
+      },
+      {
+        "id": "vfd-101",
+        "object": "process:vfd",
+        "x": 13,
+        "y": -1.5,
+        "params": {
+          "running": true
+        },
+        "bindings": {
+          "running": {
+            "connection": "sim",
+            "source": "square:10"
+          },
+          "fault": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 95,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "jb-101",
+        "object": "process:junction-box",
+        "x": 17,
+        "y": -1
+      },
+      {
+        "id": "ft-label",
+        "object": "label",
+        "size": 0.5,
+        "x": 6,
+        "y": 6.5,
+        "params": {
+          "text": "FT-101",
+          "unit": "m³/h",
+          "format": "int",
+          "bold": true
+        },
+        "bindings": {
+          "value": {
+            "connection": "sim",
+            "source": "sine:10:20:60"
+          }
         }
       },
       {

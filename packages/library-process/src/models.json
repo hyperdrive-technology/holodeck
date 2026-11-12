@@ -1,63 +1,417 @@
 {
   "valve-ball": {
     "kind": "inline",
-    "footprint": [1, 1],
+    "footprint": [
+      1,
+      1
+    ],
     "height": 0.95,
     "yMin": -0.3,
     "length": 1.0,
-    "ports": { "in": [-0.5, 0, 0], "out": [0.5, 0, 0] },
-    "anim": { "handle": [0, 0.5, 0] },
+    "ports": {
+      "in": [
+        -0.5,
+        0,
+        0
+      ],
+      "out": [
+        0.5,
+        0,
+        0
+      ]
+    },
+    "anim": {
+      "handle": [
+        0,
+        0.5,
+        0
+      ]
+    },
+    "accent": true
+  },
+  "valve-butterfly": {
+    "kind": "inline",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 0.9,
+    "yMin": -0.29,
+    "length": 0.5,
+    "ports": {
+      "in": [
+        -0.25,
+        0,
+        0
+      ],
+      "out": [
+        0.25,
+        0,
+        0
+      ]
+    },
+    "anim": {
+      "handle": [
+        0,
+        0.5,
+        0
+      ]
+    },
     "accent": true
   },
   "valve-control": {
     "kind": "inline",
-    "footprint": [1, 1],
+    "footprint": [
+      1,
+      1
+    ],
     "height": 1.65,
     "yMin": -0.3,
     "length": 1.0,
-    "ports": { "in": [-0.5, 0, 0], "out": [0.5, 0, 0] },
-    "anim": { "stem": [0, 0.48, 0] },
+    "ports": {
+      "in": [
+        -0.5,
+        0,
+        0
+      ],
+      "out": [
+        0.5,
+        0,
+        0
+      ]
+    },
+    "anim": {
+      "stem": [
+        0,
+        0.48,
+        0
+      ]
+    },
+    "accent": true
+  },
+  "valve-actuated": {
+    "kind": "inline",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 1.3,
+    "yMin": -0.3,
+    "length": 1.0,
+    "ports": {
+      "in": [
+        -0.5,
+        0,
+        0
+      ],
+      "out": [
+        0.5,
+        0,
+        0
+      ]
+    },
+    "anim": {
+      "handle": [
+        0,
+        0.91,
+        0
+      ]
+    },
+    "accent": true
+  },
+  "valve-solenoid": {
+    "kind": "inline",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 0.85,
+    "yMin": -0.27,
+    "length": 0.5,
+    "ports": {
+      "in": [
+        -0.25,
+        0,
+        0
+      ],
+      "out": [
+        0.25,
+        0,
+        0
+      ]
+    },
+    "anim": {},
+    "accent": true
+  },
+  "valve-three-way": {
+    "kind": "inline",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 1.35,
+    "yMin": -0.3,
+    "length": 1.0,
+    "ports": {
+      "in": [
+        -0.5,
+        0,
+        0
+      ],
+      "out": [
+        0.5,
+        0,
+        0
+      ],
+      "branch": [
+        0,
+        0,
+        0.5
+      ]
+    },
+    "anim": {
+      "stem": [
+        0,
+        0.45,
+        0
+      ]
+    },
+    "accent": true
+  },
+  "valve-check": {
+    "kind": "inline",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 0.76,
+    "yMin": -0.29,
+    "length": 1.0,
+    "ports": {
+      "in": [
+        -0.5,
+        0,
+        0
+      ],
+      "out": [
+        0.5,
+        0,
+        0
+      ]
+    },
+    "anim": {},
+    "accent": true
+  },
+  "valve-relief": {
+    "kind": "mounted",
+    "footprint": [
+      0.8,
+      0.6
+    ],
+    "height": 1.06,
+    "yMin": 0,
+    "ports": {
+      "process": [
+        0,
+        0,
+        0
+      ],
+      "out": [
+        0.4,
+        0.3,
+        0
+      ]
+    },
+    "anim": {
+      "handle": [
+        0.12,
+        0.955,
+        0
+      ]
+    },
     "accent": true
   },
   "motor": {
     "kind": "floor",
-    "footprint": [1, 1],
+    "footprint": [
+      1,
+      1
+    ],
     "height": 0.72,
     "yMin": 0,
     "ports": {},
-    "anim": { "shaft": [0, 0.32, 0] },
+    "anim": {
+      "shaft": [
+        0,
+        0.32,
+        0
+      ]
+    },
     "accent": true
   },
   "heat-exchanger-shell-tube": {
     "kind": "floor",
-    "footprint": [3, 1],
+    "footprint": [
+      3,
+      1
+    ],
     "height": 1.22,
     "yMin": 0,
     "ports": {
-      "tube-in": [-1.1, 0.32, 0.5],
-      "tube-out": [-1.1, 0.84, -0.5],
-      "shell-in": [-0.4, 1.2, 0],
-      "shell-out": [0.72, 1.2, 0]
+      "tube-in": [
+        -1.1,
+        0.32,
+        0.5
+      ],
+      "tube-out": [
+        -1.1,
+        0.84,
+        -0.5
+      ],
+      "shell-in": [
+        -0.4,
+        1.2,
+        0
+      ],
+      "shell-out": [
+        0.72,
+        1.2,
+        0
+      ]
     },
     "anim": {},
     "accent": false
   },
   "transmitter": {
     "kind": "mounted",
-    "footprint": [0.36, 0.36],
+    "footprint": [
+      0.36,
+      0.36
+    ],
     "height": 0.6,
     "yMin": 0,
-    "ports": { "process": [0, 0, 0] },
+    "ports": {
+      "process": [
+        0,
+        0,
+        0
+      ]
+    },
+    "anim": {},
+    "accent": true
+  },
+  "gauge-pressure": {
+    "kind": "mounted",
+    "footprint": [
+      0.36,
+      0.16
+    ],
+    "height": 0.5,
+    "yMin": 0,
+    "ports": {
+      "process": [
+        0,
+        0,
+        0
+      ]
+    },
+    "anim": {
+      "needle": [
+        0,
+        0.325,
+        0.059
+      ]
+    },
+    "accent": true
+  },
+  "flowmeter-mag": {
+    "kind": "inline",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 1.07,
+    "yMin": -0.29,
+    "length": 1.0,
+    "ports": {
+      "in": [
+        -0.5,
+        0,
+        0
+      ],
+      "out": [
+        0.5,
+        0,
+        0
+      ]
+    },
+    "anim": {},
+    "accent": true
+  },
+  "level-radar": {
+    "kind": "mounted",
+    "footprint": [
+      0.32,
+      0.28
+    ],
+    "height": 0.6,
+    "yMin": -0.2,
+    "ports": {
+      "process": [
+        0,
+        0,
+        0
+      ]
+    },
+    "anim": {},
+    "accent": true
+  },
+  "beacon": {
+    "kind": "mounted",
+    "footprint": [
+      0.22,
+      0.22
+    ],
+    "height": 0.7,
+    "yMin": 0,
+    "ports": {},
     "anim": {},
     "accent": true
   },
   "cabinet": {
     "kind": "floor",
-    "footprint": [1, 1],
+    "footprint": [
+      1,
+      1
+    ],
     "height": 1.95,
     "yMin": 0,
     "ports": {},
     "anim": {},
     "accent": true
+  },
+  "vfd": {
+    "kind": "mounted",
+    "footprint": [
+      0.42,
+      0.32
+    ],
+    "height": 0.7,
+    "yMin": 0,
+    "ports": {},
+    "anim": {},
+    "accent": true
+  },
+  "junction-box": {
+    "kind": "mounted",
+    "footprint": [
+      0.44,
+      0.24
+    ],
+    "height": 0.4,
+    "yMin": 0,
+    "ports": {},
+    "anim": {},
+    "accent": false
   }
 }

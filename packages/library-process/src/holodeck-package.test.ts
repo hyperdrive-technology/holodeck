@@ -13,7 +13,12 @@ const manifestUrl = 'https://assets.example.test/packs/process/holodeck.package.
 const assetBase = 'https://assets.example.test/packs/process/assets/';
 const context = { host: 'test', assetUrl: (path: string) => new URL(path, assetBase).href };
 const engine = { id: 'holodeck.iso', label: 'Iso contract', apiVersion: '1.0.0', documentFormat: 'holodeck.iso.scene.v1', kinds: ISO_KINDS };
-const expectedIds = ['valve-ball', 'valve-control', 'motor', 'heat-exchanger-shell-tube', 'transmitter', 'cabinet'].map((s) => `process:${s}`);
+const expectedIds = [
+  'valve-ball', 'valve-butterfly', 'valve-control', 'valve-actuated', 'valve-solenoid', 'valve-three-way', 'valve-check', 'valve-relief',
+  'motor', 'heat-exchanger-shell-tube',
+  'transmitter', 'gauge-pressure', 'flowmeter-mag', 'level-radar', 'beacon',
+  'cabinet', 'vfd', 'junction-box',
+].map((s) => `process:${s}`);
 
 describe('process package contract', () => {
   it('validates with the SDK and matches the published entry and version', () => {

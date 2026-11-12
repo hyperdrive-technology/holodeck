@@ -39,6 +39,7 @@ export type {
   IsoPartOrigin,
   IsoPartParamSpec,
   IsoPartPort,
+  IsoPartStateColor,
   IsoTheme,
 } from './registry/types';
 export { HOLODECK_STYLE, type HolodeckStyle } from '../assets/process/style';

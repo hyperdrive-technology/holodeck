@@ -84,6 +84,15 @@ describe('structural validators', () => {
     expect(ok({ inlineLength: 1 })).toBe(true);
     expect(ok({ inlineLength: 0 })).toBe(true);
     expect(ok({ inlineLength: -1 })).toBe(false);
+    const flags = { on: { type: 'boolean', label: 'On', default: false }, h: { type: 'number', label: 'H', default: 0 } };
+    expect(ok({ params: flags, stateColors: [{ param: 'on', color: '#22c55e' }] })).toBe(true);
+    expect(ok({ params: flags, stateColors: [{ param: 'on', color: 'green' }] })).toBe(false);
+    expect(ok({ params: flags, stateColors: [{ param: 'h', color: '#22c55e' }] })).toBe(false);
+    expect(ok({ params: flags, stateColors: [{ param: 'missing', color: '#22c55e' }] })).toBe(false);
+    expect(ok({ params: flags, stateColors: { param: 'on', color: '#22c55e' } })).toBe(false);
+    expect(ok({ params: flags, heightParam: 'h' })).toBe(true);
+    expect(ok({ params: flags, heightParam: 'on' })).toBe(false);
+    expect(ok({ params: flags, heightParam: 'toString' })).toBe(false);
   });
 
   it('requires a pool renderer for instanced parts', () => {
