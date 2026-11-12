@@ -112,7 +112,7 @@ jobs:
           ref: ${{ steps.sdk.outputs.ref }}
           path: holodeck-sdk
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: steps.scope.outputs.run == 'true'
         with:
           version: 12.16.1
