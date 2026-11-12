@@ -174,7 +174,7 @@ jobs:
           path: holodeck/packages/editor-2.5d-react/artifacts/
           if-no-files-found: ignore
 
-  # The five packages that are not required checks and take about a minute each, plus
+  # The six packages that are not required checks and take about a minute each, plus
   # the node:test suites of the repo scripts, in ONE sandbox (was six): one checkout,
   # one SDK build, one pnpm store restore. Each package is still scoped on its own and
   # every package runs even after another fails, so one red package does not hide
@@ -183,13 +183,16 @@ jobs:
   #     blender-drift.yml, holodeck#136). assets-aws: sanitised SVG icons, vendored
   #     archetype models, provider-aws part hints; no network. provider-aws: the real
   #     AWS SDK against an in-process fake backend; no credentials, no network.
+  #   library-process: shipped process GLBs and their node contract checked without
+  #     Blender (the rebuild is blender-drift.yml); its tests also read
+  #     blender/parts/process (catalogue guard) and docs/assets/process-catalog.md.
   small-packages:
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci')
-    name: flow-runtime, provider-http, library-cloud, provider-aws, assets-aws, scripts
+    name: flow-runtime, provider-http, library-cloud, library-process, provider-aws, assets-aws, scripts
     runs-on: boat
     timeout-minutes: 30
     env:
-      PACKAGES: flow-runtime provider-http library-cloud provider-aws assets-aws
+      PACKAGES: flow-runtime provider-http library-cloud library-process provider-aws assets-aws
       # None of these packages has render tests.
       HOLODECK_SKIP_RENDER_TESTS: '1'
     steps:
@@ -216,10 +219,11 @@ jobs:
           echo "Using holodeck-sdk ref: $ref"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
-      # All five packages run, or none. They have hidden test-time links that
+      # All six packages run, or none. They have hidden test-time links that
       # package.json does not show: assets-aws tests import provider-aws
-      # DEFAULT_PART_HINTS, and library-cloud/assets-aws conformance tests consume the
-      # editor-2.5d-react contracts. Choosing per package skipped those tests, so any
+      # DEFAULT_PART_HINTS, library-cloud/library-process/assets-aws conformance tests
+      # consume the editor-2.5d-react contracts, and library-process reads
+      # library-cloud's parts (unique ids), blender/parts/process and the catalog doc. Choosing per package skipped those tests, so any
       # change to one of them or to editor-2.5d-react selects the whole set. Shared
       # inputs and unowned root files select it too (scripts/ci-scope.mjs).
       - name: Does this change touch the small packages?
@@ -235,7 +239,8 @@ jobs:
           fi
           out=$(mktemp)
           GITHUB_OUTPUT="$out" node holodeck/scripts/ci-scope.mjs --cwd holodeck --event "$EVENT" --base "$BASE_SHA" \
-            --sdk-ref "$SDK_REF" --paths "^packages/(${PACKAGES// /|}|editor-2\.5d-react)/"
+            --sdk-ref "$SDK_REF" --paths "^packages/(${PACKAGES// /|}|editor-2\.5d-react)/" \
+            --paths '^blender/parts/process/' --paths '^docs/assets/process-catalog\.md$'
           if grep -qx 'run=true' "$out"; then selected=$PACKAGES; else selected=""; fi
           echo "Selected: ${selected:-none}"
           echo "packages=$selected" >> "$GITHUB_OUTPUT"
@@ -263,6 +268,7 @@ jobs:
             holodeck/packages/flow-runtime/pnpm-lock.yaml
             holodeck/packages/provider-http/pnpm-lock.yaml
             holodeck/packages/library-cloud/pnpm-lock.yaml
+            holodeck/packages/library-process/pnpm-lock.yaml
             holodeck/packages/provider-aws/pnpm-lock.yaml
             holodeck/packages/assets-aws/pnpm-lock.yaml
 
@@ -350,7 +356,7 @@ jobs:
         run: |
           if ! command -v node >/dev/null; then echo "no node on the image yet: run"; echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           node holodeck/scripts/ci-scope.mjs --cwd holodeck --event "$EVENT" --base "$BASE_SHA" --sdk-ref "$SDK_REF" \
-            --paths '^apps/studio/' --paths '^packages/(editor-2\.5d-react|provider-http|provider-aws|library-cloud|mcp)/'
+            --paths '^apps/studio/' --paths '^packages/(editor-2\.5d-react|provider-http|provider-aws|library-cloud|library-process|mcp)/'
 
       - name: Checkout holodeck-sdk (${{ steps.sdk.outputs.ref }})
         if: steps.scope.outputs.run == 'true'
@@ -376,6 +382,7 @@ jobs:
             holodeck/packages/provider-http/pnpm-lock.yaml
             holodeck/packages/provider-aws/pnpm-lock.yaml
             holodeck/packages/library-cloud/pnpm-lock.yaml
+            holodeck/packages/library-process/pnpm-lock.yaml
             holodeck/apps/studio/pnpm-lock.yaml
             holodeck/packages/mcp/pnpm-lock.yaml
 
@@ -394,10 +401,10 @@ jobs:
           pnpm build
 
       # Provider packages the studio installs (holodeck#101); file: deps, copied at install.
-      - name: Build provider-http, provider-aws and library-cloud
+      - name: Build provider-http, provider-aws, library-cloud and library-process
         if: steps.scope.outputs.run == 'true'
         run: |
-          for p in provider-http provider-aws library-cloud; do
+          for p in provider-http provider-aws library-cloud library-process; do
             (cd holodeck/packages/$p && pnpm install --frozen-lockfile && pnpm build)
           done
 

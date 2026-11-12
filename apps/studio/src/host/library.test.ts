@@ -19,8 +19,26 @@ describe('library', () => {
     const ids = items.map((i) => i.id);
     expect(ids).toEqual(expect.arrayContaining(['tank', 'valve', 'pipe', 'label', 'area']));
     expect(ids).not.toContain('shaft');
-    expect(new Set(items.map((i) => i.packageId))).toEqual(new Set(['holodeck.iso', 'holodeck.cloud']));
+    expect(new Set(items.map((i) => i.packageId))).toEqual(new Set(['holodeck.iso', 'holodeck.cloud', 'holodeck.process']));
     expect(items.find((i) => i.id === 'tank')?.packageName).toBe('Holodeck 2.5D engine');
+  });
+
+  it('shows the process parts as their own palette group, by catalog family', async () => {
+    const host = await createStudioHost();
+    const group = groupLibrary(libraryItems(host)).find((g) => g.packageId === 'holodeck.process');
+    expect(group?.packageName).toBe('Process parts');
+    expect(group?.categories.map((c) => [c.category, c.items.map((i) => i.id)])).toEqual([
+      ['Valves', ['valve-ball', 'valve-butterfly', 'valve-control', 'valve-actuated', 'valve-solenoid', 'valve-three-way', 'valve-check', 'valve-relief'].map((s) => `process:${s}`)],
+      ['Rotating equipment', ['motor', 'pump-lobe', 'pump-inline', 'pump-dosing', 'blower', 'compressor'].map((s) => `process:${s}`)],
+      ['Heat transfer', ['process:heat-exchanger-shell-tube', 'process:boiler', 'process:cooling-tower']],
+      ['Separation', ['process:filter', 'process:strainer-y', 'process:cyclone']],
+      ['Instruments', ['transmitter', 'gauge-pressure', 'flowmeter-mag', 'level-radar', 'beacon'].map((s) => `process:${s}`)],
+      ['Electrical', ['process:cabinet', 'process:vfd', 'process:junction-box']],
+    ]);
+    expect(groupLibrary(libraryItems(host), 'control valve').flatMap((g) => g.categories.flatMap((c) => c.items.map((i) => i.id)))).toEqual([
+      'process:valve-control',
+      'process:valve-three-way', // "Three-way control valve" in its hint
+    ]);
   });
 
   describe('matchesQuery', () => {

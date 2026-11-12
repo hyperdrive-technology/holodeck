@@ -1,0 +1,989 @@
+{
+  "format": "holodeck.document.v1",
+  "id": "sample-process-line",
+  "name": "Process line",
+  "engine": "holodeck.iso",
+  "engineVersion": "1.0.0",
+  "requires": {
+    "holodeck.iso": "^1.0",
+    "holodeck.process": "^0.1",
+    "holodeck.sim": "^1.0"
+  },
+  "connections": [
+    {
+      "id": "sim",
+      "provider": "holodeck.sim",
+      "label": "Simulated plant"
+    }
+  ],
+  "body": {
+    "format": "holodeck.iso.scene.v1",
+    "id": "sample-process-line",
+    "name": "Process line",
+    "gridCellSize": 1,
+    "objects": [
+      {
+        "id": "plant-area",
+        "object": "area",
+        "x": 14,
+        "y": 0,
+        "width": 40,
+        "height": 18,
+        "z": -1,
+        "params": {
+          "fill": "#f1f5f9",
+          "outline": "#94a3b8",
+          "outlineStyle": "dashed"
+        }
+      },
+      {
+        "id": "feed-tank",
+        "object": "tank",
+        "x": 0,
+        "y": 0,
+        "params": {
+          "level": 0.5
+        },
+        "bindings": {
+          "level": {
+            "connection": "sim",
+            "source": "sine:20:15:90",
+            "transform": {
+              "kind": "scale",
+              "inMin": 0,
+              "inMax": 100,
+              "outMin": 0,
+              "outMax": 1,
+              "clamp": true
+            }
+          },
+          "alarm": {
+            "connection": "sim",
+            "source": "sine:20:15:90",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 85,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "feed-pipe",
+        "object": "pipe",
+        "x": 1,
+        "y": 0,
+        "toX": 8,
+        "toY": 0,
+        "attach": {
+          "from": {
+            "object": "feed-tank",
+            "port": "east"
+          }
+        }
+      },
+      {
+        "id": "xv-101",
+        "object": "process:valve-ball",
+        "x": 3,
+        "y": 0,
+        "onPipe": "feed-pipe",
+        "at": 0.29,
+        "params": {
+          "open": true
+        },
+        "bindings": {
+          "open": {
+            "connection": "sim",
+            "source": "square:12"
+          }
+        }
+      },
+      {
+        "id": "tv-101",
+        "object": "process:valve-control",
+        "x": 6,
+        "y": 0,
+        "onPipe": "feed-pipe",
+        "at": 0.71,
+        "params": {
+          "position": 40
+        },
+        "bindings": {
+          "position": {
+            "connection": "sim",
+            "source": "sine:16:0:100"
+          },
+          "fault": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 92,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "feed-elbow",
+        "object": "elbow",
+        "x": 8,
+        "y": 0,
+        "params": {
+          "bend": "auto"
+        }
+      },
+      {
+        "id": "exchanger-pipe",
+        "object": "pipe",
+        "x": 8,
+        "y": 0,
+        "toX": 8,
+        "toY": -2.5
+      },
+      {
+        "id": "e-101",
+        "object": "process:heat-exchanger-shell-tube",
+        "x": 9.1,
+        "y": -3,
+        "params": {
+          "tubeInTemp": 20,
+          "tubeOutTemp": 72
+        },
+        "bindings": {
+          "tubeInTemp": {
+            "connection": "sim",
+            "source": "sine:30:15:25"
+          },
+          "tubeOutTemp": {
+            "connection": "sim",
+            "source": "sine:20:60:85"
+          }
+        }
+      },
+      {
+        "id": "m-101",
+        "object": "process:motor",
+        "x": 13,
+        "y": -3,
+        "params": {
+          "running": true,
+          "speed": 100
+        },
+        "bindings": {
+          "running": {
+            "connection": "sim",
+            "source": "square:10"
+          },
+          "speed": {
+            "connection": "sim",
+            "source": "sine:8:40:100"
+          },
+          "fault": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 95,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "tt-101",
+        "object": "process:transmitter",
+        "x": 10,
+        "y": 1,
+        "params": {
+          "value": 72,
+          "unit": "°C"
+        },
+        "bindings": {
+          "value": {
+            "connection": "sim",
+            "source": "sine:20:60:85"
+          },
+          "alarm": {
+            "connection": "sim",
+            "source": "sine:20:60:85",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 82,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "mcc-1",
+        "object": "process:cabinet",
+        "x": 15,
+        "y": 1,
+        "bindings": {
+          "fault": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 92,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "feed-label",
+        "object": "label",
+        "size": 0.55,
+        "x": 0,
+        "y": 3,
+        "params": {
+          "text": "Feed",
+          "unit": "%",
+          "format": "int",
+          "bold": true
+        },
+        "bindings": {
+          "value": {
+            "connection": "sim",
+            "source": "sine:20:15:90"
+          },
+          "alarm": {
+            "connection": "sim",
+            "source": "sine:20:15:90",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 85,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "tv-label",
+        "object": "label",
+        "size": 0.5,
+        "x": 6,
+        "y": 2,
+        "params": {
+          "text": "TV-101",
+          "unit": "%",
+          "format": "int",
+          "bold": true
+        },
+        "bindings": {
+          "value": {
+            "connection": "sim",
+            "source": "sine:16:0:100"
+          }
+        }
+      },
+      {
+        "id": "tt-label",
+        "object": "label",
+        "size": 0.5,
+        "x": 10,
+        "y": 2.5,
+        "params": {
+          "text": "TT-101",
+          "unit": "°C",
+          "format": "int",
+          "bold": true
+        },
+        "bindings": {
+          "value": {
+            "connection": "sim",
+            "source": "sine:20:60:85"
+          },
+          "alarm": {
+            "connection": "sim",
+            "source": "sine:20:60:85",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 82,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "e-label",
+        "object": "label",
+        "size": 0.5,
+        "x": 9,
+        "y": -5,
+        "params": {
+          "text": "E-101",
+          "bold": true
+        }
+      },
+      {
+        "id": "m-label",
+        "object": "label",
+        "size": 0.5,
+        "x": 13,
+        "y": -4.5,
+        "params": {
+          "text": "M-101",
+          "bold": true
+        }
+      },
+      {
+        "id": "mcc-label",
+        "object": "label",
+        "size": 0.5,
+        "x": 15,
+        "y": 2.5,
+        "params": {
+          "text": "MCC-1",
+          "bold": true
+        }
+      },
+      {
+        "id": "return-pipe",
+        "object": "pipe",
+        "x": 0,
+        "y": 5,
+        "toX": 12,
+        "toY": 5
+      },
+      {
+        "id": "nv-101",
+        "object": "process:valve-check",
+        "x": 2,
+        "y": 5,
+        "onPipe": "return-pipe",
+        "at": 0.17
+      },
+      {
+        "id": "hv-102",
+        "object": "process:valve-butterfly",
+        "x": 4,
+        "y": 5,
+        "onPipe": "return-pipe",
+        "at": 0.33,
+        "params": {
+          "open": 1
+        },
+        "bindings": {
+          "open": {
+            "connection": "sim",
+            "source": "sine:14:0:1"
+          }
+        }
+      },
+      {
+        "id": "ft-101",
+        "object": "process:flowmeter-mag",
+        "x": 6,
+        "y": 5,
+        "onPipe": "return-pipe",
+        "at": 0.5,
+        "params": {
+          "value": 40
+        },
+        "bindings": {
+          "value": {
+            "connection": "sim",
+            "source": "sine:10:20:60"
+          },
+          "fault": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 95,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "sv-101",
+        "object": "process:valve-solenoid",
+        "x": 8,
+        "y": 5,
+        "onPipe": "return-pipe",
+        "at": 0.67,
+        "bindings": {
+          "energised": {
+            "connection": "sim",
+            "source": "square:5"
+          }
+        }
+      },
+      {
+        "id": "xv-102",
+        "object": "process:valve-actuated",
+        "x": 10,
+        "y": 5,
+        "onPipe": "return-pipe",
+        "at": 0.83,
+        "params": {
+          "open": 1
+        },
+        "bindings": {
+          "open": {
+            "connection": "sim",
+            "source": "square:9"
+          },
+          "fault": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 92,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "tv-102",
+        "object": "process:valve-three-way",
+        "x": 12,
+        "y": 5,
+        "params": {
+          "position": 50
+        },
+        "bindings": {
+          "position": {
+            "connection": "sim",
+            "source": "ramp:12:0:100"
+          },
+          "fault": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 95,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "branch-out",
+        "object": "pipe",
+        "x": 12,
+        "y": 5,
+        "toX": 15,
+        "toY": 5,
+        "attach": {
+          "from": {
+            "object": "tv-102",
+            "port": "out"
+          }
+        }
+      },
+      {
+        "id": "branch-down",
+        "object": "pipe",
+        "x": 12,
+        "y": 5,
+        "toX": 12,
+        "toY": 8,
+        "attach": {
+          "from": {
+            "object": "tv-102",
+            "port": "branch"
+          }
+        }
+      },
+      {
+        "id": "pi-101",
+        "object": "process:gauge-pressure",
+        "x": 5,
+        "y": 0,
+        "params": {
+          "value": 50,
+          "mountHeight": 0.52
+        },
+        "bindings": {
+          "value": {
+            "connection": "sim",
+            "source": "sine:20:15:90"
+          },
+          "alarm": {
+            "connection": "sim",
+            "source": "sine:20:15:90",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 85,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "psv-101",
+        "object": "process:valve-relief",
+        "x": 3,
+        "y": -4,
+        "bindings": {
+          "lifted": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 95,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "lt-101",
+        "object": "process:level-radar",
+        "x": 1,
+        "y": -4,
+        "params": {
+          "value": 50
+        },
+        "bindings": {
+          "value": {
+            "connection": "sim",
+            "source": "sine:20:15:90"
+          }
+        }
+      },
+      {
+        "id": "xl-101",
+        "object": "process:beacon",
+        "x": 16,
+        "y": 1,
+        "params": {
+          "green": true
+        },
+        "bindings": {
+          "red": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 92,
+                  "value": true
+                }
+              ]
+            }
+          },
+          "amber": {
+            "connection": "sim",
+            "source": "sine:20:60:85",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 82,
+                  "value": true
+                }
+              ]
+            }
+          },
+          "green": {
+            "connection": "sim",
+            "source": "square:10"
+          }
+        }
+      },
+      {
+        "id": "vfd-101",
+        "object": "process:vfd",
+        "x": 13,
+        "y": -1.5,
+        "params": {
+          "running": true
+        },
+        "bindings": {
+          "running": {
+            "connection": "sim",
+            "source": "square:10"
+          },
+          "fault": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 95,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "jb-101",
+        "object": "process:junction-box",
+        "x": 17,
+        "y": -1
+      },
+      {
+        "id": "ft-label",
+        "object": "label",
+        "size": 0.5,
+        "x": 6,
+        "y": 6.5,
+        "params": {
+          "text": "FT-101",
+          "unit": "m³/h",
+          "format": "int",
+          "bold": true
+        },
+        "bindings": {
+          "value": {
+            "connection": "sim",
+            "source": "sine:10:20:60"
+          }
+        }
+      },
+      {
+        "id": "p-101",
+        "object": "process:pump-lobe",
+        "x": 22,
+        "y": -4,
+        "params": {
+          "running": true,
+          "speed": 80
+        },
+        "bindings": {
+          "running": {
+            "connection": "sim",
+            "source": "square:10"
+          },
+          "speed": {
+            "connection": "sim",
+            "source": "sine:8:40:100"
+          }
+        }
+      },
+      {
+        "id": "fan-101",
+        "object": "process:blower",
+        "x": 25,
+        "y": -4,
+        "params": {
+          "running": true
+        },
+        "bindings": {
+          "running": {
+            "connection": "sim",
+            "source": "square:10"
+          },
+          "speed": {
+            "connection": "sim",
+            "source": "sine:8:40:100"
+          }
+        }
+      },
+      {
+        "id": "p-103",
+        "object": "process:pump-dosing",
+        "x": 28,
+        "y": -4,
+        "params": {
+          "running": true,
+          "stroke": 80
+        },
+        "bindings": {
+          "running": {
+            "connection": "sim",
+            "source": "square:6"
+          },
+          "stroke": {
+            "connection": "sim",
+            "source": "sine:20:30:100"
+          }
+        }
+      },
+      {
+        "id": "cy-101",
+        "object": "process:cyclone",
+        "x": 31,
+        "y": -4,
+        "params": {
+          "dp": 12
+        },
+        "bindings": {
+          "dp": {
+            "connection": "sim",
+            "source": "sine:15:8:16"
+          }
+        }
+      },
+      {
+        "id": "k-101",
+        "object": "process:compressor",
+        "x": 22,
+        "y": 0,
+        "params": {
+          "running": true,
+          "load": 60
+        },
+        "bindings": {
+          "running": {
+            "connection": "sim",
+            "source": "square:10"
+          },
+          "load": {
+            "connection": "sim",
+            "source": "sine:12:30:90"
+          },
+          "fault": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 95,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "air-pipe",
+        "object": "pipe",
+        "x": 23,
+        "y": 0,
+        "toX": 26,
+        "toY": 0,
+        "attach": {
+          "from": {
+            "object": "k-101",
+            "port": "out"
+          }
+        }
+      },
+      {
+        "id": "f-101",
+        "object": "process:filter",
+        "x": 27,
+        "y": 0,
+        "params": {
+          "dp": 0.4
+        },
+        "bindings": {
+          "dp": {
+            "connection": "sim",
+            "source": "ramp:40:0.2:1.5"
+          },
+          "blocked": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 95,
+                  "value": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "filtrate-pipe",
+        "object": "pipe",
+        "x": 27,
+        "y": 0,
+        "toX": 33,
+        "toY": 0,
+        "attach": {
+          "from": {
+            "object": "f-101",
+            "port": "out"
+          }
+        }
+      },
+      {
+        "id": "s-101",
+        "object": "process:strainer-y",
+        "x": 29,
+        "y": 0,
+        "onPipe": "filtrate-pipe",
+        "at": 0.33,
+        "bindings": {
+          "blocked": {
+            "connection": "sim",
+            "source": "ramp:40:0:100",
+            "transform": {
+              "kind": "threshold",
+              "below": false,
+              "steps": [
+                {
+                  "at": 92,
+                  "value": true
+                }
+              ]
+            }
+          },
+          "dp": {
+            "connection": "sim",
+            "source": "ramp:40:0.1:0.8"
+          }
+        }
+      },
+      {
+        "id": "p-102",
+        "object": "process:pump-inline",
+        "x": 31,
+        "y": 0,
+        "onPipe": "filtrate-pipe",
+        "at": 0.67,
+        "params": {
+          "running": true
+        },
+        "bindings": {
+          "running": {
+            "connection": "sim",
+            "source": "square:10"
+          },
+          "speed": {
+            "connection": "sim",
+            "source": "sine:8:40:100"
+          }
+        }
+      },
+      {
+        "id": "ct-101",
+        "object": "process:cooling-tower",
+        "x": 24,
+        "y": 5,
+        "params": {
+          "running": true
+        },
+        "bindings": {
+          "running": {
+            "connection": "sim",
+            "source": "square:10"
+          },
+          "speed": {
+            "connection": "sim",
+            "source": "sine:20:50:100"
+          }
+        }
+      },
+      {
+        "id": "cw-pipe",
+        "object": "pipe",
+        "x": 25,
+        "y": 5,
+        "toX": 28,
+        "toY": 5,
+        "attach": {
+          "from": {
+            "object": "ct-101",
+            "port": "out"
+          }
+        }
+      },
+      {
+        "id": "b-101",
+        "object": "process:boiler",
+        "x": 31,
+        "y": 5,
+        "params": {
+          "firing": true,
+          "pressure": 8
+        },
+        "bindings": {
+          "firing": {
+            "connection": "sim",
+            "source": "square:14"
+          },
+          "pressure": {
+            "connection": "sim",
+            "source": "sine:30:6:10"
+          }
+        }
+      },
+      {
+        "id": "title-label",
+        "object": "label",
+        "size": 0.8,
+        "x": 14,
+        "y": -7,
+        "params": {
+          "text": "Process parts (simulated)",
+          "bold": true
+        }
+      }
+    ]
+  }
+}

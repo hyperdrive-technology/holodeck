@@ -108,6 +108,19 @@ export interface IsoInstancedRendererProps {
   onObjectPointerDown?: (id: string, event: import('@react-three/fiber').ThreeEvent<PointerEvent>) => void;
 }
 
+/** One `IsoPartDefinition.animNodes` entry. */
+export interface IsoAnimNode {
+  /** GLB node name, `anim.<name>`. */
+  node: string;
+  /** `holodeck.iso.animator` id. */
+  animator: string;
+  /** Part-level animator settings (over the animator's defaults, under the placement's). */
+  settings?: Record<string, unknown>;
+}
+
+/** `IsoPartDefinition.origin`. */
+export type IsoPartOrigin = 'floor' | 'pipe-axis';
+
 /** A pipe attach point: part-local offset from the centre (cells) and outward direction. */
 export interface IsoPartPort {
   x: number;
@@ -226,8 +239,53 @@ export interface IsoPartDefinition extends Contribution {
    * `footprint` consistent with the scaled size: routing uses the footprint.
    */
   scale?: number;
-  /** param -> `anim.*` node in the GLB + the animator that drives it. `placement.animation` overrides. */
-  animNodes?: Record<string, { node: string; animator: string }>;
+  /**
+   * param -> `anim.*` node in the GLB + the animator that drives it.
+   * `settings` are the part's own animator settings (a motor shaft spins
+   * about `x`, a control-valve stem travels 0.08): they sit between the
+   * animator's defaults and `placement.animation[param].settings`, and apply
+   * only while that animator drives the node (a placement that swaps the
+   * animator starts from the new animator's defaults).
+   */
+  animNodes?: Record<string, IsoAnimNode>;
+  /**
+   * Where the GLB origin sits in the world (default `'floor'`, Y = 0).
+   * `'pipe-axis'`: inline parts authored with their origin on the pipe axis
+   * (valves, strainers, inline meters; docs/assets/process-catalog.md) are
+   * lifted to `pipeWorldY()` for the current pipe radius, like the built-in
+   * code valve.
+   */
+  origin?: IsoPartOrigin;
+  /**
+   * Name of a boolean param that turns the `hd.accent` finish into the
+   * theme's alarm colour (`style.colors.alarm`) while it is true: a motor
+   * band, a control-valve cap or a cabinet beacon showing `fault`. Beats a
+   * `color` param and the placement colour; absent = no alarm tint.
+   */
+  alarmParam?: string;
+  /**
+   * Boolean params that tint `hd.accent` while true, after `alarmParam` and
+   * before a `color` param; the first true entry wins. A solenoid coil shows
+   * `energised`, a drive bezel `running`, a stack light its highest lit
+   * tier. `color` is a hex string (per part, not themed).
+   */
+  stateColors?: IsoPartStateColor[];
+  /**
+   * Name of a number param that lifts the model by that many world units
+   * above its `origin` (per placement, bindable): mounted instruments sit
+   * on the floor, a pipe top (`pipeWorldY() + radius`) or a vessel nozzle.
+   * The param's default is the floor-standing lift (a radar horn that hangs
+   * 0.2 below its flange declares 0.2).
+   */
+  heightParam?: string;
+}
+
+/** One `IsoPartDefinition.stateColors` entry. */
+export interface IsoPartStateColor {
+  /** A declared boolean param. */
+  param: string;
+  /** `#rgb` / `#rrggbb` / `#rrggbbaa`. */
+  color: string;
 }
 
 export interface IsoTheme extends Contribution {
@@ -243,8 +301,17 @@ export interface IsoAnimatorContext {
   dt: number;
   /** Seconds since the animator hook mounted. */
   elapsed: number;
-  /** Animator `settings` defaults merged with `placement.animation[param].settings`. */
+  /**
+   * Animator `settings` defaults, then the part's `animNodes[param].settings`,
+   * then `placement.animation[param].settings`.
+   */
   settings: Record<string, unknown>;
+  /**
+   * Every resolved param of the placement (read-only), for animators gated
+   * by a second param: a motor shaft spins from `speed` only while `running`
+   * (`spin`'s `enableParam`). Optional so direct callers and tests may omit it.
+   */
+  params?: Readonly<Record<string, unknown>>;
 }
 
 export interface IsoAnimator extends Contribution {

@@ -1,0 +1,822 @@
+{
+  "valve-ball": {
+    "kind": "inline",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 0.95,
+    "yMin": -0.3,
+    "length": 1.0,
+    "ports": {
+      "in": {
+        "at": [
+          -0.5,
+          0,
+          0
+        ],
+        "facing": "-x"
+      },
+      "out": {
+        "at": [
+          0.5,
+          0,
+          0
+        ],
+        "facing": "+x"
+      }
+    },
+    "anim": {
+      "handle": [
+        0,
+        0.5,
+        0
+      ]
+    },
+    "accent": true
+  },
+  "valve-butterfly": {
+    "kind": "inline",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 0.9,
+    "yMin": -0.29,
+    "length": 0.5,
+    "ports": {
+      "in": {
+        "at": [
+          -0.25,
+          0,
+          0
+        ],
+        "facing": "-x"
+      },
+      "out": {
+        "at": [
+          0.25,
+          0,
+          0
+        ],
+        "facing": "+x"
+      }
+    },
+    "anim": {
+      "handle": [
+        0,
+        0.5,
+        0
+      ]
+    },
+    "accent": true
+  },
+  "valve-control": {
+    "kind": "inline",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 1.65,
+    "yMin": -0.3,
+    "length": 1.0,
+    "ports": {
+      "in": {
+        "at": [
+          -0.5,
+          0,
+          0
+        ],
+        "facing": "-x"
+      },
+      "out": {
+        "at": [
+          0.5,
+          0,
+          0
+        ],
+        "facing": "+x"
+      }
+    },
+    "anim": {
+      "stem": [
+        0,
+        0.48,
+        0
+      ]
+    },
+    "accent": true
+  },
+  "valve-actuated": {
+    "kind": "inline",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 1.3,
+    "yMin": -0.3,
+    "length": 1.0,
+    "ports": {
+      "in": {
+        "at": [
+          -0.5,
+          0,
+          0
+        ],
+        "facing": "-x"
+      },
+      "out": {
+        "at": [
+          0.5,
+          0,
+          0
+        ],
+        "facing": "+x"
+      }
+    },
+    "anim": {
+      "handle": [
+        0,
+        0.91,
+        0
+      ]
+    },
+    "accent": true
+  },
+  "valve-solenoid": {
+    "kind": "inline",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 0.85,
+    "yMin": -0.27,
+    "length": 0.5,
+    "ports": {
+      "in": {
+        "at": [
+          -0.25,
+          0,
+          0
+        ],
+        "facing": "-x"
+      },
+      "out": {
+        "at": [
+          0.25,
+          0,
+          0
+        ],
+        "facing": "+x"
+      }
+    },
+    "anim": {},
+    "accent": true
+  },
+  "valve-three-way": {
+    "kind": "inline",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 1.35,
+    "yMin": -0.3,
+    "length": 1.0,
+    "ports": {
+      "in": {
+        "at": [
+          -0.5,
+          0,
+          0
+        ],
+        "facing": "-x"
+      },
+      "out": {
+        "at": [
+          0.5,
+          0,
+          0
+        ],
+        "facing": "+x"
+      },
+      "branch": {
+        "at": [
+          0,
+          0,
+          0.5
+        ],
+        "facing": "+z"
+      }
+    },
+    "anim": {
+      "stem": [
+        0,
+        0.45,
+        0
+      ]
+    },
+    "accent": true
+  },
+  "valve-check": {
+    "kind": "inline",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 0.76,
+    "yMin": -0.29,
+    "length": 1.0,
+    "ports": {
+      "in": {
+        "at": [
+          -0.5,
+          0,
+          0
+        ],
+        "facing": "-x"
+      },
+      "out": {
+        "at": [
+          0.5,
+          0,
+          0
+        ],
+        "facing": "+x"
+      }
+    },
+    "anim": {},
+    "accent": true
+  },
+  "valve-relief": {
+    "kind": "mounted",
+    "footprint": [
+      0.8,
+      0.6
+    ],
+    "height": 1.06,
+    "yMin": 0,
+    "ports": {
+      "process": {
+        "at": [
+          0,
+          0,
+          0
+        ],
+        "facing": "-y"
+      },
+      "out": {
+        "at": [
+          0.4,
+          0.3,
+          0
+        ],
+        "facing": "+x"
+      }
+    },
+    "anim": {
+      "handle": [
+        0.12,
+        0.955,
+        0
+      ]
+    },
+    "accent": true
+  },
+  "motor": {
+    "kind": "floor",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 0.72,
+    "yMin": 0,
+    "ports": {},
+    "anim": {
+      "shaft": [
+        0,
+        0.32,
+        0
+      ]
+    },
+    "accent": true
+  },
+  "pump-lobe": {
+    "kind": "floor",
+    "footprint": [
+      2,
+      1
+    ],
+    "height": 0.6,
+    "yMin": 0,
+    "ports": {
+      "in": {
+        "at": [
+          0.53,
+          0.32,
+          -0.5
+        ],
+        "facing": "-z"
+      },
+      "out": {
+        "at": [
+          0.53,
+          0.32,
+          0.5
+        ],
+        "facing": "+z"
+      }
+    },
+    "anim": {
+      "shaft": [
+        -0.17,
+        0.32,
+        0
+      ]
+    },
+    "accent": true
+  },
+  "pump-inline": {
+    "kind": "inline",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 1.6,
+    "yMin": -0.28,
+    "length": 1.0,
+    "ports": {
+      "in": {
+        "at": [
+          -0.5,
+          0,
+          0
+        ],
+        "facing": "-x"
+      },
+      "out": {
+        "at": [
+          0.5,
+          0,
+          0
+        ],
+        "facing": "+x"
+      }
+    },
+    "anim": {
+      "shaft": [
+        0,
+        0.47,
+        0
+      ]
+    },
+    "accent": true
+  },
+  "pump-dosing": {
+    "kind": "floor",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 0.96,
+    "yMin": 0,
+    "ports": {
+      "in": {
+        "at": [
+          0.3,
+          0.12,
+          0
+        ],
+        "facing": "-y",
+        "radius": 0.1
+      },
+      "out": {
+        "at": [
+          0.3,
+          0.94,
+          0
+        ],
+        "facing": "+y",
+        "radius": 0.1
+      }
+    },
+    "anim": {
+      "stem": [
+        0.12,
+        0.52,
+        0
+      ]
+    },
+    "accent": true
+  },
+  "blower": {
+    "kind": "floor",
+    "footprint": [
+      2,
+      2
+    ],
+    "height": 1.5,
+    "yMin": 0,
+    "ports": {
+      "in": {
+        "at": [
+          -0.08,
+          0.73,
+          0.76
+        ],
+        "facing": "+z",
+        "mouth": "round"
+      },
+      "out": {
+        "at": [
+          0.445,
+          1.49,
+          0.23
+        ],
+        "facing": "+y",
+        "mouth": "rect"
+      }
+    },
+    "anim": {
+      "blades": [
+        -0.08,
+        0.73,
+        0.69
+      ]
+    },
+    "accent": true
+  },
+  "compressor": {
+    "kind": "floor",
+    "footprint": [
+      2,
+      1
+    ],
+    "height": 1.47,
+    "yMin": 0,
+    "ports": {
+      "out": {
+        "at": [
+          1.0,
+          0.32,
+          0
+        ],
+        "facing": "+x"
+      }
+    },
+    "anim": {},
+    "accent": true
+  },
+  "heat-exchanger-shell-tube": {
+    "kind": "floor",
+    "footprint": [
+      3,
+      1
+    ],
+    "height": 1.22,
+    "yMin": 0,
+    "ports": {
+      "tube-in": {
+        "at": [
+          -1.1,
+          0.32,
+          0.5
+        ],
+        "facing": "+z"
+      },
+      "tube-out": {
+        "at": [
+          -1.1,
+          0.84,
+          -0.5
+        ],
+        "facing": "-z"
+      },
+      "shell-in": {
+        "at": [
+          -0.4,
+          1.2,
+          0
+        ],
+        "facing": "+y"
+      },
+      "shell-out": {
+        "at": [
+          0.72,
+          1.2,
+          0
+        ],
+        "facing": "+y"
+      }
+    },
+    "anim": {},
+    "accent": false
+  },
+  "boiler": {
+    "kind": "floor",
+    "footprint": [
+      3,
+      2
+    ],
+    "height": 2.2,
+    "yMin": 0,
+    "ports": {
+      "feed": {
+        "at": [
+          0.38,
+          0.32,
+          1.0
+        ],
+        "facing": "+z"
+      },
+      "steam": {
+        "at": [
+          -0.3,
+          1.88,
+          0
+        ],
+        "facing": "+y"
+      }
+    },
+    "anim": {},
+    "accent": true
+  },
+  "cooling-tower": {
+    "kind": "floor",
+    "footprint": [
+      2,
+      2
+    ],
+    "height": 2.6,
+    "yMin": 0,
+    "ports": {
+      "in": {
+        "at": [
+          -1.0,
+          1.5,
+          0
+        ],
+        "facing": "-x"
+      },
+      "out": {
+        "at": [
+          1.0,
+          0.32,
+          0
+        ],
+        "facing": "+x"
+      }
+    },
+    "anim": {
+      "blades": [
+        0,
+        2.22,
+        0
+      ]
+    },
+    "accent": true
+  },
+  "filter": {
+    "kind": "floor",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 1.6,
+    "yMin": 0,
+    "ports": {
+      "in": {
+        "at": [
+          -0.5,
+          0.84,
+          0
+        ],
+        "facing": "-x"
+      },
+      "out": {
+        "at": [
+          0.5,
+          0.32,
+          0
+        ],
+        "facing": "+x"
+      }
+    },
+    "anim": {},
+    "accent": true
+  },
+  "strainer-y": {
+    "kind": "inline",
+    "footprint": [
+      1,
+      2
+    ],
+    "height": 0.58,
+    "yMin": -0.3,
+    "length": 1.0,
+    "ports": {
+      "in": {
+        "at": [
+          -0.5,
+          0,
+          0
+        ],
+        "facing": "-x"
+      },
+      "out": {
+        "at": [
+          0.5,
+          0,
+          0
+        ],
+        "facing": "+x"
+      }
+    },
+    "anim": {},
+    "accent": true
+  },
+  "cyclone": {
+    "kind": "floor",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 2.4,
+    "yMin": 0,
+    "ports": {
+      "in": {
+        "at": [
+          -0.5,
+          1.84,
+          0.235
+        ],
+        "facing": "-x",
+        "mouth": "rect"
+      },
+      "out": {
+        "at": [
+          0,
+          2.4,
+          0
+        ],
+        "facing": "+y"
+      },
+      "solids": {
+        "at": [
+          0,
+          0.24,
+          0
+        ],
+        "facing": "-y"
+      }
+    },
+    "anim": {},
+    "accent": false
+  },
+  "transmitter": {
+    "kind": "mounted",
+    "footprint": [
+      0.36,
+      0.36
+    ],
+    "height": 0.6,
+    "yMin": 0,
+    "ports": {
+      "process": {
+        "at": [
+          0,
+          0,
+          0
+        ],
+        "facing": "-y"
+      }
+    },
+    "anim": {},
+    "accent": true
+  },
+  "gauge-pressure": {
+    "kind": "mounted",
+    "footprint": [
+      0.36,
+      0.16
+    ],
+    "height": 0.5,
+    "yMin": 0,
+    "ports": {
+      "process": {
+        "at": [
+          0,
+          0,
+          0
+        ],
+        "facing": "-y"
+      }
+    },
+    "anim": {
+      "needle": [
+        0,
+        0.325,
+        0.059
+      ]
+    },
+    "accent": true
+  },
+  "flowmeter-mag": {
+    "kind": "inline",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 1.07,
+    "yMin": -0.29,
+    "length": 1.0,
+    "ports": {
+      "in": {
+        "at": [
+          -0.5,
+          0,
+          0
+        ],
+        "facing": "-x"
+      },
+      "out": {
+        "at": [
+          0.5,
+          0,
+          0
+        ],
+        "facing": "+x"
+      }
+    },
+    "anim": {},
+    "accent": true
+  },
+  "level-radar": {
+    "kind": "mounted",
+    "footprint": [
+      0.32,
+      0.28
+    ],
+    "height": 0.6,
+    "yMin": -0.2,
+    "ports": {
+      "process": {
+        "at": [
+          0,
+          0,
+          0
+        ],
+        "facing": "-y"
+      }
+    },
+    "anim": {},
+    "accent": true
+  },
+  "beacon": {
+    "kind": "mounted",
+    "footprint": [
+      0.22,
+      0.22
+    ],
+    "height": 0.7,
+    "yMin": 0,
+    "ports": {},
+    "anim": {},
+    "accent": true
+  },
+  "cabinet": {
+    "kind": "floor",
+    "footprint": [
+      1,
+      1
+    ],
+    "height": 1.95,
+    "yMin": 0,
+    "ports": {},
+    "anim": {},
+    "accent": true
+  },
+  "vfd": {
+    "kind": "mounted",
+    "footprint": [
+      0.42,
+      0.32
+    ],
+    "height": 0.7,
+    "yMin": 0,
+    "ports": {},
+    "anim": {},
+    "accent": true
+  },
+  "junction-box": {
+    "kind": "mounted",
+    "footprint": [
+      0.44,
+      0.24
+    ],
+    "height": 0.4,
+    "yMin": 0,
+    "ports": {},
+    "anim": {},
+    "accent": false
+  }
+}

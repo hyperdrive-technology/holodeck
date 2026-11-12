@@ -61,7 +61,7 @@ describe('tool surface', () => {
     expect(r.data.tier).toBe('author');
     expect(r.data.root).toBeTypeOf('string');
     const packages = (r.data.packages as Array<{ id: string }>).map((p) => p.id);
-    expect(packages).toEqual(expect.arrayContaining(['holodeck.iso', 'holodeck.cloud', 'holodeck.sim', 'holodeck.http', 'holodeck.provider-aws']));
+    expect(packages).toEqual(expect.arrayContaining(['holodeck.iso', 'holodeck.cloud', 'holodeck.process', 'holodeck.sim', 'holodeck.http', 'holodeck.provider-aws']));
     expect((r.data.providers as Array<{ id: string }>).map((p) => p.id)).toEqual(expect.arrayContaining(['holodeck.sim', 'holodeck.http', 'aws.cloudwatch']));
   });
 

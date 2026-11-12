@@ -1,0 +1,1401 @@
+[
+  {
+    "id": "process:valve-ball",
+    "label": "Ball valve",
+    "category": "Valves",
+    "hint": "Flanged ball valve with a quarter-turn lever; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 1,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "open": {
+        "type": "boolean",
+        "label": "Open",
+        "default": true
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/valve-ball.glb",
+    "animNodes": {
+      "open": {
+        "node": "anim.handle",
+        "animator": "turn",
+        "settings": {
+          "axis": "y",
+          "fromDeg": 90,
+          "toDeg": 0,
+          "scale": 1
+        }
+      }
+    },
+    "instanced": false
+  },
+  {
+    "id": "process:valve-butterfly",
+    "label": "Butterfly valve",
+    "category": "Valves",
+    "hint": "Wafer butterfly valve with a lever on a notched quadrant; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 0.5,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "open": {
+        "type": "number",
+        "label": "Open",
+        "default": 1,
+        "min": 0,
+        "max": 1,
+        "step": 0.01
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/valve-butterfly.glb",
+    "animNodes": {
+      "open": {
+        "node": "anim.handle",
+        "animator": "turn",
+        "settings": {
+          "axis": "y",
+          "fromDeg": 90,
+          "toDeg": 0,
+          "scale": 1
+        }
+      }
+    },
+    "instanced": false
+  },
+  {
+    "id": "process:valve-control",
+    "label": "Control valve",
+    "category": "Valves",
+    "hint": "Globe valve with a pneumatic diaphragm actuator; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 1,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "position": {
+        "type": "number",
+        "label": "Position",
+        "default": 0,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/valve-control.glb",
+    "animNodes": {
+      "position": {
+        "node": "anim.stem",
+        "animator": "travel",
+        "settings": {
+          "axis": "y",
+          "distance": 0.08,
+          "scale": 100
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "instanced": false
+  },
+  {
+    "id": "process:valve-actuated",
+    "label": "Actuated ball valve",
+    "category": "Valves",
+    "hint": "Ball valve with a pneumatic rotary actuator and position indicator; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 1,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "open": {
+        "type": "number",
+        "label": "Open",
+        "default": 1,
+        "min": 0,
+        "max": 1,
+        "step": 0.01
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/valve-actuated.glb",
+    "animNodes": {
+      "open": {
+        "node": "anim.handle",
+        "animator": "turn",
+        "settings": {
+          "axis": "y",
+          "fromDeg": 90,
+          "toDeg": 0,
+          "scale": 1
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "instanced": false
+  },
+  {
+    "id": "process:valve-solenoid",
+    "label": "Solenoid valve",
+    "category": "Valves",
+    "hint": "Block-body solenoid valve with a coil and cable plug; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 0.5,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "energised": {
+        "type": "boolean",
+        "label": "Energised",
+        "default": false
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/valve-solenoid.glb",
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "energised",
+        "color": "#22c55e"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:valve-three-way",
+    "label": "Three-way valve",
+    "category": "Valves",
+    "hint": "Three-way control valve with an electric actuator and a side branch; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 1,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      },
+      "branch": {
+        "x": 0,
+        "y": 0,
+        "dir": "s"
+      }
+    },
+    "params": {
+      "position": {
+        "type": "number",
+        "label": "Position",
+        "default": 0,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/valve-three-way.glb",
+    "animNodes": {
+      "position": {
+        "node": "anim.stem",
+        "animator": "travel",
+        "settings": {
+          "axis": "y",
+          "distance": 0.06,
+          "scale": 100
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "instanced": false
+  },
+  {
+    "id": "process:valve-check",
+    "label": "Check valve",
+    "category": "Valves",
+    "hint": "Swing check valve with a bolted cover and a flow arrow; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 1,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/valve-check.glb",
+    "instanced": false
+  },
+  {
+    "id": "process:valve-relief",
+    "label": "Relief valve",
+    "category": "Valves",
+    "hint": "Angle pressure relief valve with a spring bonnet and lifting lever",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "floor": true,
+    "heightParam": "mountHeight",
+    "params": {
+      "lifted": {
+        "type": "boolean",
+        "label": "Lifted",
+        "default": false
+      },
+      "mountHeight": {
+        "type": "number",
+        "label": "Mount height",
+        "default": 0,
+        "min": 0,
+        "max": 10,
+        "step": 0.01,
+        "unit": "cells"
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/valve-relief.glb",
+    "animNodes": {
+      "lifted": {
+        "node": "anim.handle",
+        "animator": "turn",
+        "settings": {
+          "axis": "z",
+          "fromDeg": 0,
+          "toDeg": 20,
+          "scale": 1
+        }
+      }
+    },
+    "alarmParam": "lifted",
+    "instanced": false
+  },
+  {
+    "id": "process:motor",
+    "label": "Motor",
+    "category": "Rotating equipment",
+    "hint": "Foot-mounted electric motor, shaft along its length",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "params": {
+      "running": {
+        "type": "boolean",
+        "label": "Running",
+        "default": false
+      },
+      "speed": {
+        "type": "number",
+        "label": "Speed",
+        "default": 100,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/motor.glb",
+    "animNodes": {
+      "speed": {
+        "node": "anim.shaft",
+        "animator": "spin",
+        "settings": {
+          "axis": "x",
+          "rpmScale": 0.6,
+          "enableParam": "running"
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "instanced": false,
+    "stateColors": [
+      {
+        "param": "running",
+        "color": "#22c55e"
+      }
+    ]
+  },
+  {
+    "id": "process:pump-lobe",
+    "label": "Lobe pump",
+    "category": "Rotating equipment",
+    "hint": "Skid-mounted rotary lobe pump with motor, coupling and opposed ports, 2×1",
+    "footprint": {
+      "w": 2,
+      "h": 1
+    },
+    "params": {
+      "running": {
+        "type": "boolean",
+        "label": "Running",
+        "default": false
+      },
+      "speed": {
+        "type": "number",
+        "label": "Speed",
+        "default": 100,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/pump-lobe.glb",
+    "animNodes": {
+      "speed": {
+        "node": "anim.shaft",
+        "animator": "spin",
+        "settings": {
+          "axis": "x",
+          "rpmScale": 0.6,
+          "enableParam": "running"
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "running",
+        "color": "#22c55e"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:pump-inline",
+    "label": "Inline pump",
+    "category": "Rotating equipment",
+    "hint": "Vertical inline centrifugal pump with a top motor; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 1,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "running": {
+        "type": "boolean",
+        "label": "Running",
+        "default": false
+      },
+      "speed": {
+        "type": "number",
+        "label": "Speed",
+        "default": 100,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/pump-inline.glb",
+    "animNodes": {
+      "speed": {
+        "node": "anim.shaft",
+        "animator": "spin",
+        "settings": {
+          "axis": "y",
+          "rpmScale": 0.6,
+          "enableParam": "running"
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "running",
+        "color": "#22c55e"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:pump-dosing",
+    "label": "Dosing pump",
+    "category": "Rotating equipment",
+    "hint": "Diaphragm metering pump with vertical small-bore connections",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "params": {
+      "running": {
+        "type": "boolean",
+        "label": "Running",
+        "default": false
+      },
+      "stroke": {
+        "type": "number",
+        "label": "Stroke",
+        "default": 100,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/pump-dosing.glb",
+    "animNodes": {
+      "stroke": {
+        "node": "anim.stem",
+        "animator": "travel",
+        "settings": {
+          "axis": "x",
+          "distance": 0.04,
+          "scale": 100,
+          "cycleHz": 1.5,
+          "enableParam": "running"
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "running",
+        "color": "#22c55e"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:blower",
+    "label": "Centrifugal blower",
+    "category": "Rotating equipment",
+    "hint": "Scroll-casing blower with an open inlet eye and a top duct outlet, 2×2",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "params": {
+      "running": {
+        "type": "boolean",
+        "label": "Running",
+        "default": false
+      },
+      "speed": {
+        "type": "number",
+        "label": "Speed",
+        "default": 100,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/blower.glb",
+    "animNodes": {
+      "speed": {
+        "node": "anim.blades",
+        "animator": "spin",
+        "settings": {
+          "axis": "z",
+          "rpmScale": 0.6,
+          "enableParam": "running"
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "running",
+        "color": "#22c55e"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:compressor",
+    "label": "Screw compressor",
+    "category": "Rotating equipment",
+    "hint": "Packaged screw compressor with a low discharge, 2×1",
+    "footprint": {
+      "w": 2,
+      "h": 1
+    },
+    "ports": {
+      "out": {
+        "x": 1,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "running": {
+        "type": "boolean",
+        "label": "Running",
+        "default": false
+      },
+      "load": {
+        "type": "number",
+        "label": "Load",
+        "default": 0,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/compressor.glb",
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "running",
+        "color": "#22c55e"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:heat-exchanger-shell-tube",
+    "label": "Shell-and-tube heat exchanger",
+    "category": "Heat transfer",
+    "hint": "Horizontal shell-and-tube exchanger on two saddles, 3×1",
+    "footprint": {
+      "w": 3,
+      "h": 1
+    },
+    "params": {
+      "tubeInTemp": {
+        "type": "number",
+        "label": "Tube in",
+        "default": 20,
+        "min": -40,
+        "max": 400,
+        "step": 0.5,
+        "unit": "°C"
+      },
+      "tubeOutTemp": {
+        "type": "number",
+        "label": "Tube out",
+        "default": 20,
+        "min": -40,
+        "max": 400,
+        "step": 0.5,
+        "unit": "°C"
+      },
+      "shellInTemp": {
+        "type": "number",
+        "label": "Shell in",
+        "default": 20,
+        "min": -40,
+        "max": 400,
+        "step": 0.5,
+        "unit": "°C"
+      },
+      "shellOutTemp": {
+        "type": "number",
+        "label": "Shell out",
+        "default": 20,
+        "min": -40,
+        "max": 400,
+        "step": 0.5,
+        "unit": "°C"
+      }
+    },
+    "model": "models/heat-exchanger-shell-tube.glb",
+    "instanced": false
+  },
+  {
+    "id": "process:boiler",
+    "label": "Fire-tube boiler",
+    "category": "Heat transfer",
+    "hint": "Packaged horizontal fire-tube boiler with burner and stack, 3×2",
+    "footprint": {
+      "w": 3,
+      "h": 2
+    },
+    "params": {
+      "firing": {
+        "type": "boolean",
+        "label": "Firing",
+        "default": false
+      },
+      "pressure": {
+        "type": "number",
+        "label": "Pressure",
+        "default": 0,
+        "reading": true
+      },
+      "unit": {
+        "type": "string",
+        "label": "Unit",
+        "default": "bar"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/boiler.glb",
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "firing",
+        "color": "#f97316"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:cooling-tower",
+    "label": "Cooling tower",
+    "category": "Heat transfer",
+    "hint": "Induced-draft package cooling tower with an open fan stack, 2×2",
+    "footprint": {
+      "w": 2,
+      "h": 2
+    },
+    "ports": {
+      "out": {
+        "x": 1,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "running": {
+        "type": "boolean",
+        "label": "Running",
+        "default": false
+      },
+      "speed": {
+        "type": "number",
+        "label": "Speed",
+        "default": 100,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/cooling-tower.glb",
+    "animNodes": {
+      "speed": {
+        "node": "anim.blades",
+        "animator": "spin",
+        "settings": {
+          "axis": "y",
+          "rpmScale": 0.3,
+          "enableParam": "running"
+        }
+      }
+    },
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "running",
+        "color": "#22c55e"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:filter",
+    "label": "Cartridge filter",
+    "category": "Separation",
+    "hint": "Vertical cartridge / bag filter with a clamped dome lid",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "ports": {
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "blocked": {
+        "type": "boolean",
+        "label": "Blocked",
+        "default": false
+      },
+      "dp": {
+        "type": "number",
+        "label": "Differential pressure",
+        "default": 0,
+        "reading": true
+      },
+      "unit": {
+        "type": "string",
+        "label": "Unit",
+        "default": "bar"
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/filter.glb",
+    "alarmParam": "blocked",
+    "instanced": false
+  },
+  {
+    "id": "process:strainer-y",
+    "label": "Y-strainer",
+    "category": "Separation",
+    "hint": "Inline Y-strainer with a diagonal basket toward +Z; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 2
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 1,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "blocked": {
+        "type": "boolean",
+        "label": "Blocked",
+        "default": false
+      },
+      "dp": {
+        "type": "number",
+        "label": "Differential pressure",
+        "default": 0,
+        "reading": true
+      },
+      "unit": {
+        "type": "string",
+        "label": "Unit",
+        "default": "bar"
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/strainer-y.glb",
+    "alarmParam": "blocked",
+    "instanced": false
+  },
+  {
+    "id": "process:cyclone",
+    "label": "Cyclone",
+    "category": "Separation",
+    "hint": "Cyclone separator with a long cone on a four-leg frame",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "params": {
+      "dp": {
+        "type": "number",
+        "label": "Differential pressure",
+        "default": 0,
+        "reading": true
+      },
+      "unit": {
+        "type": "string",
+        "label": "Unit",
+        "default": "mbar"
+      }
+    },
+    "model": "models/cyclone.glb",
+    "instanced": false
+  },
+  {
+    "id": "process:transmitter",
+    "label": "Transmitter",
+    "category": "Instruments",
+    "hint": "Field transmitter head on a short process connection",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "floor": true,
+    "params": {
+      "value": {
+        "type": "number",
+        "label": "Value",
+        "default": 0,
+        "reading": true
+      },
+      "unit": {
+        "type": "string",
+        "label": "Unit",
+        "default": ""
+      },
+      "alarm": {
+        "type": "boolean",
+        "label": "Alarm",
+        "default": false
+      },
+      "mountHeight": {
+        "type": "number",
+        "label": "Mount height",
+        "default": 0,
+        "min": 0,
+        "max": 10,
+        "step": 0.01,
+        "unit": "cells"
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/transmitter.glb",
+    "alarmParam": "alarm",
+    "instanced": false,
+    "heightParam": "mountHeight"
+  },
+  {
+    "id": "process:gauge-pressure",
+    "label": "Pressure gauge",
+    "category": "Instruments",
+    "hint": "Bottom-entry pressure gauge with a 270° dial",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "floor": true,
+    "heightParam": "mountHeight",
+    "params": {
+      "value": {
+        "type": "number",
+        "label": "Pressure",
+        "default": 0,
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "unit": "%"
+      },
+      "alarm": {
+        "type": "boolean",
+        "label": "Alarm",
+        "default": false
+      },
+      "mountHeight": {
+        "type": "number",
+        "label": "Mount height",
+        "default": 0,
+        "min": 0,
+        "max": 10,
+        "step": 0.01,
+        "unit": "cells"
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/gauge-pressure.glb",
+    "animNodes": {
+      "value": {
+        "node": "anim.needle",
+        "animator": "turn",
+        "settings": {
+          "axis": "z",
+          "fromDeg": 0,
+          "toDeg": -270,
+          "scale": 100
+        }
+      }
+    },
+    "alarmParam": "alarm",
+    "instanced": false
+  },
+  {
+    "id": "process:flowmeter-mag",
+    "label": "Magnetic flowmeter",
+    "category": "Instruments",
+    "hint": "Inline electromagnetic flowmeter with a transmitter head; sits on a pipe",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "origin": "pipe-axis",
+    "inlineLength": 1,
+    "ports": {
+      "in": {
+        "x": 0,
+        "y": 0,
+        "dir": "w"
+      },
+      "out": {
+        "x": 0,
+        "y": 0,
+        "dir": "e"
+      }
+    },
+    "params": {
+      "value": {
+        "type": "number",
+        "label": "Flow",
+        "default": 0,
+        "reading": true
+      },
+      "unit": {
+        "type": "string",
+        "label": "Unit",
+        "default": "m³/h"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/flowmeter-mag.glb",
+    "alarmParam": "fault",
+    "instanced": false
+  },
+  {
+    "id": "process:level-radar",
+    "label": "Radar level transmitter",
+    "category": "Instruments",
+    "hint": "Vessel-top radar level transmitter with a downward horn",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "floor": true,
+    "heightParam": "mountHeight",
+    "params": {
+      "value": {
+        "type": "number",
+        "label": "Level",
+        "default": 0,
+        "reading": true
+      },
+      "unit": {
+        "type": "string",
+        "label": "Unit",
+        "default": "%"
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "mountHeight": {
+        "type": "number",
+        "label": "Mount height",
+        "default": 0.2,
+        "min": 0,
+        "max": 10,
+        "step": 0.01,
+        "unit": "cells"
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/level-radar.glb",
+    "alarmParam": "fault",
+    "instanced": false
+  },
+  {
+    "id": "process:beacon",
+    "label": "Stack light",
+    "category": "Instruments",
+    "hint": "Three-tier stack light on a short pole (one colour: the highest lit tier)",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "floor": true,
+    "heightParam": "mountHeight",
+    "params": {
+      "red": {
+        "type": "boolean",
+        "label": "Red",
+        "default": false
+      },
+      "amber": {
+        "type": "boolean",
+        "label": "Amber",
+        "default": false
+      },
+      "green": {
+        "type": "boolean",
+        "label": "Green",
+        "default": false
+      },
+      "mountHeight": {
+        "type": "number",
+        "label": "Mount height",
+        "default": 0,
+        "min": 0,
+        "max": 10,
+        "step": 0.01,
+        "unit": "cells"
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/beacon.glb",
+    "stateColors": [
+      {
+        "param": "red",
+        "color": "#ef4444"
+      },
+      {
+        "param": "amber",
+        "color": "#f59e0b"
+      },
+      {
+        "param": "green",
+        "color": "#22c55e"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:cabinet",
+    "label": "Control cabinet",
+    "category": "Electrical",
+    "hint": "Floor-standing control cabinet with a status beacon",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "params": {
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/cabinet.glb",
+    "alarmParam": "fault",
+    "instanced": false
+  },
+  {
+    "id": "process:vfd",
+    "label": "Variable frequency drive",
+    "category": "Electrical",
+    "hint": "Wall-mounted drive with a heatsink and keypad",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "floor": true,
+    "heightParam": "mountHeight",
+    "params": {
+      "running": {
+        "type": "boolean",
+        "label": "Running",
+        "default": false
+      },
+      "fault": {
+        "type": "boolean",
+        "label": "Fault",
+        "default": false
+      },
+      "mountHeight": {
+        "type": "number",
+        "label": "Mount height",
+        "default": 0,
+        "min": 0,
+        "max": 10,
+        "step": 0.01,
+        "unit": "cells"
+      },
+      "color": {
+        "type": "color",
+        "label": "State colour",
+        "default": ""
+      }
+    },
+    "model": "models/vfd.glb",
+    "alarmParam": "fault",
+    "stateColors": [
+      {
+        "param": "running",
+        "color": "#22c55e"
+      }
+    ],
+    "instanced": false
+  },
+  {
+    "id": "process:junction-box",
+    "label": "Junction box",
+    "category": "Electrical",
+    "hint": "Field junction box with a screwed lid and three glands",
+    "footprint": {
+      "w": 1,
+      "h": 1
+    },
+    "floor": true,
+    "heightParam": "mountHeight",
+    "params": {
+      "mountHeight": {
+        "type": "number",
+        "label": "Mount height",
+        "default": 0,
+        "min": 0,
+        "max": 10,
+        "step": 0.01,
+        "unit": "cells"
+      }
+    },
+    "model": "models/junction-box.glb",
+    "instanced": false
+  }
+]

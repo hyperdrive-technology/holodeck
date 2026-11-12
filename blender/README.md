@@ -23,6 +23,14 @@ From `packages/library-cloud`, run `pnpm parts:build` for its GLBs or
 `pnpm parts:preview` for GLBs plus `/tmp/a1-previews/<archetype>.png`. See the
 [cloud library README](../packages/library-cloud/README.md) for its catalogue and tests.
 
+Process parts live in `parts/process/` (shared vocabulary in `_common.py`; any
+`_*.py` is a helper module, never a part) and belong to
+`@holodeck/library-process`. From `packages/library-process`, run
+`pnpm parts:build` or `pnpm parts:preview`. Each part also needs an entry in
+that package's `src/models.json` and `src/parts.json`; see its
+[README](../packages/library-process/README.md) and the
+[process catalogue](../docs/assets/process-catalog.md).
+
 Blender is found via `$BLENDER`, then `/Applications/Blender.app/Contents/MacOS/Blender`,
 then `blender` on `PATH`. Tested with Blender 5.2.2 LTS. To render a preview
 (Workbench, orthographic iso camera, not exported), run:

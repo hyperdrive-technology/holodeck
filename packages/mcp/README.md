@@ -118,7 +118,7 @@ Design notes, the playground bridge and the Blender flow: [`docs/MCP.md`](../../
 pnpm type-check && pnpm exec vitest run && pnpm build && node ../../scripts/smoke-dist.mjs .
 ```
 
-The package consumes the built `editor-2.5d-react`, `library-cloud`,
+The package consumes the built `editor-2.5d-react`, `library-cloud`, `library-process`,
 `provider-http` and `provider-aws` (`file:` deps, copied at install). Rebuild
 them and run `pnpm install` again after changing them. In CI it runs inside
 the `studio` job.

@@ -40,7 +40,7 @@ import { describeSaveStatus } from '../features/save-status';
 import { hasUncommittedDraft } from '../features/fields';
 import { focusLibrarySearch } from '../features/StudioHotkeys';
 import { useDocumentSession } from '../features/use-document-session';
-import { ensurePlaygroundDocument, PLAYGROUND_TABS, playgroundStarter, type PlaygroundTab } from './playground-state';
+import { ensurePlaygroundDocument, PLAYGROUND_TABS, playgroundProcessSample, playgroundStarter, type PlaygroundTab } from './playground-state';
 import { PLAYGROUND_DOCUMENT_ID } from './starter';
 import { connectionProblems, ViewerPanel } from './ViewerPanel';
 
@@ -427,14 +427,26 @@ function PlaygroundWorkspace({
           <DialogHeader>
             <DialogTitle>Reset the playground?</DialogTitle>
             <DialogDescription>
-              The scene, its connections and bindings go back to the starter. Your changes and the undo history are discarded (export from the studio first
-              to keep a copy).
+              The scene, its connections and bindings go back to the starter, or to the process-parts sample (valves, a motor, a heat exchanger, a
+              transmitter and a cabinet on simulated data). Your changes and the undo history are discarded (export from the studio first to keep a
+              copy).
             </DialogDescription>
           </DialogHeader>
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             <DialogClose asChild>
               <Button variant="outline">Cancel</Button>
             </DialogClose>
+            <Button
+              variant="outline"
+              data-testid="load-process-sample"
+              onClick={() => {
+                setResetOpen(false);
+                setFrozen(null);
+                session.replace(playgroundProcessSample(host));
+              }}
+            >
+              Load the process-parts sample
+            </Button>
             <Button
               variant="destructive"
               onClick={() => {
