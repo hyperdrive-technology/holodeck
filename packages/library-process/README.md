@@ -100,6 +100,21 @@ Grid ports are only declared where a pipe leaving a grid node meets the GLB
 nozzle; the heat exchanger's nozzles are off the grid, so it has none yet (see
 the catalogue's Package section).
 
+## Agent skills
+
+The package ships three skills (`skills/`, published with the package) so an
+agent can extend the library in the same style without re-deriving the rules:
+
+| Skill | Use it to |
+| --- | --- |
+| [`process-part-add`](skills/process-part-add/SKILL.md) | add one part: script template, kinds, registration checklist, style guide |
+| [`process-part-verify`](skills/process-part-verify/SKILL.md) | verify a part (previews, byte-stable rebuild, motion, tests, Studio) or review one |
+| [`process-parts-batch`](skills/process-parts-batch/SKILL.md) | run a wave of parts through a 3D-generating model, with a brief template |
+
+In this repository they are linked from `.claude/skills/`, so Claude Code finds
+them; other agents can read the `SKILL.md` files directly. `src/skills.test.ts`
+fails when a skill names a `_common` helper, part or file that no longer exists.
+
 ## Adding parts from a new Blender batch
 
 1. The batch adds `blender/parts/process/<slug>.py` and
