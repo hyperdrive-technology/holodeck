@@ -12,7 +12,7 @@
     "./assets/*": "./assets/*",
     "./package.json": "./package.json"
   },
-  "files": ["dist/**/*", "assets/**/*", "holodeck.package.json", "README.md", "LICENSE"],
+  "files": ["dist/**/*", "assets/**/*", "skills/**/*", "holodeck.package.json", "README.md", "LICENSE"],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

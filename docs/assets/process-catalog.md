@@ -87,6 +87,9 @@ How the definitions use the editor contract (`IsoPartDefinition`):
   them on the floor (0.2 for the radar, whose horn hangs below its flange);
   0.52 puts one on top of a floor pipe. They declare no grid ports.
 
+The package also ships agent skills (`packages/library-process/skills/`) for adding,
+verifying and batching parts in this style.
+
 Nothing in the package knows about PLCs or Hyperdrive. Hyperdrive binds tags to
 the part params through the normal binding model.
 

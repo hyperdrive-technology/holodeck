@@ -29,7 +29,8 @@ Process parts live in `parts/process/` (shared vocabulary in `_common.py`; any
 `pnpm parts:build` or `pnpm parts:preview`. Each part also needs an entry in
 that package's `src/models.json` and `src/parts.json`; see its
 [README](../packages/library-process/README.md) and the
-[process catalogue](../docs/assets/process-catalog.md).
+[process catalogue](../docs/assets/process-catalog.md). Agent skills for adding, verifying
+and batching process parts: [`packages/library-process/skills/`](../packages/library-process/skills/).
 
 Blender is found via `$BLENDER`, then `/Applications/Blender.app/Contents/MacOS/Blender`,
 then `blender` on `PATH`. Tested with Blender 5.2.2 LTS. To render a preview
