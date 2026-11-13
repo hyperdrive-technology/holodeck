@@ -73,6 +73,7 @@ Make only the parts in the table below.
 For each part, from the worktree root:
 
 ```sh
+BLENDER=${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}
 mkdir -p packages/library-process/assets/models <preview dir>
 "$BLENDER" -b --factory-startup --python-exit-code 1 \
   --python blender/parts/process/<slug>.py -- \

@@ -109,9 +109,11 @@ the **process-part-verify** skill before declaring the part done.
    add it to the asset map (`process-package.test.ts` fails if missing).
 6. Slug lists in tests: `src/holodeck-package.test.ts`,
    `apps/studio/src/host/library.test.ts` and
-   `apps/studio/e2e/process-sample.webgpu.spec.ts`; add the part to
-   `apps/studio/samples/process-line.holodeck.json` if it belongs in the
-   sample line.
+   `apps/studio/e2e/process-sample.webgpu.spec.ts`. Also **place the part in
+   `apps/studio/samples/process-line.holodeck.json`** (it must stay clear of
+   the other parts): `apps/studio/src/samples/process-line.test.ts` requires
+   every package part in the sample and checks overlaps and object counts, so
+   update any count it asserts.
 7. A part-specific animation or state-colour test in `src/process-glb.test.ts`
    when it has an anim node (copy a neighbour: it asserts the end positions).
 
