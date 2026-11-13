@@ -9,8 +9,8 @@ description: Verify a new or changed @holodeck/library-process part before it is
 the runtime look, so a part is verified in layers, cheapest first. Report what
 you ran and what you did not.
 
-Paths are relative to the holodeck repo root. `$BLENDER` defaults to
-`/Applications/Blender.app/Contents/MacOS/Blender` (tested with 5.2.2).
+Paths are relative to the holodeck repo root. Set Blender once per shell
+(tested with 5.2.2): `BLENDER=${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}`.
 
 ## 1. First build (script only, before the part is registered)
 
@@ -84,7 +84,7 @@ or load `apps/studio/samples/process-line.holodeck.json`, which places every
 part. Check: outlines at creases without clutter, `hd.accent` takes the state
 colour (toggle the part's `fault` / `running` params), moving nodes move the
 right way, an inline part snaps to a drawn pipe, a mounted part sits at the
-right `mountHeight`. The WebGPU e2e (`pnpm --dir apps/studio e2e`, needs
+right `mountHeight`. The WebGPU e2e (`pnpm e2e` in `apps/studio`, needs
 Chromium) renders the sample with every part; run it once per PR on the final
 head, and say so if you could not.
 
