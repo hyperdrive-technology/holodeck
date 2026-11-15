@@ -2,6 +2,7 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig, type Connect, type Plugin } from 'vite';
+import { mcpBridgePlugin } from './bridge/vite-plugin.ts';
 
 const EDITOR = '@holodeck/editor-2.5d-react';
 
@@ -28,7 +29,8 @@ export function frameHeaders(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), frameHeaders()],
+  // mcpBridgePlugin: only with `--mode playground` / HOLODECK_MCP_BRIDGE=1 (bridge/vite-plugin.ts).
+  plugins: [react(), tailwindcss(), frameHeaders(), mcpBridgePlugin()],
   resolve: {
     alias: { '@': decodeURIComponent(new URL('./src', import.meta.url).pathname) },
     // The editor and the SDK are `file:` dependencies with their own
@@ -80,6 +82,6 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test-setup.ts'],
-    include: ['src/**/*.test.{ts,tsx}'],
+    include: ['src/**/*.test.{ts,tsx}', 'bridge/**/*.test.ts'],
   },
 });

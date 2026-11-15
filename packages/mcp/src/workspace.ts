@@ -47,7 +47,7 @@ const errno = (error: unknown) => (error as NodeJS.ErrnoException)?.code;
 const isMissing = (error: unknown) => errno(error) === 'ENOENT' || errno(error) === 'ENOTDIR';
 
 /** Run `fn` after every earlier call with the same key has settled. */
-function serialised<T>(locks: Map<string, Promise<unknown>>, key: string, fn: () => Promise<T>): Promise<T> {
+export function serialised<T>(locks: Map<string, Promise<unknown>>, key: string, fn: () => Promise<T>): Promise<T> {
   const previous = locks.get(key) ?? Promise.resolve();
   const run = previous.then(fn, fn);
   const settled = run.then(

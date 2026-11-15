@@ -135,6 +135,11 @@ No document list or welcome screen; the studio at `/` is unchanged.
   a transmitter and a control cabinet, all on `holodeck.sim` (stem position,
   lever, shaft and fault tints animate in the Viewer). Deleted from another tab, the playground starts again
   from the starter.
+- **MCP bridge**: `pnpm playground` also starts a loopback-only WebSocket
+  bridge (`bridge/`, a Vite plugin; `HOLODECK_MCP_BRIDGE=1` with `vite
+  preview`). The tab registers as a session, and `@holodeck/mcp` edits its
+  scene live, one undo step per tool call. Design and threat model:
+  [`docs/MCP.md`](../../docs/MCP.md#playground-bridge).
 - Shared code: the working copy, writer and every command live in
   `useDocumentSession` (`src/features/use-document-session.ts`), used by both
   `/d/$docId` and `/playground`. Secrets follow the studio rules above (never
