@@ -21,6 +21,7 @@ import {
   nozzleAxisY,
   planRiserEnd,
   planRisers,
+  riserAppearance,
   vesselUndersideY,
   RISER_MIN_RUN,
   RISER_NOZZLE_LEN,
@@ -64,6 +65,45 @@ function plan(objects: IsoPlacement[], walls: VesselWall[], bends: Set<string> =
     if (clip.from || clip.to) clips.set(p.id, clip);
   }
   return planRisers(objects, clips, walls, bends);
+}
+
+/** Runs as main draws them (clip only) and with risers, for the same scene. */
+function runsFor(objects: IsoPlacement[], walls: VesselWall[]) {
+  const clips = new Map<string, PipeClip>();
+  for (const p of objects) {
+    const from = { x: p.x, y: p.y };
+    const to = { x: p.toX!, y: p.toY! };
+    const clip: PipeClip = {};
+    // Same "best contact" rule as resolvePipeClips, simplified: first contact wins.
+    for (const w of walls) {
+      clip.from ??= clipFor(from, to, w) ?? undefined;
+      clip.to ??= clipFor(to, from, w) ?? undefined;
+    }
+    if (!clip.from) delete clip.from;
+    if (!clip.to) delete clip.to;
+    if (clip.from || clip.to) clips.set(p.id, clip);
+  }
+  const { risers, trims } = planRisers(objects, clips, walls);
+  const main = new Map(objects.map((p) => [p.id, pipeRunSpec(p, new Set(), clips.get(p.id))!]));
+  const next = new Map(objects.map((p) => [p.id, pipeRunSpec(p, new Set(), clips.get(p.id), trims.get(p.id))!]));
+  return { objects, risers, trims, main, next };
+}
+
+function assertNoNewlyHidden({ objects, risers, trims, main, next }: ReturnType<typeof runsFor>) {
+  const label = objects.map((o) => `${o.id}:${o.x},${o.y}->${o.toX},${o.toY}`).join(' ');
+  for (const p of objects) {
+    const m = main.get(p.id)!;
+    const n = next.get(p.id)!;
+    if (m.hidden || Math.hypot(p.toX! - p.x, p.toY! - p.y) < 1e-9) continue;
+    expect(n.hidden, `${p.id} hidden by risers; ${label}`).toBe(false);
+    const dot = (n.to[0] - n.from[0]) * (p.toX! - p.x) + (n.to[1] - n.from[1]) * (p.toY! - p.y);
+    expect(dot, `${p.id} flipped; ${label}`).toBeGreaterThan(0);
+  }
+  // Every drawn riser is fed by a run that is trimmed to it.
+  for (const r of risers) {
+    expect(r.pipes.length).toBeGreaterThan(0);
+    for (const pe of r.pipes) expect(trims.get(pe.pipeId)?.[pe.end], `${r.id} <- ${pe.pipeId}.${pe.end}`).toBeDefined();
+  }
 }
 
 /** World (x, z) of grid (x, y). */
@@ -304,6 +344,67 @@ describe('planRisers', () => {
     }
   });
 
+  it('regression: header grouping cannot deepen both trims of a run until it hides (GPT case, branches first)', () => {
+    const a = raised({ id: 'a' });
+    const b = raised({ id: 'b', y: 1.2 });
+    const between = pipe('ab', 0, 0.395, 0, 0.805);
+    const objects = [pipe('br1', 0, 0.395, 3, 0.395), pipe('br2', 0, 0.805, 3, 0.805), between];
+    const result = runsFor(objects, [a, b]);
+    expect(result.main.get('ab')!.hidden).toBe(false);
+    expect(result.next.get('ab')!.hidden).toBe(false);
+    assertNoNewlyHidden(result);
+  });
+
+  it('property: no input order or layout hides a run (or flips it) that main draws', () => {
+    // Small seeded PRNG (mulberry32) so a failure is reproducible.
+    let seed = 0x5eed;
+    const rnd = () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const pick = <T,>(xs: readonly T[]) => xs[Math.floor(rnd() * xs.length)]!;
+    let checked = 0;
+    const POSITIONS = [[1.25, 0], [1.5, 0], [2, 0], [3, 0], [1.5, 0.4], [0, 1.2], [0, 1.5], [0, 2]] as const;
+    const INSETS = [0.395, 0.6, 0.8];
+    const BRANCH_OFFSETS = [0.2, 0.39, 0.395, 0.6];
+    for (const [vx, vy] of POSITIONS) {
+      for (const inset of INSETS) {
+        for (const off of BRANCH_OFFSETS) {
+          const vessels = [raised({ id: 'v0' }), raised({ id: 'v1', x: vx, y: vy })];
+          const d = Math.hypot(vx, vy);
+          const [ux, uy] = [vx / d, vy / d];
+          // Branches leave each vessel perpendicular to the link, `off` along it towards the other vessel
+          // (GPT's case: off = inset = 0.395, so the branch risers sit right on the link's ends).
+          const objects: IsoPlacement[] = [
+            pipe('b0', ux * off, uy * off, ux * off - uy * 3, uy * off + ux * 3),
+            pipe('b1', vx - ux * off, vy - uy * off, vx - ux * off - uy * 3, vy - uy * off + ux * 3),
+          ];
+          // Plus two random stubs near a vessel.
+          for (let i = 0; i < 2; i++) {
+            const v = pick(vessels);
+            const sgn = rnd() < 0.5 ? -1 : 1;
+            const r = pick([0, 0.2, 0.6, 0.8]);
+            const len = pick([0.3, 0.5, 1, 2]);
+            const x = v.x + sgn * r;
+            const y = v.y + pick([0, 0.39, -0.395]);
+            objects.push(pipe(`p${i}`, x, y, x + sgn * len, y));
+          }
+          const link = pipe('link', ux * inset, uy * inset, vx - ux * inset, vy - uy * inset);
+          for (let at = 0; at <= objects.length; at++) {
+            const order = [...objects.slice(0, at), link, ...objects.slice(at)];
+            for (const list of [order, [...order].reverse()]) {
+              assertNoNewlyHidden(runsFor(list, vessels));
+              checked += 1;
+            }
+          }
+        }
+      }
+    }
+    expect(checked).toBe(POSITIONS.length * INSETS.length * BRANCH_OFFSETS.length * 5 * 2);
+  });
+
   it('ends on an elbow cell are the elbow\'s business: no riser', () => {
     const v = raised();
     const { risers } = plan([pipe('p', 0.8, 0, 3, 0)], [v], new Set(['0.8,0']));
@@ -381,5 +482,26 @@ describe('brewery scenes (vendored fixtures, mirrored vessel parts)', () => {
     const kettle = risers.filter((r) => r.vesselId === 'kettle');
     expect(kettle.map((r) => r.pipes.map((p) => p.pipeId).join('+')).sort()).toEqual(['p-k-out', 'p-mt-out']);
     expect(kettle.every((r) => r.kind === 'side')).toBe(true);
+  });
+});
+
+describe('riserAppearance (holodeck#326)', () => {
+  const r = (...ids: string[]) => ({ pipes: ids.map((pipeId) => ({ pipeId, end: 'from' as const })) });
+  it('takes the feeding pipe\'s opacity and z (defaults 1 / 0)', () => {
+    expect(riserAppearance(r('a'), new Map([['a', {}]]))).toEqual({ opacity: 1, z: 0 });
+    expect(riserAppearance(r('a'), new Map([['a', { opacity: 0.3, z: -2 }]]))).toEqual({ opacity: 0.3, z: -2 });
+  });
+  it('a zero-opacity pipe gives a zero-opacity (undrawn) riser', () => {
+    expect(riserAppearance(r('a'), new Map([['a', { opacity: 0 }]])).opacity).toBe(0);
+  });
+  it('a shared header takes the most visible, frontmost member', () => {
+    const byId = new Map([
+      ['a', { opacity: 0, z: 1 }],
+      ['b', { opacity: 0.5, z: -1 }],
+    ]);
+    expect(riserAppearance(r('a', 'b'), byId)).toEqual({ opacity: 0.5, z: 1 });
+  });
+  it('clamps out-of-range opacity', () => {
+    expect(riserAppearance(r('a'), new Map([['a', { opacity: 4 }]])).opacity).toBe(1);
   });
 });

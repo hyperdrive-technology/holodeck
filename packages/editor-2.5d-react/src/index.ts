@@ -161,6 +161,7 @@ export {
   DEFAULT_TANK_CUTOUT,
   ELBOW_BEND_PARAM,
   planRisers,
+  riserAppearance,
   vesselUndersideY,
 } from './routing';
 export type { PipeRiser, RiserKind, RiserOptions, RiserPipeEnd, RiserPlan } from './routing';

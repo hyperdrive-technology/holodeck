@@ -9,6 +9,9 @@ import { resolveAutoElbows } from '../routing/elbows';
 import { mergeFittingParams } from '../../assets/process/fitting-params';
 import { Riser } from '../../assets/process/Riser';
 import { bendKeysOf, resolvePipeRuns } from './pipe-runs';
+import { riserAppearance } from '../routing/vessel-risers';
+import { Appearance } from '../objects/AppearanceGroup';
+import { needsAppearance } from '../objects/appearance';
 import type { IsoPlacement } from './scene';
 import { connectorRouteKey, liveConnectorObjects, resolveConnectorPaths } from '../objects/connector';
 
@@ -73,11 +76,18 @@ export function SceneGraph({
     // routeKey stands in for metrics (read through the ref) on purpose.
     [objects, registry, routeKey],
   );
-  const riserViews = risers.map((riser) => (
-    <group key={`riser:${riser.id}`} onPointerDown={(event) => onObjectPointerDown?.(riser.pipes[0]!.pipeId, event)}>
-      <Riser riser={riser} radius={pipeRadius} params={fittings} />
-    </group>
-  ));
+  const byId = new Map(objects.map((o) => [o.id, o]));
+  // A riser fades / orders with the pipes that feed it (riserAppearance); fully invisible runs draw no riser.
+  const riserViews = risers.flatMap((riser) => {
+    const look = riserAppearance(riser, byId);
+    if (look.opacity <= 0) return [];
+    const body = <Riser riser={riser} radius={pipeRadius} params={fittings} />;
+    return [
+      <group key={`riser:${riser.id}`} onPointerDown={(event) => onObjectPointerDown?.(riser.pipes[0]!.pipeId, event)}>
+        {needsAppearance(look) ? <Appearance opacity={look.opacity} z={look.z}>{body}</Appearance> : body}
+      </group>,
+    ];
+  });
   const drawn = hiddenFittings.size > 0 ? objects.filter((o) => !hiddenFittings.has(o.id)) : objects;
   const view = (object: IsoPlacement) => (
     <group

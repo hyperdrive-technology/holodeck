@@ -382,5 +382,65 @@ export function planRisers(
       },
     });
   }
-  return { risers, trims };
+  return enforceRunBudgets(objects, clips, bendKeys, risers, trims);
+}
+
+/**
+ * The invariant, checked once on the FINAL trims (after header grouping,
+ * whatever the input order): every run keeps at least RISER_MIN_RUN between
+ * its drawn ends. A run that does not is put back exactly as on main: both of
+ * its riser ends are dropped (it keeps the plain vessel clip trims), and a
+ * riser left with no pipe is not drawn. A run hidden by risers but visible on
+ * main is therefore impossible (holodeck#320 and its header follow-up).
+ */
+function enforceRunBudgets(
+  objects: readonly IsoPlacement[],
+  clips: ReadonlyMap<string, PipeClip>,
+  bendKeys: ReadonlySet<string>,
+  risers: PipeRiser[],
+  trims: Map<string, { from?: number; to?: number }>,
+): RiserPlan {
+  const revert = new Set<string>();
+  for (const p of objects) {
+    if (!isPipe(p)) continue;
+    const t = trims.get(p.id);
+    if (!t) continue;
+    const len = Math.hypot(p.toX - p.x, p.toY - p.y);
+    // Elbow trims as pipe-math.ts trimRun applies them (dropped when both do not fit).
+    let ea = bendKeys.has(`${p.x},${p.y}`) ? ELBOW_RADIUS : 0;
+    let eb = bendKeys.has(`${p.toX},${p.toY}`) ? ELBOW_RADIUS : 0;
+    if (ea + eb >= len - 1e-4) ea = eb = 0;
+    const clip = clips.get(p.id);
+    const a = t.from ?? (ea || clip?.from?.trim || 0);
+    const b = t.to ?? (eb || clip?.to?.trim || 0);
+    if (a + b > len - RISER_MIN_RUN + EPS) revert.add(p.id);
+  }
+  if (revert.size === 0) return { risers, trims };
+  for (const id of revert) trims.delete(id);
+  const kept = risers
+    .map((r) => ({ ...r, pipes: r.pipes.filter((pe) => !revert.has(pe.pipeId)) }))
+    .filter((r) => r.pipes.length > 0);
+  return { risers: kept, trims };
+}
+
+/**
+ * Opacity / z-order of a riser, from the pipes that feed it (holodeck#326):
+ * a riser belongs to its runs, so it fades with them. A shared header takes
+ * the most visible member (max opacity) and the frontmost z (max), so it is
+ * never fainter or further back than any run it carries. Opacity 0 = do not
+ * draw it (every feeding run is invisible). Missing values default like
+ * placements do (opacity 1, z 0).
+ */
+export function riserAppearance(
+  riser: Pick<PipeRiser, 'pipes'>,
+  byId: ReadonlyMap<string, Pick<IsoPlacement, 'opacity' | 'z'>>,
+): { opacity: number; z: number } {
+  let opacity = 0;
+  let z = -Infinity;
+  for (const pe of riser.pipes) {
+    const p = byId.get(pe.pipeId);
+    opacity = Math.max(opacity, Math.min(1, Math.max(0, p?.opacity ?? 1)));
+    z = Math.max(z, p?.z ?? 0);
+  }
+  return { opacity, z: Number.isFinite(z) ? z : 0 };
 }

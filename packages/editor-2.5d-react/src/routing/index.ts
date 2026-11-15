@@ -65,6 +65,7 @@ export {
   nozzleAxisY,
   planRiserEnd,
   planRisers,
+  riserAppearance,
   vesselUndersideY,
   RISER_MIN_RISE,
   RISER_MIN_RUN,
