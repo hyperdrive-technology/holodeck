@@ -339,6 +339,22 @@ describe('part_install', () => {
     await expect(readFile(join(modelsDir(), 'mixer.glb'))).rejects.toThrow();
   });
 
+  it('a binding collision is refused before the GLB is copied (holodeck#294)', async () => {
+    await open();
+    await h.call('blender_build_part', { name: 'switch', source: goodScript(), preview: false });
+    expect((await h.call('part_install', { name: 'switch' })).isError).toBe(false);
+    const index = await readFile(join(modelsDir(), 'index.ts'), 'utf8');
+
+    await h.call('blender_build_part', { name: 'switch-glb', source: goodScript(), preview: false });
+    const r = await h.call('part_install', { name: 'switch-glb' });
+    expect(r.data.error).toMatchObject({ code: 'conflict', message: expect.stringContaining('would both import as switchGlb') });
+    await expect(readFile(join(modelsDir(), 'switch-glb.glb'))).rejects.toThrow();
+    expect(await readFile(join(modelsDir(), 'index.ts'), 'utf8')).toBe(index);
+    // The library is still consistent: the next install works.
+    await h.call('blender_build_part', { name: 'mixer', source: goodScript(), preview: false });
+    expect((await h.call('part_install', { name: 'mixer' })).isError).toBe(false);
+  });
+
   it('closing the server removes the scratch builds', async () => {
     await open();
     const r = await h.call('blender_build_part', { name: 'mixer', source: goodScript(), preview: false });

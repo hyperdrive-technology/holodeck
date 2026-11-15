@@ -51,6 +51,12 @@ describe('validatePartGlb', () => {
     expect(problemsOf((j) => delete j.meshes[0].primitives[0].material)).toEqual([expect.stringMatching(/has no material/)]);
   });
 
+  it('a primitive must point at a material that exists (holodeck#295)', () => {
+    for (const bad of [999, 1, -1, 0.5, '0']) {
+      expect(problemsOf((j) => (j.meshes[0].primitives[0].material = bad)), String(bad)).toEqual([expect.stringMatching(/material .* does not exist \(the GLB has 1 material/)]);
+    }
+  });
+
   it('double-sided materials are a warning, not a violation', () => {
     const v = validatePartGlb(partGlb((j) => (j.materials[0].doubleSided = true)));
     expect(v.ok).toBe(true);
@@ -73,6 +79,23 @@ describe('validatePartGlb', () => {
       }),
     ).toEqual([expect.stringMatching(/declared twice/)]);
     expect(problemsOf((j) => (j.nodes[1].name = 'port.'))).toEqual([expect.stringMatching(/name after "port\." must be/)]);
+  });
+
+  it('ports and pivots outside the scene do not count (holodeck#296)', () => {
+    // The only port is not in the scene: the runtime would find no connection point.
+    expect(problemsOf((j) => (j.scenes[0].nodes = [0]))).toEqual([expect.stringMatching(/"port\.in" is not in scene 0/), expect.stringMatching(/^no port\.\* empty/)]);
+    // One port in the scene, one outside: the outside one is a problem and not reported as a port.
+    const v = validatePartGlb(partGlb((j) => j.nodes.push({ name: 'port.out' }, { name: 'anim.lid' })));
+    expect(v.problems).toEqual([expect.stringMatching(/"port\.out" is not in scene 0/), expect.stringMatching(/"anim\.lid" is not in scene 0.*hd\.add_anim/)]);
+    expect(v.stats).toMatchObject({ ports: ['in'], anims: [] });
+    // Under the part's root it is found.
+    const child = validatePartGlb(
+      partGlb((j) => {
+        j.nodes.push({ name: 'port.out' });
+        j.nodes[0].children = [2];
+      }),
+    );
+    expect(child).toMatchObject({ ok: true, stats: { ports: ['in', 'out'] } });
   });
 
   it('anim pivots are empties and are reported', () => {

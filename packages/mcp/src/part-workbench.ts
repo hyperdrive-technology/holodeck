@@ -293,10 +293,20 @@ export class PartWorkbench {
           'conflict',
         );
       }
-      const after = before.includes(name) ? before : [...before, name].sort();
-      await writeRepoFile(this.layout, target, glb);
+      // Generate the next map before writing anything: a binding collision (`switch` vs `switch-glb`)
+      // is refused with the library untouched, not after the GLB is copied (holodeck#294).
       const registered = !before.includes(name);
-      if (registered) await writeRepoFile(this.layout, this.layout.modelIndex, modelIndexSource(after));
+      const nextIndex = registered ? modelIndexSource([...before, name]) : null;
+      await writeRepoFile(this.layout, target, glb);
+      if (nextIndex !== null) {
+        try {
+          await writeRepoFile(this.layout, this.layout.modelIndex, nextIndex);
+        } catch (err) {
+          // A new GLB without its import fails index.test.ts and every later install: take it back out.
+          await rm(target, { force: true }).catch(() => undefined);
+          throw err;
+        }
+      }
       return {
         name,
         model: repoPath(this.layout, target),

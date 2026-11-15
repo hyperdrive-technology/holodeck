@@ -165,10 +165,19 @@ const RESERVED_WORDS = new Set(
   'await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield arguments eval'.split(' '),
 );
 
-/** `brite-tank` -> `briteTank`; a reserved word gets a `Glb` suffix (`switch` -> `switchGlb`). */
+/**
+ * Names the generated index.ts itself declares: an import binding with one of
+ * these names would clash with it (`model-url` -> `modelUrl`, holodeck#293).
+ */
+const GENERATED_NAMES = new Set(['modelUrl', 'BUILTIN_MODEL_URLS']);
+
+/**
+ * `brite-tank` -> `briteTank`; a reserved word or a name the index declares
+ * gets a `Glb` suffix (`switch` -> `switchGlb`, `model-url` -> `modelUrlGlb`).
+ */
 export function modelIdentifier(name: string): string {
   const camel = name.replace(/-([a-z0-9])/g, (_, c: string) => c.toUpperCase());
-  return RESERVED_WORDS.has(camel) ? `${camel}Glb` : camel;
+  return RESERVED_WORDS.has(camel) || GENERATED_NAMES.has(camel) ? `${camel}Glb` : camel;
 }
 
 const INDEX_HEADER = `/**

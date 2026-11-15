@@ -211,9 +211,9 @@ export function validatePartGlb(bytes: Uint8Array, options: ValidateOptions = {}
   for (const ext of gltf.extensionsRequired ?? []) problems.push(`extension ${ext} is required: parts must load with no glTF extensions (lights, Draco, ...)`);
   for (const ext of gltf.extensionsUsed ?? []) if (!(gltf.extensionsRequired ?? []).includes(ext)) warnings.push(`extension ${ext} is used: parts normally need none`);
 
-  // Nodes: cameras / lights / skins on nodes, ports and anim pivots.
-  const ports: string[] = [];
-  const anims: string[] = [];
+  // Nodes: cameras / lights / skins on nodes, ports and anim pivots. Ports and pivots are
+  // kept with their node index: only those in the scene count (checked after the traversal).
+  const declared: { index: number; label: string; prefix: 'port.' | 'anim.'; short: string }[] = [];
   nodes.forEach((node, i) => {
     const label = node.name ? JSON.stringify(node.name) : `node ${i}`;
     if (node.camera !== undefined) problems.push(`${label} is a camera`);
@@ -221,17 +221,16 @@ export function validatePartGlb(bytes: Uint8Array, options: ValidateOptions = {}
     else if (node.extensions && Object.keys(node.extensions).length) problems.push(`${label} carries node extensions (${Object.keys(node.extensions).join(', ')})`);
     if (node.skin !== undefined) problems.push(`${label} is skinned`);
     const name = node.name ?? '';
-    for (const [prefix, list] of [['port.', ports], ['anim.', anims]] as const) {
+    for (const prefix of ['port.', 'anim.'] as const) {
       if (!name.startsWith(prefix)) continue;
       const short = name.slice(prefix.length);
       if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(short)) problems.push(`${label}: the name after "${prefix}" must be letters, digits, "-" or "_" (got ${JSON.stringify(short)})`);
-      if (list.includes(short)) problems.push(`${label} is declared twice`);
-      list.push(short);
+      if (declared.some((d) => d.prefix === prefix && d.short === short)) problems.push(`${label} is declared twice`);
+      declared.push({ index: i, label, prefix, short });
       if (node.mesh !== undefined) problems.push(`${label} must be an empty, not a mesh (${prefix === 'port.' ? 'hd.add_port' : 'hd.add_anim'})`);
     }
     if (name.startsWith('port.') && (node.children?.length ?? 0) > 0) problems.push(`${label} must have no children (a port is a point)`);
   });
-  if (ports.length === 0) problems.push('no port.* empty: a part needs at least one pipe connection point (hd.add_port)');
 
   // Geometry: triangles and bounds, from the default scene.
   let triangles = 0;
@@ -240,6 +239,9 @@ export function validatePartGlb(bytes: Uint8Array, options: ValidateOptions = {}
       const where = `mesh ${JSON.stringify(mesh.name ?? mi)} primitive ${pi}`;
       if (prim.mode !== undefined && prim.mode !== TRIANGLES) problems.push(`${where}: mode ${prim.mode} (only triangles, mode 4)`);
       if (prim.material === undefined) problems.push(`${where} has no material: it would render with the default material, outside the style layer`);
+      else if (!Number.isInteger(prim.material) || prim.material < 0 || prim.material >= materials.length) {
+        problems.push(`${where}: material ${JSON.stringify(prim.material)} does not exist (the GLB has ${materials.length} material(s)); it would not load`);
+      }
       const count = prim.indices !== undefined ? accessors[prim.indices]?.count : accessors[prim.attributes?.POSITION ?? -1]?.count;
       if (typeof count !== 'number') problems.push(`${where}: no index or POSITION accessor`);
       else triangles += Math.floor(count / 3);
@@ -278,6 +280,19 @@ export function validatePartGlb(bytes: Uint8Array, options: ValidateOptions = {}
   };
   const seen = new Set<number>();
   for (const root of Array.isArray(roots) ? roots : []) visit(root, IDENTITY, seen);
+
+  // Ports and pivots outside the scene: the runtime (findPorts / the animator) walks the
+  // loaded scene, so a node that is not in it is never found (holodeck#296).
+  const ports: string[] = [];
+  const anims: string[] = [];
+  for (const d of declared) {
+    if (!seen.has(d.index)) {
+      problems.push(`${d.label} is not in scene ${sceneIndex}: the runtime would never find it (parent it under the part, as hd.${d.prefix === 'port.' ? 'add_port' : 'add_anim'} does)`);
+      continue;
+    }
+    (d.prefix === 'port.' ? ports : anims).push(d.short);
+  }
+  if (ports.length === 0) problems.push('no port.* empty: a part needs at least one pipe connection point (hd.add_port)');
 
   let bounds: PartStats['bounds'] = null;
   const found = box as Box | null;

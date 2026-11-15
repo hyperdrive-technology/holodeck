@@ -1,5 +1,5 @@
 /** Part names, the repo files the Blender tools may touch, and the generated model map. */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -58,7 +58,11 @@ describe('part names', () => {
 describe('model map (assets/models/index.ts)', () => {
   it('the generator reproduces the checked-in file byte for byte', () => {
     const layout = repoLayout(defaultRepoRoot());
-    const names = ['brite-tank', 'fermenter', 'heat-exchanger', 'kettle', 'mash-tun', 'pump', 'valve'];
+    // The GLBs on disk, so a part_install (which adds a GLB and its import) keeps this green (holodeck#292).
+    const names = readdirSync(layout.modelsDir)
+      .filter((f) => f.endsWith('.glb'))
+      .map((f) => f.slice(0, -'.glb'.length));
+    expect(names).toEqual(expect.arrayContaining(['brite-tank', 'fermenter', 'heat-exchanger', 'kettle', 'mash-tun', 'pump', 'valve']));
     expect(modelIndexSource(names)).toBe(readFileSync(layout.modelIndex, 'utf8'));
   });
 
@@ -75,6 +79,15 @@ describe('model map (assets/models/index.ts)', () => {
     expect(modelIndexSource(['switch'])).toContain('  switch: switchGlb,\n');
     expect(() => modelIndexSource(['switch', 'switch-glb'])).toThrow(/would both import as switchGlb/);
     expect(() => modelIndexSource(['../x'])).toThrow(ToolError);
+  });
+
+  it('a name that would shadow what the index declares gets a suffix (holodeck#293)', () => {
+    expect(modelIdentifier('model-url')).toBe('modelUrlGlb');
+    const text = modelIndexSource(['model-url', 'valve']);
+    expect(text).toContain("import modelUrlGlb from './model-url.glb?url';\n");
+    expect(text).toContain("  'model-url': modelUrlGlb,\n");
+    expect(text).toContain('export function modelUrl(name: string): string {');
+    expect(() => modelIndexSource(['model-url', 'model-url-glb'])).toThrow(/would both import as modelUrlGlb/);
   });
 });
 
