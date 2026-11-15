@@ -140,8 +140,8 @@ describe('validatePartGlb', () => {
   });
 
   it('triangle budget: default and per call; non-triangle primitives are refused', () => {
-    expect(problemsOf((j) => (j.accessors[1].count = (DEFAULT_PART_TRIANGLES + 1) * 3))).toEqual([expect.stringMatching(/5001 triangles, over the budget of 5000/)]);
-    expect(problemsOf(() => undefined, { maxTriangles: 10 })).toEqual([expect.stringMatching(/12 triangles, over the budget of 10/)]);
+    expect(problemsOf((j) => (j.accessors[1].count = (DEFAULT_PART_TRIANGLES + 1) * 3))).toEqual([expect.stringMatching(/5001 triangles drawn, over the budget of 5000/)]);
+    expect(problemsOf(() => undefined, { maxTriangles: 10 })).toEqual([expect.stringMatching(/12 triangles drawn, over the budget of 10/)]);
     // No indices: POSITION count / 3.
     expect(validatePartGlb(partGlb((j) => delete j.meshes[0].primitives[0].indices)).stats?.triangles).toBe(8);
     expect(problemsOf((j) => (j.meshes[0].primitives[0].mode = 1))).toEqual([expect.stringMatching(/mode 1/)]);
@@ -192,6 +192,50 @@ describe('validatePartGlb', () => {
     expect(problemsOf((j) => (j.nodes[0].children = [0]))).toEqual(expect.arrayContaining([expect.stringMatching(/reachable twice/)]));
     expect(problemsOf((j) => delete j.accessors[0].min)).toEqual(expect.arrayContaining([expect.stringMatching(/lacks min \/ max/)]));
     expect(problemsOf((j) => (j.asset.version = '1.0'))).toEqual([expect.stringMatching(/asset\.version/)]);
+  });
+
+  it('triangles count once per node that draws the mesh (holodeck#322)', () => {
+    // 100 more nodes drawing the one 12-triangle mesh: 1212 drawn.
+    const shared = validatePartGlb(
+      partGlb((j) => {
+        for (let k = 0; k < 100; k++) {
+          j.nodes.push({ mesh: 0, translation: [0, 0, 0] });
+          j.scenes[0].nodes.push(j.nodes.length - 1);
+        }
+      }),
+    );
+    expect(shared).toMatchObject({ ok: true, stats: { triangles: 1212 } });
+    expect(validatePartGlb(partGlb((j) => j.nodes.push({ mesh: 0 }, { mesh: 0 })), { maxTriangles: 12 }).ok).toBe(true); // not in the scene: not drawn
+    const over = validatePartGlb(
+      partGlb((j) => {
+        j.nodes.push({ mesh: 0 });
+        j.scenes[0].nodes.push(2);
+      }),
+      { maxTriangles: 20 },
+    );
+    expect(over.problems).toEqual([expect.stringMatching(/24 triangles drawn, over the budget of 20/)]);
+  });
+
+  it('malformed JSON shapes and dangling mesh references are problems, never a throw (holodeck#323)', () => {
+    expect(problemsOf((j) => (j.nodes[0] = null))).toEqual(expect.arrayContaining([expect.stringMatching(/nodes\[0\] is not an object/)]));
+    expect(problemsOf((j) => (j.nodes = 'x'))).toEqual(expect.arrayContaining([expect.stringMatching(/nodes is not an array/)]));
+    expect(problemsOf((j) => (j.materials[0] = 7))).toEqual(expect.arrayContaining([expect.stringMatching(/materials\[0\] is not an object/)]));
+    expect(problemsOf((j) => (j.meshes[0].primitives = 3))).toEqual(expect.arrayContaining([expect.stringMatching(/primitives is not an array/)]));
+    expect(problemsOf((j) => (j.nodes[0].children = 5))).toEqual(expect.arrayContaining([expect.stringMatching(/children is not an array/)]));
+    expect(problemsOf((j) => (j.nodes[1].name = 42))).toEqual(expect.arrayContaining([expect.stringMatching(/name is not a string/)]));
+    expect(problemsOf((j) => (j.nodes[1].extensions = 'KHR'))).toEqual([expect.stringMatching(/extensions is not an object/)]);
+    expect(problemsOf((j) => (j.scenes = [null]))).toEqual(expect.arrayContaining([expect.stringMatching(/scenes\[0\] is not an object/)]));
+    // A reachable node pointing at a mesh that does not exist.
+    expect(
+      problemsOf((j) => {
+        j.nodes.push({ name: 'ghost', mesh: 999 });
+        j.scenes[0].nodes.push(2);
+      }),
+    ).toEqual([expect.stringMatching(/"ghost": mesh 999 does not exist \(the GLB has 1 mesh/)]);
+    expect(problemsOf((j) => j.nodes.push({ mesh: -1 }))).toEqual([expect.stringMatching(/node 2: mesh -1 does not exist/)]);
+    for (const edit of [(j: any) => (j.nodes[0] = null), (j: any) => (j.accessors = [null, null]), (j: any) => (j.meshes = [1])]) {
+      expect(() => validatePartGlb(partGlb(edit))).not.toThrow();
+    }
   });
 
   it('lists every problem at once', () => {
