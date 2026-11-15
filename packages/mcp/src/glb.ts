@@ -184,16 +184,53 @@ export function validatePartGlb(bytes: Uint8Array, options: ValidateOptions = {}
   } catch (error) {
     return { ok: false, problems: [error instanceof Error ? error.message : String(error)], warnings: [], stats: null };
   }
+  try {
+    return checkPart(bytes, gltf, options);
+  } catch (error) {
+    // Last resort for a JSON shape the checks below do not expect (holodeck#323): still a result, never a throw.
+    return { ok: false, problems: [`the glTF JSON could not be checked: ${error instanceof Error ? error.message : String(error)}`], warnings: [], stats: null };
+  }
+}
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+const isIndex = (v: unknown, length: number): v is number => Number.isInteger(v) && (v as number) >= 0 && (v as number) < length;
+
+/**
+ * The entries of a top-level glTF array. A non-object entry is a problem and
+ * reads as `{}`, so the checks below can dereference every entry safely.
+ */
+function objectsOf<T>(value: unknown, what: string, problems: string[]): T[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    problems.push(`${what} is not an array`);
+    return [];
+  }
+  return value.map((entry, i) => {
+    if (isObject(entry)) return entry as T;
+    problems.push(`${what}[${i}] is not an object`);
+    return {} as T;
+  });
+}
+
+/** A list of node indices (`children`, a scene's `nodes`), or [] with a problem when it is something else. */
+function indicesOf(value: unknown, what: string, problems: string[]): number[] {
+  if (value === undefined) return [];
+  if (Array.isArray(value)) return value as number[];
+  problems.push(`${what} is not an array of node indices`);
+  return [];
+}
+
+function checkPart(bytes: Uint8Array, gltf: GltfJson, options: ValidateOptions): PartValidation {
   const problems: string[] = [];
   const warnings: string[] = [];
   const budget = options.maxTriangles ?? DEFAULT_PART_TRIANGLES;
 
   if (gltf.asset?.version !== '2.0') problems.push(`asset.version is ${JSON.stringify(gltf.asset?.version ?? null)}; expected "2.0"`);
 
-  const nodes = Array.isArray(gltf.nodes) ? gltf.nodes : [];
-  const meshes = Array.isArray(gltf.meshes) ? gltf.meshes : [];
-  const accessors = Array.isArray(gltf.accessors) ? gltf.accessors : [];
-  const materials = Array.isArray(gltf.materials) ? gltf.materials : [];
+  const nodes = objectsOf<GltfNode>(gltf.nodes, 'nodes', problems);
+  const meshes = objectsOf<NonNullable<GltfJson['meshes']>[number]>(gltf.meshes, 'meshes', problems);
+  const accessors = objectsOf<NonNullable<GltfJson['accessors']>[number]>(gltf.accessors, 'accessors', problems);
+  const materials = objectsOf<NonNullable<GltfJson['materials']>[number]>(gltf.materials, 'materials', problems);
 
   // Materials: by name only, hd.* finishes.
   const allowed = FINISH_NAMES.map((f) => `hd.${f}`).join(', ');
@@ -215,12 +252,16 @@ export function validatePartGlb(bytes: Uint8Array, options: ValidateOptions = {}
   // kept with their node index: only those in the scene count (checked after the traversal).
   const declared: { index: number; label: string; prefix: 'port.' | 'anim.'; short: string }[] = [];
   nodes.forEach((node, i) => {
-    const label = node.name ? JSON.stringify(node.name) : `node ${i}`;
+    const name = typeof node.name === 'string' ? node.name : '';
+    const label = name ? JSON.stringify(name) : `node ${i}`;
+    if (node.name !== undefined && typeof node.name !== 'string') problems.push(`node ${i}: name is not a string`);
     if (node.camera !== undefined) problems.push(`${label} is a camera`);
-    if (node.extensions && 'KHR_lights_punctual' in node.extensions) problems.push(`${label} is a light (KHR_lights_punctual)`);
-    else if (node.extensions && Object.keys(node.extensions).length) problems.push(`${label} carries node extensions (${Object.keys(node.extensions).join(', ')})`);
+    if (isObject(node.extensions) && 'KHR_lights_punctual' in node.extensions) problems.push(`${label} is a light (KHR_lights_punctual)`);
+    else if (isObject(node.extensions) && Object.keys(node.extensions).length) problems.push(`${label} carries node extensions (${Object.keys(node.extensions).join(', ')})`);
+    else if (node.extensions !== undefined && !isObject(node.extensions)) problems.push(`${label}: extensions is not an object`);
     if (node.skin !== undefined) problems.push(`${label} is skinned`);
-    const name = node.name ?? '';
+    // A dangling mesh would fail to load (holodeck#323); checked on every node, in the scene or not.
+    if (node.mesh !== undefined && !isIndex(node.mesh, meshes.length)) problems.push(`${label}: mesh ${JSON.stringify(node.mesh)} does not exist (the GLB has ${meshes.length} mesh(es))`);
     for (const prefix of ['port.', 'anim.'] as const) {
       if (!name.startsWith(prefix)) continue;
       const short = name.slice(prefix.length);
@@ -229,28 +270,32 @@ export function validatePartGlb(bytes: Uint8Array, options: ValidateOptions = {}
       declared.push({ index: i, label, prefix, short });
       if (node.mesh !== undefined) problems.push(`${label} must be an empty, not a mesh (${prefix === 'port.' ? 'hd.add_port' : 'hd.add_anim'})`);
     }
-    if (name.startsWith('port.') && (node.children?.length ?? 0) > 0) problems.push(`${label} must have no children (a port is a point)`);
+    if (name.startsWith('port.') && indicesOf(node.children, `${label}: children`, []).length > 0) problems.push(`${label} must have no children (a port is a point)`);
   });
 
-  // Geometry: triangles and bounds, from the default scene.
-  let triangles = 0;
-  meshes.forEach((mesh, mi) => {
-    (mesh.primitives ?? []).forEach((prim, pi) => {
+  // Geometry: triangles per mesh here; the traversal below counts them once per node that
+  // draws the mesh, so a mesh used by 100 nodes counts 100 times (holodeck#322).
+  const meshTriangles = meshes.map((mesh, mi) => {
+    let count = 0;
+    objectsOf<NonNullable<NonNullable<GltfJson['meshes']>[number]['primitives']>[number]>(mesh.primitives, `mesh ${JSON.stringify(mesh.name ?? mi)} primitives`, problems).forEach((prim, pi) => {
       const where = `mesh ${JSON.stringify(mesh.name ?? mi)} primitive ${pi}`;
       if (prim.mode !== undefined && prim.mode !== TRIANGLES) problems.push(`${where}: mode ${prim.mode} (only triangles, mode 4)`);
       if (prim.material === undefined) problems.push(`${where} has no material: it would render with the default material, outside the style layer`);
       else if (!Number.isInteger(prim.material) || prim.material < 0 || prim.material >= materials.length) {
         problems.push(`${where}: material ${JSON.stringify(prim.material)} does not exist (the GLB has ${materials.length} material(s)); it would not load`);
       }
-      const count = prim.indices !== undefined ? accessors[prim.indices]?.count : accessors[prim.attributes?.POSITION ?? -1]?.count;
-      if (typeof count !== 'number') problems.push(`${where}: no index or POSITION accessor`);
-      else triangles += Math.floor(count / 3);
+      const attributes = isObject(prim.attributes) ? prim.attributes : {};
+      const n = prim.indices !== undefined ? accessors[prim.indices]?.count : accessors[attributes.POSITION ?? -1]?.count;
+      if (typeof n !== 'number') problems.push(`${where}: no index or POSITION accessor`);
+      else count += Math.floor(n / 3);
     });
+    return count;
   });
-  if (triangles > budget) problems.push(`${triangles} triangles, over the budget of ${budget}: lower the segment counts`);
+  let triangles = 0;
 
   const sceneIndex = gltf.scene ?? 0;
-  const roots = gltf.scenes?.[sceneIndex]?.nodes;
+  const scenes = objectsOf<NonNullable<GltfJson['scenes']>[number]>(gltf.scenes, 'scenes', problems);
+  const roots = isIndex(sceneIndex, scenes.length) ? scenes[sceneIndex]!.nodes : undefined;
   if (!Array.isArray(roots)) problems.push(`no scene ${sceneIndex} with root nodes`);
   let box: Box | null = null;
   const visit = (index: number, parent: Mat4, seen: Set<number>): void => {
@@ -261,9 +306,10 @@ export function validatePartGlb(bytes: Uint8Array, options: ValidateOptions = {}
     }
     seen.add(index);
     const world = multiply(parent, localMatrix(node));
-    if (node.mesh !== undefined) {
-      for (const prim of meshes[node.mesh]?.primitives ?? []) {
-        const acc = accessors[prim.attributes?.POSITION ?? -1];
+    if (isIndex(node.mesh, meshes.length)) {
+      triangles += meshTriangles[node.mesh]!;
+      for (const prim of objectsOf<NonNullable<NonNullable<GltfJson['meshes']>[number]['primitives']>[number]>(meshes[node.mesh]!.primitives, 'primitives', [])) {
+        const acc = accessors[(isObject(prim.attributes) ? prim.attributes : {}).POSITION ?? -1];
         if (!acc || !isNumbers(acc.min, 3) || !isNumbers(acc.max, 3)) {
           problems.push(`mesh of ${JSON.stringify(node.name ?? index)}: its POSITION accessor lacks min / max (required by glTF)`);
           continue;
@@ -276,10 +322,11 @@ export function validatePartGlb(bytes: Uint8Array, options: ValidateOptions = {}
         }
       }
     }
-    for (const child of node.children ?? []) visit(child, world, seen);
+    for (const child of indicesOf(node.children, `node ${index}: children`, problems)) visit(child, world, seen);
   };
   const seen = new Set<number>();
   for (const root of Array.isArray(roots) ? roots : []) visit(root, IDENTITY, seen);
+  if (triangles > budget) problems.push(`${triangles} triangles drawn, over the budget of ${budget}: lower the segment counts (a mesh shared by several nodes counts once per node)`);
 
   // Ports and pivots outside the scene: the runtime (findPorts / the animator) walks the
   // loaded scene, so a node that is not in it is never found (holodeck#296).
