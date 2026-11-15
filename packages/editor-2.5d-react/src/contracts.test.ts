@@ -93,8 +93,13 @@ describe('@holodeck/editor-2.5d-react/contracts', () => {
     expect(contracts.HOLODECK_STYLE).toBe(HOLODECK_STYLE);
     expect(Object.keys(contracts).sort()).toEqual(
       [
+        'BUILTIN_ISO_ANIMATORS',
         'HOLODECK_STYLE',
         'ISO_ANIMATOR_KIND',
+        'ISO_PART_ORIGINS',
+        'applyAnimations',
+        'fractionOf',
+        'planAnimations',
         'ISO_INSPECTOR_KIND',
         'ISO_KINDS',
         'ISO_PART_KIND',

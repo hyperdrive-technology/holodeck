@@ -15,6 +15,8 @@ name: Blender drift
 # blender/parts/**/*.py and the shipped GLBs was only caught on a dev machine.
 #
 #   library-cloud      src/cloud-glb.test.ts     26 cloud archetypes
+#   library-process    src/process-glb.test.ts   blender/parts/process/*.py (helpers _*.py are
+#                                                 imported by the parts, never built)
 #   editor-2.5d-react  src/models/valve-glb.test.ts   valve.glb
 #
 # Runs on PRs/pushes that touch the scripts, the GLBs or the build tooling,
@@ -97,7 +99,8 @@ jobs:
         run: |
           if ! command -v node >/dev/null; then echo "no node on the image yet: run"; echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           node holodeck/scripts/ci-scope.mjs --cwd holodeck --event "$EVENT" --base "$BASE_SHA" --sdk-ref "$SDK_REF" --no-shared \
-            --paths '^blender/' --paths '^packages/library-cloud/' --paths '^packages/editor-2\.5d-react/assets/models/' \
+            --paths '^blender/' --paths '^packages/library-cloud/' --paths '^packages/library-process/' \
+            --paths '^packages/editor-2\.5d-react/assets/models/' \
             --paths '^packages/editor-2\.5d-react/scripts/build-parts\.mjs$' --paths '^packages/editor-2\.5d-react/src/models/' \
             --paths '^\.github/workflows/blender-drift\.yml$' --paths '^scripts/ci-scope\.mjs$'
 
@@ -122,6 +125,7 @@ jobs:
           cache-dependency-path: |
             holodeck-sdk/ts/pnpm-lock.yaml
             holodeck/packages/library-cloud/pnpm-lock.yaml
+            holodeck/packages/library-process/pnpm-lock.yaml
             holodeck/packages/editor-2.5d-react/pnpm-lock.yaml
 
       # The cache path is INSIDE the workspace (.blender, next to the two checkouts).
@@ -179,6 +183,17 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm exec vitest run src/cloud-glb.test.ts
+
+      # Rebuilds every blender/parts/process/<slug>.py and compares it with
+      # packages/library-process/assets/models/<slug>.glb (same rule as cloud). The
+      # catalogue guard in the same file fails if a script, GLB, models.json entry or
+      # parts.json definition is missing, so a new part cannot skip the rebuild.
+      - name: library-process rebuild check
+        if: steps.scope.outputs.run == 'true'
+        working-directory: holodeck/packages/library-process
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec vitest run src/process-glb.test.ts
 
       - name: editor-2.5d-react rebuild check
         if: steps.scope.outputs.run == 'true'

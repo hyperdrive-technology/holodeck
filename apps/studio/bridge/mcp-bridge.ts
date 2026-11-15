@@ -209,7 +209,13 @@ export async function startMcpBridge(options: McpBridgeOptions): Promise<McpBrid
   };
 
   http.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    const url = new URL(req.url ?? '/', 'ws://bridge.invalid');
+    let url: URL;
+    try {
+      url = new URL(req.url ?? '/', 'ws://bridge.invalid');
+    } catch {
+      // `//[` and the like: new URL() throws, and an exception here would end the dev server.
+      return refuse(socket, 400, 'Bad Request');
+    }
     if (url.pathname !== '/') return refuse(socket, 404, 'Not Found');
     const host = req.headers.host ?? '';
     if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) return refuse(socket, 403, 'Forbidden');

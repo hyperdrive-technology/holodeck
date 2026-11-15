@@ -3,7 +3,7 @@ import {
   HOLODECK_KINDS,
   type ContributionKind,
 } from '@holodeck/sdk';
-import type { IsoAnimator, IsoInspectorPanel, IsoPartDefinition, IsoPartParamSpec, IsoTheme } from './types';
+import type { IsoAnimator, IsoInspectorPanel, IsoPartDefinition, IsoPartOrigin, IsoPartParamSpec, IsoTheme } from './types';
 import { assetUrlProblem, isHexColor, paramValueProblem } from '../objects/validate';
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object';
@@ -36,6 +36,10 @@ const isPositiveSize = (v: unknown): boolean => isNum(v) && v > 0 && v <= MAX_DA
 
 const isParamSpecMap = (v: unknown): boolean => isObj(v) && Object.values(v).every(isParamSpec);
 
+/** `IsoPartDefinition.origin` values. */
+export const ISO_PART_ORIGINS: readonly IsoPartOrigin[] = ['floor', 'pipe-axis'];
+const PORT_DIRS = ['n', 'e', 's', 'w'];
+
 export function isIsoPartDefinition(item: unknown): item is IsoPartDefinition {
   if (!isObj(item) || !isStr(item.id) || typeof item.label !== 'string') return false;
   const fp = item.footprint;
@@ -62,10 +66,41 @@ export function isIsoPartDefinition(item: unknown): item is IsoPartDefinition {
     if (!isObj(item.animNodes)) return false;
     for (const a of Object.values(item.animNodes)) {
       if (!isObj(a) || !isStr(a.node) || !isStr(a.animator)) return false;
+      // Part-level animator settings: a plain object (values are the animator's business).
+      if (a.settings !== undefined && (!isObj(a.settings) || Array.isArray(a.settings))) return false;
     }
   }
+  if (item.origin !== undefined && !ISO_PART_ORIGINS.includes(item.origin as IsoPartOrigin)) return false;
+  // Names a declared boolean param, or the tint could never switch on.
+  if (item.alarmParam !== undefined) {
+    if (!isStr(item.alarmParam)) return false;
+    const spec = (item.params as Record<string, IsoPartParamSpec>)[item.alarmParam];
+    if (!spec || spec.type !== 'boolean') return false;
+  }
+  if (item.stateColors !== undefined) {
+    if (!Array.isArray(item.stateColors)) return false;
+    for (const entry of item.stateColors) {
+      if (!isObj(entry) || !isStr(entry.param) || !isHexColor(entry.color)) return false;
+      const spec = Object.prototype.hasOwnProperty.call(item.params, entry.param) ? (item.params as Record<string, IsoPartParamSpec>)[entry.param] : undefined;
+      if (!spec || spec.type !== 'boolean') return false;
+    }
+  }
+  if (item.heightParam !== undefined) {
+    if (!isStr(item.heightParam)) return false;
+    const spec = Object.prototype.hasOwnProperty.call(item.params, item.heightParam) ? (item.params as Record<string, IsoPartParamSpec>)[item.heightParam] : undefined;
+    if (!spec || spec.type !== 'number') return false;
+  }
+  if (item.ports !== undefined) {
+    if (!isObj(item.ports)) return false;
+    for (const port of Object.values(item.ports)) {
+      if (!isObj(port) || !isNum(port.x) || !isNum(port.y) || !PORT_DIRS.includes(port.dir as string)) return false;
+    }
+  }
+  // Same rule as routing/inline.ts `inlineBodyLength` (0 = a joint-like part with no body).
+  if (item.inlineLength !== undefined && !(isNum(item.inlineLength) && item.inlineLength >= 0)) return false;
   return true;
 }
+
 
 export function isIsoTheme(item: unknown): item is IsoTheme {
   if (!isObj(item) || !isStr(item.id) || typeof item.label !== 'string' || !isObj(item.style)) return false;

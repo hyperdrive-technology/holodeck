@@ -1395,6 +1395,17 @@ describe('apply-scene (an edit computed outside the editor: the MCP playground b
     expect(nan.revision).toBe(before.revision);
   });
 
+  it('refuses a scene computed before another commit landed (expectRevision)', () => {
+    const before = withTank();
+    const target = { ...before.scene, name: 'Agent' };
+    const moved = editorReducer(before, { type: 'apply-scene', scene: { ...before.scene, name: 'User' } });
+    const stale = editorReducer(moved, { type: 'apply-scene', scene: target, expectRevision: before.revision });
+    expect(stale.notice).toMatch(/^Edit rejected/);
+    expect(stale.scene.name).toBe('User');
+    expect(stale.revision).toBe(moved.revision);
+    expect(editorReducer(before, { type: 'apply-scene', scene: target, expectRevision: before.revision }).scene).toBe(target);
+  });
+
   it('is ignored in run mode (read-only), like every edit', () => {
     const ro = editorReducer(withTank(), { type: 'set-read-only', readOnly: true });
     const after = editorReducer(ro, { type: 'apply-scene', scene: { ...ro.scene, objects: [] } });

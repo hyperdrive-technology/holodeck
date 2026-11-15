@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "holodeck.package.v1",
+  "id": "holodeck.process",
+  "name": "Process parts",
+  "description": "Low-poly industrial process parts built from Blender scripts: valves, rotating equipment, heat exchangers, instruments and electrical enclosures, with ports, animated stems, levers and shafts, and a state colour.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "contributes": ["holodeck.iso.part"],
+  "engines": { "holodeck.iso": "^1.0" },
+  "entry": "dist/holodeck-package.js",
+  "assets": "assets",
+  "homepage": "https://github.com/hyperdrive-technology/holodeck/tree/main/packages/library-process#readme",
+  "repository": "github:hyperdrive-technology/holodeck",
+  "keywords": ["process", "industrial", "library", "isometric", "valves", "instruments"]
+}

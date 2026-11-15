@@ -24,6 +24,7 @@ import { createStudioHost, hostDocumentProblems } from '../host/studio-host';
 import { createStudioRouter } from '../router';
 import { StudioProvider } from '../studio-context';
 import { playgroundStarter } from './playground-state';
+import { createProcessLineDocument } from '../samples/process-line';
 import { createPlaygroundDocument, PLAYGROUND_DOCUMENT_ID } from './starter';
 
 const editor = vi.hoisted(() => ({
@@ -248,6 +249,24 @@ describe('/playground', () => {
     expect(editor.props?.selectedId).toBeNull();
     expect(editor.props?.camera).toBeUndefined();
     expect(screen.getByTestId('canvas')).toHaveAttribute('data-editor-epoch', '1');
+  });
+
+  it('the Reset dialog loads the process-parts sample into the playground document', async () => {
+    await openPlayground();
+    act(() => editor.props!.onSelect!('feed-tank'));
+    fireEvent.click(screen.getByRole('button', { name: /Reset/ }));
+    const dialog = await screen.findByTestId('reset-dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Load the process-parts sample' }));
+    await waitFor(async () => expect((await stored())?.body.objects).toEqual(createProcessLineDocument('x').body.objects));
+    const saved = (await stored())!;
+    expect(saved.id).toBe(PLAYGROUND_DOCUMENT_ID);
+    expect(saved.connections).toEqual(createProcessLineDocument('x').connections);
+    expect(saved.requires?.['holodeck.process']).toBeDefined();
+    expect(hostDocumentProblems(host, saved)).toEqual([]);
+    // A fresh editor on the sample, as for Reset.
+    expect(editor.mounts).toBe(2);
+    expect(editor.props?.selectedId).toBeNull();
+    expect(editor.props?.scene.objects.some((o) => o.object === 'process:valve-control')).toBe(true);
   });
 
   it('Reset can be cancelled', async () => {

@@ -57,7 +57,7 @@ const CORS_HEADERS = ['Access-Control-Allow-Origin', 'Access-Control-Allow-Crede
  * Vite installs its CORS middleware BEFORE plugin `configureServer` hooks run
  * (Vite 8; default `server.cors` allows every localhost origin), so CORS
  * headers can already be on `res` here: they are removed, and the real-Vite
- * test in mcp-bridge.test.ts pins that no other localhost page can read the
+ * test in vite-plugin.test.ts pins that no other localhost page can read the
  * answer (holodeck#277).
  */
 export function bridgeConfigMiddleware(bridge: () => Promise<McpBridge | null>, allowOrigin: (origin: string) => boolean): Connect.NextHandleFunction {
