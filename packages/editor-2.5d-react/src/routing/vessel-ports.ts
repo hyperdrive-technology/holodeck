@@ -157,6 +157,14 @@ export function portWallAngleDeg(port: IsoPartPort, rotation = 0): number {
 export interface WallSpan {
   bottomY: number;
   topY: number;
+  /**
+   * World Y of the bottom closure's lowest point (cone outlet / dish pole),
+   * below `bottomY`. Absent = flat bottom at `bottomY`. Read by the pipe
+   * risers (routing/vessel-risers.ts); `tankWallSpan` fills it in.
+   */
+  outletY?: number;
+  /** Radius of the flat outlet at `outletY` (a cone's tip); absent or >= the vessel radius = a pole (dish). */
+  outletRadius?: number;
 }
 
 /**

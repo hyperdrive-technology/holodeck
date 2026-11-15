@@ -7,6 +7,7 @@ import type { ObjectPointer } from './InstancedLibrary';
 import { partitionByPart } from './partition-scene';
 import { resolveAutoElbows } from '../routing/elbows';
 import { mergeFittingParams } from '../../assets/process/fitting-params';
+import { Riser } from '../../assets/process/Riser';
 import { bendKeysOf, resolvePipeRuns } from './pipe-runs';
 import type { IsoPlacement } from './scene';
 import { connectorRouteKey, liveConnectorObjects, resolveConnectorPaths } from '../objects/connector';
@@ -25,7 +26,10 @@ import { connectorRouteKey, liveConnectorObjects, resolveConnectorPaths } from '
  * the vessel-window clip (a pipe running into a cut-away window stops at the
  * wall with a cut-section end). Both the pooled `InstancedPipes` and the
  * unique-mesh pipe read the same `PipeRunSpec`, and fittings that would sit
- * inside a cut-away vessel are not drawn.
+ * inside a cut-away vessel are not drawn. Runs that end at a raised vessel
+ * (on legs / a skirt) are trimmed to a riser that climbs to a side nozzle or
+ * the bottom outlet (routing/vessel-risers.ts); the risers are drawn here,
+ * after the parts, and a click on one selects the first pipe that feeds it.
  */
 export function SceneGraph({
   objects: authored,
@@ -51,7 +55,7 @@ export function SceneGraph({
   const registry = registryProp ?? contextRegistry;
   const bendKeys = useMemo(() => bendKeysOf(objects), [objects]);
   const pipeRadius = mergeFittingParams(fittings).pipeRadius;
-  const { runs: pipeRuns, hiddenFittings } = useMemo(
+  const { runs: pipeRuns, hiddenFittings, risers } = useMemo(
     () => resolvePipeRuns(objects, registry, { pipeRadius }),
     [objects, registry, pipeRadius],
   );
@@ -69,6 +73,11 @@ export function SceneGraph({
     // routeKey stands in for metrics (read through the ref) on purpose.
     [objects, registry, routeKey],
   );
+  const riserViews = risers.map((riser) => (
+    <group key={`riser:${riser.id}`} onPointerDown={(event) => onObjectPointerDown?.(riser.pipes[0]!.pipeId, event)}>
+      <Riser riser={riser} radius={pipeRadius} params={fittings} />
+    </group>
+  ));
   const drawn = hiddenFittings.size > 0 ? objects.filter((o) => !hiddenFittings.has(o.id)) : objects;
   const view = (object: IsoPlacement) => (
     <group
@@ -89,7 +98,12 @@ export function SceneGraph({
     </group>
   );
   if (!instanced) {
-    return <group>{drawn.map(view)}</group>;
+    return (
+      <group>
+        {drawn.map(view)}
+        {riserViews}
+      </group>
+    );
   }
   const { pools, unique } = partitionByPart(drawn, registry);
   return (
@@ -101,6 +115,7 @@ export function SceneGraph({
           : null;
       })}
       {unique.map(view)}
+      {riserViews}
     </group>
   );
 }
