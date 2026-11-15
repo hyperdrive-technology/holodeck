@@ -347,6 +347,7 @@ jobs:
 
       # The studio consumes editor-2.5d-react and the provider/library packages (file:
       # deps), so a change to any of them, or to the studio, runs it (scripts/ci-scope.mjs).
+      # blender/: the MCP Blender tests copy holodeck_bpy.py and the top-level part scripts (holodeck#287).
       - name: Does this change touch the studio, the MCP server or a package they consume?
         id: scope
         env:
@@ -356,7 +357,8 @@ jobs:
         run: |
           if ! command -v node >/dev/null; then echo "no node on the image yet: run"; echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           node holodeck/scripts/ci-scope.mjs --cwd holodeck --event "$EVENT" --base "$BASE_SHA" --sdk-ref "$SDK_REF" \
-            --paths '^apps/studio/' --paths '^packages/(editor-2\.5d-react|provider-http|provider-aws|library-cloud|library-process|mcp)/'
+            --paths '^apps/studio/' --paths '^packages/(editor-2\.5d-react|provider-http|provider-aws|library-cloud|library-process|mcp)/' \
+            --paths '^blender/(parts/)?[^/]+\.py$'
 
       - name: Checkout holodeck-sdk (${{ steps.sdk.outputs.ref }})
         if: steps.scope.outputs.run == 'true'

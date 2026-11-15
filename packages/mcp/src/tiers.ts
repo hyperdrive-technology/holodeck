@@ -4,9 +4,10 @@
  *
  *   read    library and scene inspection; nothing is written
  *   author  also creates and edits `.holodeck.json` documents under the workspace root
- *   exec    reserved for tools that run local programs (Blender part builds, a later
- *           group). No tool needs it yet; those tools will also require
- *           HOLODECK_MCP_ALLOW_BLENDER=1.
+ *   exec    also runs local programs: the Blender part tools (`blender_build_part`,
+ *           `blender_preview`, `part_install`). Those ALSO need
+ *           HOLODECK_MCP_ALLOW_BLENDER=1 (part-workbench.ts), so the tier alone never
+ *           lets an agent run Blender's Python.
  *
  * A tool above the server's tier stays listed (so an agent can see what
  * exists) but refuses with a message that names the tier it needs.

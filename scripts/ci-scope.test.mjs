@@ -215,6 +215,11 @@ test('ci.yml studio job (studio + MCP server) runs for the studio, the MCP serve
   ]) assert.equal(runs(file), true, file);
   assert.equal(runs('packages/flow-runtime/src/a.ts'), false);
   assert.equal(runs('packages/mcp-extra/src/a.ts'), false);
+  // The MCP Blender tests read holodeck_bpy.py and the top-level part scripts (holodeck#287).
+  assert.equal(runs('blender/holodeck_bpy.py'), true);
+  assert.equal(runs('blender/parts/valve.py'), true);
+  assert.equal(runs('blender/parts/cloud/server.py'), false);
+  assert.equal(runs('blender/README.md'), false);
 });
 
 /** The `--paths` of one job's scope step (`name:` of the step), from the raw workflow text. */

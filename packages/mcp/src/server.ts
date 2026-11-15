@@ -26,14 +26,21 @@ import {
   MAX_IDS_PER_CALL,
   MAX_IMAGE_BYTES,
   MAX_NAME_LENGTH,
+  MAX_BLENDER_TIMEOUT_MS,
   MAX_PARAMS_PER_CALL,
+  MAX_PART_NAME_LENGTH,
+  MAX_PART_SOURCE_BYTES,
+  MAX_PART_TRIANGLES,
   MAX_PARTS_PAGE,
   MAX_PATH_LENGTH,
   MAX_TEXT_LENGTH,
+  MIN_BLENDER_TIMEOUT_MS,
 } from './limits';
+import { footprintOf, validatePartGlb } from './glb';
+import { ALLOW_BLENDER_ENV, PartWorkbench, type BlenderOptions } from './part-workbench';
 import { listParts, partDetail } from './parts';
 import { PlaygroundBridge, PLAYGROUND_PATH } from './playground';
-import { errorResult, imageResult, imageTooLarge, okResult } from './result';
+import { errorResult, imageResult, imagesResult, imageTooLarge, okResult } from './result';
 import { MAX_SIDE, MIN_SIDE, SceneRenderer } from './render';
 import { SceneEditor } from './scene-editor';
 import {
@@ -68,6 +75,8 @@ export interface HolodeckMcpOptions {
   renderer?: SceneRenderer;
   /** Link to `pnpm playground` (default: reads `.holodeck-mcp.json`, see playground.ts). */
   bridge?: PlaygroundBridge;
+  /** Blender part tools: gate, binary, repo (default: from the environment, see part-workbench.ts). */
+  blender?: BlenderOptions;
 }
 
 /** What the tools share. `current` is the document `scene_open` selected. */
@@ -78,6 +87,8 @@ export interface ServerContext {
   store: DocumentStore;
   renderer: SceneRenderer;
   bridge: PlaygroundBridge;
+  /** Blender part builds (`blender_*`, `part_*`). */
+  parts: PartWorkbench;
   /** A document path, `@playground`, or null. */
   current: string | null;
 }
@@ -212,6 +223,7 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
     store: new DocumentStore(workspace, host, options.now),
     renderer: options.renderer ?? new SceneRenderer(),
     bridge: options.bridge ?? new PlaygroundBridge(),
+    parts: new PartWorkbench(options.blender),
     current: null,
   };
   const server = new McpServer(
@@ -224,6 +236,8 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
         'Every edit is validated like a studio save; an invalid edit is refused with every problem listed and nothing is written.',
         `When the user runs pnpm playground, path "${PLAYGROUND_PATH}" edits the scene open in their browser tab live (one undo step per call);`,
         'playground_status says whether one is connected, playground_state / playground_screenshot read it back. Providers: provider_list, provider_connect, provider_browse.',
+        'New 3D parts (tier exec + HOLODECK_MCP_ALLOW_BLENDER=1): blender_status, then blender_build_part (a holodeck_bpy script -> GLB + Workbench preview + contract check),',
+        'blender_preview (Workbench and the real Holodeck style), part_validate, and part_install (into the library models).',
       ].join(' '),
     },
   );
@@ -935,15 +949,194 @@ export async function createHolodeckMcpServer(options: HolodeckMcpOptions): Prom
     },
   );
 
-  // Close the render browser and the bridge link with the server (transport closed, client gone).
+  // --- Blender parts ------------------------------------------------------------
+
+  const parts = context.parts;
+  const partName = z
+    .string()
+    .min(1)
+    .max(MAX_PART_NAME_LENGTH)
+    .describe('Part name: lower-case words joined by "-" (e.g. "mixer", "plate-heat-exchanger"); the files are blender/parts/<name>.py and assets/models/<name>.glb');
+  const glbSource = z
+    .enum(['auto', 'build', 'installed'])
+    .default('auto')
+    .describe('Which GLB: "build" (this session\'s blender_build_part), "installed" (assets/models/<name>.glb), "auto" (the build if there is one)');
+  const maxTriangles = z.number().int().min(1).max(MAX_PART_TRIANGLES).optional().describe('Triangle budget (default 5000; shipped parts use 520-840)');
+  const validationOf = (v: { ok: boolean; problems: string[]; warnings: string[]; stats: unknown }) => ({ ok: v.ok, problems: v.problems, warnings: v.warnings, stats: v.stats });
+  const gate = () => {
+    const reasons: string[] = [];
+    if (!tierAllows(context.tier, 'exec')) reasons.push(`the server runs at tier "${context.tier}"; Blender tools need HOLODECK_MCP_TIER=exec`);
+    if (!parts.allowed) reasons.push(`${ALLOW_BLENDER_ENV}=1 is not set`);
+    return { open: reasons.length === 0, tier: context.tier, allowBlender: parts.allowed, reasons };
+  };
+
+  tool(
+    'blender_status',
+    {
+      title: 'Blender status',
+      description:
+        'Is Blender installed (path, version) and are the Blender tools allowed here (tier exec and HOLODECK_MCP_ALLOW_BLENDER=1)? Also the part scripts, installed models and this session\'s builds. Never an error when Blender is missing.',
+      tier: 'read',
+      input: {},
+      annotations: READ,
+    },
+    async () => {
+      const found = parts.locate();
+      const version = found.path ? await parts.version(found.path) : null;
+      const g = gate();
+      const hints = [
+        ...(found.path ? [] : ['install Blender 5.2.2 LTS, or set $BLENDER to its binary, and restart the server']),
+        ...(g.open ? [] : [`restart the server with HOLODECK_MCP_TIER=exec and ${ALLOW_BLENDER_ENV}=1 (the user decides: Blender runs arbitrary Python)`]),
+      ];
+      return {
+        blender: { found: found.path !== null, path: found.path, source: found.source, version: version?.version ?? null, ...(found.reason ? { reason: found.reason } : {}), ...(version?.error ? { versionError: version.error } : {}) },
+        gate: g,
+        repo: { root: parts.layout.root, parts: parts.layout.partsDir, models: parts.layout.modelsDir },
+        scripts: await parts.scripts(),
+        models: await parts.models(),
+        builds: parts.buildList.map((b) => ({ name: b.name, ok: b.validation.ok, problems: b.validation.problems.length, builtAt: b.builtAt })),
+        ...(hints.length ? { hints } : {}),
+      };
+    },
+  );
+
+  tool(
+    'blender_build_part',
+    {
+      title: 'Build a part in Blender',
+      description:
+        'Write blender/parts/<name>.py (a holodeck_bpy script: copy the header of blender/parts/valve.py, define build(), end with hd.run_part(build, "<name>")) and run it in Blender headless (--factory-startup, wall-clock timeout). ' +
+        'The GLB goes to a scratch folder (not the library until part_install). Returns the contract check (part_validate), the log tail and the Workbench preview PNG. ' +
+        'An existing part\'s script is only replaced with overwrite: true. Positions are three.js space (Y-up); materials hd.white / hd.shaded / hd.vessel / hd.flask / hd.accent; at least one hd.add_port. Contract: blender/README.md.',
+      tier: 'exec',
+      input: {
+        name: partName,
+        source: z.string().min(1).max(MAX_PART_SOURCE_BYTES).describe('The whole Python script'),
+        overwrite: z.boolean().default(false).describe('Replace an existing part script (one this session did not create)'),
+        preview: z.boolean().default(true).describe('Also render the Workbench preview PNG'),
+        timeoutMs: z.number().int().min(MIN_BLENDER_TIMEOUT_MS).max(MAX_BLENDER_TIMEOUT_MS).optional().describe('Wall-clock limit (default 120000)'),
+        maxTriangles,
+      },
+      annotations: DESTRUCTIVE,
+    },
+    async (args) => {
+      parts.assertAllowed('blender_build_part');
+      const built = await parts.build(args);
+      const payload = {
+        name: args.name,
+        script: built.script,
+        overwrote: built.overwrote,
+        glb: { path: built.build.glb, bytes: built.glbBytes },
+        ms: built.ms,
+        validation: validationOf(built.build.validation),
+        log: built.log,
+        ...(built.droppedBytes ? { logDroppedBytes: built.droppedBytes } : {}),
+        next: built.build.validation.ok
+          ? ['blender_preview for the styled look', 'part_install to add it to the library']
+          : ['fix the problems in the script and build again (no overwrite needed for a script this session wrote)'],
+      };
+      if (!built.preview) return payload;
+      return { raw: imagesResult([{ png: built.preview, caption: `Workbench preview of ${args.name} (Blender shading, not the Holodeck style)` }], payload, ['pass preview: false']) };
+    },
+  );
+
+  tool(
+    'part_validate',
+    {
+      title: 'Check a part GLB',
+      description:
+        'Check a part GLB against the contract (blender/README.md): only hd.* materials, at least one port.* empty, port.* / anim.* are empties, no cameras / lights / textures / animations, triangle budget, size (0.05..5 units), floor (y > -1), anchor at the origin, Y-up. One line per problem.',
+      tier: 'read',
+      input: { name: partName, source: glbSource, maxTriangles },
+      annotations: READ,
+    },
+    async (args) => {
+      const glb = await parts.glb(args.name, args.source);
+      const validation = validatePartGlb(glb.bytes, { maxTriangles: args.maxTriangles ?? glb.build?.maxTriangles });
+      return { name: args.name, source: glb.source, path: glb.path, ...validationOf(validation) };
+    },
+  );
+
+  tool(
+    'blender_preview',
+    {
+      title: 'Preview a part',
+      description:
+        'Images of a part: the Blender Workbench render, and the real Holodeck look (the GLB as a library part: applyHolodeckStyle, default theme, drawn by the studio build in headless Chromium with WebGPU). ' +
+        'No WebGPU or a blank capture is an error, never a blank image (pass styled: false for the Workbench image only). Needs the studio build (apps/studio: pnpm build).',
+      tier: 'exec',
+      input: {
+        name: partName,
+        source: glbSource,
+        workbench: z.boolean().default(true).describe('Include the Blender Workbench render'),
+        styled: z.boolean().default(true).describe('Include the styled render'),
+        width: z.number().int().min(MIN_SIDE).max(MAX_SIDE).default(640),
+        height: z.number().int().min(MIN_SIDE).max(MAX_SIDE).default(480),
+        timeoutMs: z.number().int().min(MIN_BLENDER_TIMEOUT_MS).max(MAX_BLENDER_TIMEOUT_MS).optional().describe('Blender wall-clock limit when the Workbench image needs a run'),
+      },
+      annotations: READ,
+    },
+    async (args) => {
+      parts.assertAllowed('blender_preview');
+      if (!args.workbench && !args.styled) throw new ToolError('nothing to render', ['set workbench and / or styled to true'], 'invalid_request');
+      const glb = await parts.glb(args.name, args.source);
+      const images: { png: Uint8Array; caption: string }[] = [];
+      if (args.workbench) {
+        // A build carries its own preview; an installed model is previewed from its script.
+        const png = await parts.workbenchPng(args.name, glb.source === 'build' ? glb.build : undefined, args.timeoutMs);
+        images.push({ png, caption: `Workbench preview of ${args.name} (Blender shading)` });
+      }
+      const validation = validatePartGlb(glb.bytes, { maxTriangles: glb.build?.maxTriangles });
+      if (args.styled) {
+        const bounds = validation.stats?.bounds;
+        if (!bounds) throw new ToolError(`cannot place "${args.name}": the GLB has no readable geometry`, validation.problems, 'invalid_part');
+        const fp = footprintOf(bounds);
+        const png = await context.renderer.renderModel({ glb: glb.bytes, footprint: { w: fp.w, h: fp.h }, height: fp.height, label: args.name }, { width: args.width, height: args.height });
+        images.push({ png, caption: `${args.name} in the Holodeck style (as a library part, default theme)` });
+      }
+      const payload = { name: args.name, source: glb.source, path: glb.path, images: images.map((i) => i.caption), validation: validationOf(validation) };
+      return { raw: imagesResult(images, payload, ['ask for a smaller width / height', 'or one image at a time (workbench: false / styled: false)']) };
+    },
+  );
+
+  tool(
+    'part_install',
+    {
+      title: 'Install a part into the library',
+      description:
+        'Copy this session\'s validated build of <name> to packages/editor-2.5d-react/assets/models/<name>.glb and register it in the built-in model map (assets/models/index.ts, BUILTIN_MODEL_URLS); the parts page (pnpm parts) shows it at once. ' +
+        'Refused when the build fails the contract, its script changed since the build, or the model exists (unless overwrite). The script stays in blender/parts/. Commit the three files.',
+      tier: 'exec',
+      input: { name: partName, overwrite: z.boolean().default(false).describe('Replace an installed model of the same name') },
+      annotations: DESTRUCTIVE,
+    },
+    async (args) => {
+      parts.assertAllowed('part_install');
+      const done = await parts.install(args.name, args.overwrite);
+      return {
+        ...done,
+        validation: validationOf(done.validation),
+        next: [
+          `add packages/editor-2.5d-react/src/models/${args.name}-glb.test.ts (modelled on valve-glb.test.ts) to pin its dimensions`,
+          'see it styled: cd packages/editor-2.5d-react && pnpm parts',
+          'consumers (studio, this server) see it after pnpm build there and pnpm install in the consumer',
+          `commit ${done.script}, ${done.model} and ${done.index}`,
+        ],
+      };
+    },
+  );
+
+  // Close the render browser, Blender and the bridge link with the server (transport closed, client gone).
   server.server.onclose = () => {
     context.bridge.close();
     void context.renderer.close();
+    void context.parts.close();
   };
   const close = async () => {
     await server.close();
     context.bridge.close();
     await context.renderer.close();
+    await context.parts.close();
   };
   return { server, context, close };
 }

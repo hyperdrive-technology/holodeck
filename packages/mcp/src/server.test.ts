@@ -28,7 +28,12 @@ describe('tool surface', () => {
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual(
       [
+        'blender_build_part',
+        'blender_preview',
+        'blender_status',
         'holodeck_info',
+        'part_install',
+        'part_validate',
         'parts_get',
         'parts_list',
         'playground_screenshot',
@@ -60,6 +65,10 @@ describe('tool surface', () => {
     expect(byName.get('parts_list')?.annotations?.readOnlyHint).toBe(true);
     expect(byName.get('scene_remove')?.annotations?.destructiveHint).toBe(true);
     expect(byName.get('scene_add_object')?.annotations?.readOnlyHint).toBe(false);
+    // Blender: every tool that runs it is exec; reading and checking are not.
+    for (const exec of ['blender_build_part', 'blender_preview', 'part_install']) expect(byName.get(exec)?.description, exec).toMatch(/\[tier: exec\]$/);
+    for (const read of ['blender_status', 'part_validate']) expect(byName.get(read)?.description, read).toMatch(/\[tier: read\]$/);
+    expect(byName.get('part_install')?.annotations?.destructiveHint).toBe(true);
   });
 
   it('holodeck_info reports the workspace, tier and installed packages', async () => {

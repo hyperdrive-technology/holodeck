@@ -12,7 +12,9 @@
  *
  * This replaced `import.meta.glob`, which is Vite-only and which tsup leaves
  * untransformed, so the built package threw on import (holodeck#7).
- * Adding a model: drop the GLB here and add a line below;
+ * Adding a model: drop the GLB here and add a line below, or let the MCP
+ * `part_install` tool do both (it regenerates this file with
+ * `packages/mcp/src/part-files.ts`, whose test pins the exact format);
  * `index.test.ts` fails if the map and the directory disagree.
  */
 import briteTank from './brite-tank.glb?url';

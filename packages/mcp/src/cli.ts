@@ -4,6 +4,8 @@
  *
  *   HOLODECK_MCP_ROOT   workspace folder for documents (default: the current directory)
  *   HOLODECK_MCP_TIER   read | author | exec (default: author)
+ *   HOLODECK_MCP_ALLOW_BLENDER=1   with tier exec: let the Blender part tools run Blender
+ *   BLENDER, HOLODECK_MCP_REPO     Blender binary; holodeck repo for blender/parts and assets/models
  *
  * stdout carries the protocol, so diagnostics go to stderr only.
  */

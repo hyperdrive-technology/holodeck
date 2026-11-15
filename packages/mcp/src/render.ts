@@ -46,6 +46,10 @@ export const RENDER_ARGS: readonly string[] = [
 export const MAC_CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 /** Matches apps/studio/src/render/render-input.ts RENDER_INPUT_GLOBAL. */
 export const RENDER_INPUT_GLOBAL = '__HOLODECK_RENDER__';
+/** Matches apps/studio/src/render/render-input.ts RENDER_MODEL_FORMAT: the input is one GLB, not a document. */
+export const RENDER_MODEL_FORMAT = 'holodeck.render-model.v1';
+/** Where the page fetches a model render's GLB; answered from memory by the capture (page.route), never from disk. */
+export const RENDER_MODEL_PATH = '/__holodeck_mcp__/model.glb';
 export const RENDER_TIMEOUT_MS = 120_000;
 export const IDLE_CLOSE_MS = 120_000;
 export const MIN_SIDE = 64;
@@ -159,6 +163,18 @@ export interface RendererOptions {
 const defaultLaunch = (executablePath: string, args: readonly string[]): Promise<Browser> => chromium.launch({ executablePath, headless: true, args: [...args] });
 
 type Session = { browser: Browser; server: Server; baseUrl: string };
+/** One capture: the route input, plus files the page may fetch that are answered from memory (path -> bytes). */
+type Job = { input: unknown; files?: Readonly<Record<string, Uint8Array>> };
+
+/** A model render: one GLB placed at the origin of a one-object scene. */
+export interface ModelRenderInput {
+  glb: Uint8Array;
+  /** Grid cells the model covers (the view is fitted to this box). */
+  footprint: { w: number; h: number };
+  /** Its height in world units (also used for the fit). */
+  height: number;
+  label?: string;
+}
 type Outcome = { state: 'ready' | 'unsupported' | 'invalid' | 'missing'; problems: string[] };
 
 const closedError = () => new ToolError('the renderer is closed (the MCP server is shutting down); no image was produced', [], 'closed');
@@ -235,16 +251,30 @@ export class SceneRenderer {
 
   /** Render `document` at `width` x `height` CSS px (device scale 1). One at a time. */
   render(document: unknown, size: { width: number; height: number }): Promise<Buffer> {
+    return this.enqueue({ input: document }, size);
+  }
+
+  /**
+   * Render one GLB as the studio draws a part (`applyHolodeckStyle`, the
+   * default theme, run mode, fitted): the `/render` route's model input.
+   * The page fetches the GLB from RENDER_MODEL_PATH, answered from memory.
+   */
+  renderModel(model: ModelRenderInput, size: { width: number; height: number }): Promise<Buffer> {
+    const input = { format: RENDER_MODEL_FORMAT, url: RENDER_MODEL_PATH, footprint: model.footprint, height: model.height, ...(model.label ? { label: model.label } : {}) };
+    return this.enqueue({ input, files: { [RENDER_MODEL_PATH]: model.glb } }, size);
+  }
+
+  private enqueue(job: Job, size: { width: number; height: number }): Promise<Buffer> {
     if (this.closed) return Promise.reject(closedError());
     for (const side of [size.width, size.height]) {
       if (!Number.isInteger(side) || side < MIN_SIDE || side > MAX_SIDE) throw new ToolError(`width and height must be whole numbers in ${MIN_SIDE}..${MAX_SIDE}`);
     }
-    const run = this.queue.then(() => this.renderNow(document, size));
+    const run = this.queue.then(() => this.renderNow(job, size));
     this.queue = run.catch(() => undefined);
     return run;
   }
 
-  private async renderNow(document: unknown, size: { width: number; height: number }): Promise<Buffer> {
+  private async renderNow(job: Job, size: { width: number; height: number }): Promise<Buffer> {
     // Queued behind a render that was running when the client went away.
     if (this.closed) throw closedError();
     if (this.idle) clearTimeout(this.idle);
@@ -258,7 +288,7 @@ export class SceneRenderer {
         try {
           // close() may have run while the context was being created (`active` was still null).
           if (this.closed) throw closedError();
-          return await this.capture(context, document, baseUrl, errors);
+          return await this.capture(context, job, baseUrl, errors);
         } finally {
           this.active = null;
           await context.close().catch(() => undefined);
@@ -278,14 +308,17 @@ export class SceneRenderer {
     }
   }
 
-  private async capture(context: BrowserContext, document: unknown, baseUrl: string, errors: string[]): Promise<Buffer> {
+  private async capture(context: BrowserContext, job: Job, baseUrl: string, errors: string[]): Promise<Buffer> {
     const page = await context.newPage();
     page.on('pageerror', (error) => errors.push(error.message));
+    for (const [path, body] of Object.entries(job.files ?? {})) {
+      await page.route(`${baseUrl}${path}`, (route) => route.fulfill({ status: 200, contentType: CONTENT_TYPES[extname(path)] ?? 'application/octet-stream', body: Buffer.from(body) }));
+    }
     await page.addInitScript(
       ({ key, value }) => {
         (window as unknown as Record<string, unknown>)[key] = value;
       },
-      { key: RENDER_INPUT_GLOBAL, value: document },
+      { key: RENDER_INPUT_GLOBAL, value: job.input },
     );
     await page.goto(`${baseUrl}/render`);
     let outcome: Outcome;
