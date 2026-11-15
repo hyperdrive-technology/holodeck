@@ -6,7 +6,7 @@ import { mergeTankParams, tankLayout, tankWallSpan } from '../../assets/process/
 import { TANK_PRESETS } from '../../assets/process/tank-presets';
 import { createCutawayRegistry } from '../editor/pipe-cutaway-parts';
 import { gridToWorld } from '../iso/grid';
-import { resolvePipeRuns } from '../iso/pipe-runs';
+import { pipeRunSpec, resolvePipeRuns } from '../iso/pipe-runs';
 import type { IsoPlacement, IsoSceneFile } from '../iso/scene';
 import { resolveAutoElbows } from './elbows';
 import {
@@ -263,6 +263,45 @@ describe('planRisers', () => {
     ]);
     expect(trims.get('out')!.from).toBeCloseTo(rp);
     expect(trims.get('in')!.to).toBeCloseTo(rp);
+  });
+
+  it('regression (holodeck#320): a short run between two raised vessels stays visible with ordered ends', () => {
+    // GPT review case: radius-1 vessels at (0,0) and (3,0), pipe (1,0) -> (2,0).
+    const span = { bottomY: 1.3, topY: 3.2, outletY: 0.75, outletRadius: 0.1 };
+    const a = raised({ id: 'a', radius: 1, span });
+    const b = raised({ id: 'b', x: 3, radius: 1, span });
+    const objects = [pipe('p', 1, 0, 2, 0)];
+    const { risers, trims } = plan(objects, [a, b]);
+    const t = trims.get('p') ?? {};
+    // Both trims together leave at least RISER_MIN_RUN of drawn run.
+    expect((t.from ?? 0) + (t.to ?? 0)).toBeLessThanOrEqual(1 - RISER_MIN_RUN + 1e-9);
+    // Every riser drawn is one whose run end is actually trimmed to it.
+    for (const r of risers) for (const pe of r.pipes) expect(t[pe.end]).toBeDefined();
+    // And through the real run resolver: visible, from before to.
+    const clips = new Map<string, PipeClip>();
+    clips.set('p', { from: clipFor({ x: 1, y: 0 }, { x: 2, y: 0 }, a)!, to: clipFor({ x: 2, y: 0 }, { x: 1, y: 0 }, b)! });
+    const spec = pipeRunSpec(objects[0]!, new Set(), clips.get('p'), t)!;
+    expect(spec.hidden).toBe(false);
+    expect(spec.to[0] - spec.from[0]).toBeGreaterThanOrEqual(RISER_MIN_RUN - 1e-9);
+  });
+
+  it('a run too short for two risers keeps the plain clips at both ends (no floating risers)', () => {
+    const span = { bottomY: 1.3, topY: 3.2 };
+    const a = raised({ id: 'a', radius: 1, span });
+    const b = raised({ id: 'b', x: 2.5, radius: 1, span });
+    const { risers, trims } = plan([pipe('p', 1, 0, 1.5, 0)], [a, b]);
+    expect(risers).toEqual([]);
+    expect(trims.size).toBe(0);
+  });
+
+  it('regression (holodeck#321): offset parallel outlet branches keep their own risers, each flush', () => {
+    const v = raised();
+    const { risers, trims } = plan([pipe('a', 0, 0, 0, 3), pipe('b', 0.39, 0, 0.39, 3)], [v]);
+    expect(risers).toHaveLength(2);
+    for (const r of risers) {
+      expect(r.pipes).toHaveLength(1);
+      expect(trims.get(r.pipes[0]!.pipeId)!.from).toBeCloseTo(rp);
+    }
   });
 
   it('ends on an elbow cell are the elbow\'s business: no riser', () => {

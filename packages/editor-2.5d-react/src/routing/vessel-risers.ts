@@ -71,6 +71,9 @@ export const RISER_MIN_RISE = 0.02;
  */
 export const RISER_MIN_RUN = 0.1;
 
+/** A run joins a shared (header) riser only when its axis passes this close to the riser axis. */
+export const HEADER_AXIS_TOL = 1e-3;
+
 export type RiserKind = 'side' | 'bottom';
 
 /** One pipe end that joins a riser. */
@@ -265,18 +268,51 @@ export function planRisers(
     if (!clip) continue;
     const from = { x: p.x, y: p.y };
     const to = { x: p.toX, y: p.toY };
-    for (const [end, self, other] of [
+    const sides = [
       ['from', from, to],
       ['to', to, from],
-    ] as const) {
-      if (bendKeys.has(`${self.x},${self.y}`)) continue;
+    ] as const;
+    // ONE length budget per run: both ends may want a riser (a short pipe
+    // between two raised vessels), so each end's reserve covers whatever the
+    // other end takes (its elbow, its riser or its plain clip trim).
+    const elbowAt = (q: Pt) => (bendKeys.has(`${q.x},${q.y}`) ? ELBOW_RADIUS : 0);
+    const want = sides.map(([end, self]) => {
+      if (bendKeys.has(`${self.x},${self.y}`)) return null;
       const c = clip[end];
       const vessel = c ? byId.get(c.vesselId) : undefined;
-      const reserve = bendKeys.has(`${other.x},${other.y}`) ? ELBOW_RADIUS : 0;
-      const plan = planRiserEnd(self, other, c, vessel, opts, reserve);
-      const ax = axis(self, other);
-      if (!plan || !vessel || !ax) continue;
-      ends.push({ pipeId: p.id, end, vessel, kind: plan.kind, at: plan.at, tAxis: plan.tAxis, endPt: self, reserve, ...ax });
+      return c && vessel ? { c, vessel } : null;
+    });
+    const ax = axis(from, to);
+    if (!ax) continue;
+    const tryPlan = (i: 0 | 1, reserve: number) => {
+      const w = want[i];
+      const [, self, other] = sides[i];
+      return w ? planRiserEnd(self, other, w.c, w.vessel, opts, reserve) : null;
+    };
+    const elbowReserve = [elbowAt(to), elbowAt(from)] as const;
+    let plans = [tryPlan(0, elbowReserve[0]), tryPlan(1, elbowReserve[1])];
+    if (plans[0] && plans[1] && plans[0].tAxis + plans[1].tAxis + 2 * rp > ax.len - RISER_MIN_RUN + EPS) {
+      // Both fit alone but not together: give each half the run (nozzles shrink to fit).
+      const half = (ax.len - RISER_MIN_RUN) / 2;
+      plans = [tryPlan(0, half), tryPlan(1, half)];
+    }
+    // An end that gets no riser keeps its clip trim; the other end must leave room for it.
+    for (const i of [0, 1] as const) {
+      const j = (1 - i) as 0 | 1;
+      if (plans[i] && !plans[j]) {
+        const otherTrim = Math.max(0, elbowReserve[i], want[j] ? want[j]!.c.trim : 0);
+        plans[i] = tryPlan(i, otherTrim);
+      }
+    }
+    for (const i of [0, 1] as const) {
+      const plan = plans[i];
+      const w = want[i];
+      if (!plan || !w) continue;
+      const [end, self, other] = sides[i];
+      const j = (1 - i) as 0 | 1;
+      const otherTake = plans[j] ? plans[j]!.tAxis + rp : Math.max(elbowReserve[i], want[j] ? want[j]!.c.trim : 0);
+      const selfAx = axis(self, other)!;
+      ends.push({ pipeId: p.id, end, vessel: w.vessel, kind: plan.kind, at: plan.at, tAxis: plan.tAxis, endPt: self, reserve: otherTake, ...selfAx });
     }
   }
 
@@ -288,7 +324,10 @@ export function planRisers(
       (grp) =>
         grp[0]!.vessel.id === e.vessel.id &&
         grp[0]!.kind === e.kind &&
-        Math.hypot(grp[0]!.at.x - e.at.x, grp[0]!.at.y - e.at.y) < 2 * rp,
+        Math.hypot(grp[0]!.at.x - e.at.x, grp[0]!.at.y - e.at.y) < 2 * rp &&
+        // Only runs whose axis passes through the shared riser can butt onto
+        // it; an offset parallel branch keeps its own riser (holodeck#321).
+        Math.abs((grp[0]!.at.x - e.endPt.x) * e.uy - (grp[0]!.at.y - e.endPt.y) * e.ux) < HEADER_AXIS_TOL,
     );
     if (g) g.push(e);
     else groups.push([e]);
