@@ -13,6 +13,7 @@ export function Pipe({
   band,
   params,
   ends,
+  y,
 }: {
   from: [number, number];
   to: [number, number];
@@ -21,13 +22,17 @@ export function Pipe({
   params?: Partial<FittingParams>;
   /** Per-end finish; `cut` where the run enters a vessel window (src/iso/pipe-runs.ts). Default: flanges. */
   ends?: { from: PipeEndStyle; to: PipeEndStyle };
+  /** World Y of the axis; default `pipeWorldY(radius)` (every floor run). Riser nozzle stubs sit higher. */
+  y?: number;
 }) {
   const style = useHolodeckStyle();
   const p = mergeFittingParams({ pipeWireColor: style.colors.pipeWire, pipeBandColor: style.colors.band, ...params });
   const r = radius ?? p.pipeRadius;
   const sides = Math.max(3, Math.round(p.pipeSides));
   const stripe = band ?? p.pipeBandColor;
-  const { length, yaw, mid } = pipePose(from, to, r);
+  const pose = pipePose(from, to, r);
+  const { length, yaw } = pose;
+  const mid: [number, number, number] = y === undefined ? pose.mid : [pose.mid[0], y, pose.mid[2]];
   // The flange toggle only applies to ends that are not cut sections.
   const fromEnd = ends?.from === 'cut' ? 'cut' : p.pipeShowFlanges ? 'flange' : 'plain';
   const toEnd = ends?.to === 'cut' ? 'cut' : p.pipeShowFlanges ? 'flange' : 'plain';

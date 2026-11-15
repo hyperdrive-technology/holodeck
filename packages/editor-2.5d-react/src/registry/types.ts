@@ -185,7 +185,18 @@ export interface IsoPartDefinition extends Contribution {
    * window rather than through it. Absent = the wall stands on the floor up
    * to the placement height (routing/vessel-ports.ts `vesselWallSpan`).
    */
-  wallSpan?: (placement: IsoPlacement) => { bottomY: number; topY: number };
+  wallSpan?: (placement: IsoPlacement) => {
+    bottomY: number;
+    topY: number;
+    /**
+     * Optional (backward compatible): world Y of the bottom closure's lowest
+     * point (cone outlet / dish pole) and the radius of the flat outlet there.
+     * Pipes ending under the vessel rise to it (routing/vessel-risers.ts).
+     * `tankWallSpan(tankLayout(...))` fills both in.
+     */
+    outletY?: number;
+    outletRadius?: number;
+  };
   /** The animatable / inspectable surface (level, rpm, open, running, temp...). */
   params: Record<string, IsoPartParamSpec>;
   /** What the palette stamps onto a new placement (height, band, width...). */

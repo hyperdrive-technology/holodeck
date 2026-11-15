@@ -5,6 +5,8 @@ export { EndCap } from './EndCap';
 export { Label } from './Label';
 export { Mixer } from './Mixer';
 export { Pipe } from './Pipe';
+export { Riser } from './Riser';
+export type { RiserShape } from './Riser';
 export { Shaft } from './Shaft';
 export { Tank } from './Tank';
 export { TankAgitator, AGITATOR_ANIM_NODE } from './TankAgitator';

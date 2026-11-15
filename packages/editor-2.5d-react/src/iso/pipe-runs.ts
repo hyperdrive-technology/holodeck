@@ -13,6 +13,12 @@
  *   the rim. Solid-wall ends are unchanged.
  * An end on a bend cell is the elbow's business, so it ignores vessel clips.
  *
+ * Ends that meet a RAISED vessel (clip contact `under` / `outlet`) get a
+ * riser instead (routing/vessel-risers.ts): the run is trimmed to end flush
+ * with a vertical riser that climbs to a side nozzle or the bottom outlet.
+ * The riser trims replace the clip trims for those ends; SceneGraph draws
+ * the risers from `ScenePipeRuns.risers`.
+ *
  * Fittings (valves, caps, elbows) whose centre sits inside a cut-away
  * vessel's wall are listed in `hiddenFittings`: they would float in the open
  * interior, so SceneGraph does not draw them.
@@ -28,6 +34,7 @@ import {
   type PipeClipOptions,
   type VesselWall,
 } from '../routing/vessel-ports';
+import { planRisers, type PipeRiser } from '../routing/vessel-risers';
 import type { IsoPartDefinition } from '../registry/types';
 import { gridToWorld } from './grid';
 import type { IsoPlacement } from './scene';
@@ -53,12 +60,15 @@ export function bendKeysOf(objects: readonly IsoPlacement[]): Set<string> {
 
 /**
  * One run. `bendKeys` from `bendKeysOf`; `clip` from `resolvePipeClips`
- * (absent = no vessel contact). Null for a pipe without a far end.
+ * (absent = no vessel contact); `riserTrim` from `planRisers` (an end listed
+ * there joins a riser: its trim wins over the clip's, and it is flanged).
+ * Null for a pipe without a far end.
  */
 export function pipeRunSpec(
   object: IsoPlacement,
   bendKeys: ReadonlySet<string> | undefined,
   clip?: PipeClip,
+  riserTrim?: { from?: number; to?: number },
 ): PipeRunSpec | null {
   if (object.toX === undefined || object.toY === undefined) return null;
   const [wx, , wz] = gridToWorld(object.x, object.y);
@@ -68,14 +78,16 @@ export function pipeRunSpec(
   const bent = trimRun([wx, wz], [tx, tz], bendFrom, bendTo);
   const vesselFrom = bendFrom ? undefined : clip?.from;
   const vesselTo = bendTo ? undefined : clip?.to;
-  const a = vesselFrom?.trim ?? 0;
-  const b = vesselTo?.trim ?? 0;
+  const riserFrom = bendFrom ? undefined : riserTrim?.from;
+  const riserTo = bendTo ? undefined : riserTrim?.to;
+  const a = riserFrom ?? vesselFrom?.trim ?? 0;
+  const b = riserTo ?? vesselTo?.trim ?? 0;
   const dx = bent.to[0] - bent.from[0];
   const dz = bent.to[1] - bent.from[1];
   const len = Math.hypot(dx, dz);
   const ends = {
-    from: vesselFrom?.cut ? 'cut' : 'flange',
-    to: vesselTo?.cut ? 'cut' : 'flange',
+    from: riserFrom === undefined && vesselFrom?.cut ? 'cut' : 'flange',
+    to: riserTo === undefined && vesselTo?.cut ? 'cut' : 'flange',
   } as const;
   const base = { ends, ...(clip ? { clip } : {}) };
   // Only vessel clipping hides a run; a degenerate authored pipe draws as before.
@@ -115,6 +127,8 @@ export interface ScenePipeRuns {
   runs: Map<string, PipeRunSpec>;
   /** Fitting ids that sit inside a cut-away vessel. */
   hiddenFittings: Set<string>;
+  /** Risers that carry runs up to raised vessels (routing/vessel-risers.ts). */
+  risers: PipeRiser[];
 }
 
 /** Every run in the scene plus the fittings to hide. `objects` should already have auto elbows resolved. */
@@ -125,14 +139,15 @@ export function resolvePipeRuns(
 ): ScenePipeRuns {
   const bendKeys = bendKeysOf(objects);
   const clips = resolvePipeClips(objects, registry, opts);
+  const walls = vesselWalls(objects, registry);
+  const { risers, trims } = planRisers(objects, clips, walls, bendKeys, opts);
   const runs = new Map<string, PipeRunSpec>();
   for (const o of objects) {
     if (o.object !== 'pipe') continue;
-    const spec = pipeRunSpec(o, bendKeys, clips.get(o.id));
+    const spec = pipeRunSpec(o, bendKeys, clips.get(o.id), trims.get(o.id));
     if (spec) runs.set(o.id, spec);
   }
   const hiddenFittings = new Set<string>();
-  const walls = vesselWalls(objects, registry);
   if (walls.length > 0) {
     for (const o of objects) {
       if (!VESSEL_HIDDEN_FITTINGS.has(o.object)) continue;
@@ -140,5 +155,5 @@ export function resolvePipeRuns(
       if (walls.some((w) => w.id !== o.id && fittingInsideVessel(o, w, opts))) hiddenFittings.add(o.id);
     }
   }
-  return { runs, hiddenFittings };
+  return { runs, hiddenFittings, risers };
 }

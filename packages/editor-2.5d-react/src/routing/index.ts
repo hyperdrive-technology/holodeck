@@ -61,3 +61,16 @@ export type {
   WallSpan,
   WindowConnection,
 } from './vessel-ports';
+export {
+  nozzleAxisY,
+  planRiserEnd,
+  planRisers,
+  riserAppearance,
+  vesselUndersideY,
+  RISER_MIN_RISE,
+  RISER_MIN_RUN,
+  RISER_NOZZLE_CLEARANCE,
+  RISER_NOZZLE_LEN,
+  RISER_NOZZLE_MIN,
+} from './vessel-risers';
+export type { PipeRiser, RiserKind, RiserOptions, RiserPipeEnd, RiserPlan } from './vessel-risers';

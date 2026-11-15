@@ -8,7 +8,9 @@
  *       close-up of each pipe end that meets a vessel: every window entry
  *       (clipped at the wall, cut-section end) plus the under / outlet ends
  *       (fermenter cone branches and glycol stubs, mash tun and kettle on legs),
- *       at the editor's fitted zoom (1x) and at twice that (2x).
+ *       at the editor's fitted zoom (1x) and at twice that (2x). The under /
+ *       outlet ends are where the pipe risers (routing/vessel-risers.ts) climb
+ *       to the side nozzle or bottom outlet, so these shots review them too.
  *
  * The scenes live in the sibling core repo; their vessels are mirrored by
  * pipe-cutaway-parts.tsx (same ids, presets, window params and wallSpan) and

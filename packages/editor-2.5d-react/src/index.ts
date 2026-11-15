@@ -47,6 +47,7 @@ export {
   Label,
   Mixer,
   Pipe,
+  Riser,
   Shaft,
   Tank,
   TankAgitator,
@@ -159,7 +160,11 @@ export {
   vesselWalls,
   DEFAULT_TANK_CUTOUT,
   ELBOW_BEND_PARAM,
+  planRisers,
+  riserAppearance,
+  vesselUndersideY,
 } from './routing';
+export type { PipeRiser, RiserKind, RiserOptions, RiserPipeEnd, RiserPlan } from './routing';
 export { resolvePipeRuns, pipeRunSpec, fittingInsideVessel } from './iso/pipe-runs';
 export { PIPE_RADIUS, pipeWorldY } from '../assets/process/pipe-math';
 export type { PipeRunSpec, ScenePipeRuns } from './iso/pipe-runs';

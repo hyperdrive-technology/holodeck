@@ -300,12 +300,30 @@ export function tankLayout(
  * `IsoPartDefinition.wallSpan`: routing/vessel-ports.ts uses it to tell a
  * pipe running through the cut-away window from one passing under a vessel
  * on legs or a skirt.
+ *
+ * When the layout also carries the bottom closure (`bottomY` / `bottomR`, as
+ * the full `tankLayout` result does), the span reports the bottom outlet too:
+ * `outletY` is the world Y of the closure's lowest point (cone outlet / dish
+ * pole) and `outletRadius` the radius of the flat outlet there. The pipe
+ * risers (routing/vessel-risers.ts) climb to it. Optional, so a caller that
+ * passes only `y0` / `bodyTop` / `floorY` gets the old two-field span.
  */
-export function tankWallSpan(layout: Pick<ReturnType<typeof tankLayout>, 'y0' | 'bodyTop' | 'floorY'>): {
+export function tankWallSpan(
+  layout: Pick<ReturnType<typeof tankLayout>, 'y0' | 'bodyTop' | 'floorY'> &
+    Partial<Pick<ReturnType<typeof tankLayout>, 'bottomY' | 'bottomR'>>,
+): {
   bottomY: number;
   topY: number;
+  outletY?: number;
+  outletRadius?: number;
 } {
-  return { bottomY: layout.y0 - layout.floorY, topY: layout.bodyTop - layout.floorY };
+  const span = { bottomY: layout.y0 - layout.floorY, topY: layout.bodyTop - layout.floorY };
+  if (typeof layout.bottomY !== 'number' || !Number.isFinite(layout.bottomY)) return span;
+  const outletY = layout.bottomY - layout.floorY;
+  // A flat bottom has no closure below the wall: the "outlet" is the whole floor.
+  if (outletY >= span.bottomY - 1e-9) return span;
+  const r = layout.bottomR;
+  return { ...span, outletY, ...(typeof r === 'number' && Number.isFinite(r) ? { outletRadius: Math.max(0, r) } : {}) };
 }
 
 /** Grid footprint (whole cells) that covers a vessel of `radius`; routing treats it as the obstacle box. */
