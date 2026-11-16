@@ -174,6 +174,14 @@ export function Tank({
     [inner, flask.bowlH, flask.originY, liquidTop, flaskStacks],
   );
   const waterline = useMemo(() => waterlineRing(inner, liquidTop, 48), [inner, liquidTop]);
+  // The bottom twin of the waterline (Des, 2026-11-16): the front half of the ring where the liquid's
+  // bowl meets its straight side, so the water reads as outlined top and bottom. Front half only: the
+  // back half lay on the back-wall floor arc and read as a double line. None while the fill is in the bowl.
+  const yaw = (p.windowYawDeg * Math.PI) / 180;
+  const liquidBase = useMemo(
+    () => (liquidTop > flask.originY + 1e-4 ? cylinderArcSegments(inner, flask.originY, yaw - Math.PI / 2, Math.PI, 24) : null),
+    [inner, flask.originY, liquidTop, yaw],
+  );
   const shoulderLathes = useMemo(() => {
     if (shoulder.shoulderH < 1e-4) {
       return { wall: [] as Vector2[], liner: [] as Vector2[] };
@@ -527,6 +535,7 @@ export function Tank({
               <LiquidFill color={liquidTones.surface} opacity={p.liquidOpacity} />
             </mesh>
             <LineBag color={p.edgeColor} positions={waterline} />
+            {liquidBase ? <LineBag color={p.edgeColor} positions={liquidBase} /> : null}
           </>
         ) : null}
         {p.showBowl && flaskMeridians ? <LineBag color={p.edgeColor} positions={flaskMeridians} /> : null}
