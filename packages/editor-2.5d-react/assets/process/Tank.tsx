@@ -10,6 +10,8 @@ import {
   waterlineRing,
   spherePhiFromCylinderTheta,
   cylinderMeridianSegments,
+  cylinderMeridianSegmentsAt,
+  backWallThetas,
   cylinderArcSegments,
   cylinderThetasEven,
   cylinderThetasKept,
@@ -74,6 +76,11 @@ function LineBag({ positions, color }: { positions: Float32Array; color: string 
   );
 }
 
+/** Back-wall verticals sit at this fraction of the liner radius: closer than 0.99 z-fights with the liner. */
+const BACK_LINE_RATIO = 0.96;
+/** Their floor arc stands this far above the floor disc (0.002) so the disc does not hide it. */
+const BACK_FLOOR_LIFT = 0.03;
+
 function LiquidFill({ color, opacity }: { color: string; opacity: number }) {
   // Opaque with depth writes so nothing behind the flask (back-wall lines,
   // the liner, pipes) prints through the cutout. A sub-1 opacity (the mixer
@@ -123,6 +130,7 @@ export function Tank({
   const liquidTones = liquidShades(color);
   const inner = tankR * p.innerRatio;
   const liner = tankR * p.linerRatio;
+  const backR = liner * BACK_LINE_RATIO;
   const layout = tankLayout(tankH, tankR, p);
   const bodyH = tankH;
   const y0 = layout.y0;
@@ -359,6 +367,23 @@ export function Tank({
                 <cylinderGeometry args={[liner, liner, bodyH, ...windowArgs]} />
                 <meshBasicMaterial color={p.linerColor} side={BackSide} toneMapped={false} />
               </mesh>
+            ) : null}
+            {/* Back-wall verticals: the outer cage above sits behind the opaque liner, so seen from the
+                window nothing marked the back wall. Drawn well inside the liner (a hair in front of it
+                z-fought: only some of the lines survived) so the translucent liquid
+                (TANK_LIQUID_OPACITY) shows them through the water. They stand on a floor arc, so each
+                ends on a ring like every other vertical in the vessel style. */}
+            {p.showCage && p.showLiner ? (
+              <>
+                <LineBag
+                  color={p.edgeColor}
+                  positions={cylinderMeridianSegmentsAt(backR, -bodyH / 2 + BACK_FLOOR_LIFT, bodyH / 2, backWallThetas(segs, keepStart, keepLen))}
+                />
+                <LineBag
+                  color={p.edgeColor}
+                  positions={cylinderArcSegments(backR, -bodyH / 2 + BACK_FLOOR_LIFT, keepStart, keepLen, segs)}
+                />
+              </>
             ) : null}
             {/* Floor disc closes the open cylinder so the ground grid / a dish bottom never shows through the window. */}
             {p.showLiner ? (

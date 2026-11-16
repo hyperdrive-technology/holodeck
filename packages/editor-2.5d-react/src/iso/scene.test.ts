@@ -141,8 +141,10 @@ describe('scene document', () => {
     expect(MIXER_SHADE_MIN).toBeCloseTo(0.4);
     expect(MIXER_SHADE_MIN).toBeGreaterThan(TANK_SHADE_MIN);
     expect(MIXER_LIQUID_OPACITY).toBeCloseTo(0.84);
-    expect(TANK_LIQUID_OPACITY).toBe(1); // solid: 0.88 with depthWrite off let back-wall lines print through the cutout
-    expect(TANK_LIQUID_OPACITY).toBeGreaterThan(0.69);
+    // Translucent (Des, 2026-11-16) so the back-wall verticals show through; LiquidFill still writes depth, so only the first surface blends.
+    expect(TANK_LIQUID_OPACITY).toBeCloseTo(0.65);
+    expect(TANK_LIQUID_OPACITY).toBeLessThan(MIXER_LIQUID_OPACITY);
+    expect(TANK_LIQUID_OPACITY).toBeGreaterThan(0.5);
     expect(DEFAULT_TANK_PARAMS.liquidOpacity).toBe(TANK_LIQUID_OPACITY);
     // Round 3 dropped the old MIXER > TANK invariant: tank liquid now has shaded side/surface, so it can be as solid as the mixer's.
     expect(TANK_WALL_THRESHOLD).toBe(15);
