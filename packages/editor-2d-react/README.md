@@ -297,6 +297,29 @@ pnpm dev
 | `onNodeSelect` | `(nodes: SceneNode[]) => void` | - | Node selection callback |
 | `onEdgeSelect` | `(edges: SceneEdge[]) => void` | - | Edge selection callback |
 | `onViewChange` | `(viewport: ViewportState) => void` | - | Viewport change callback |
+| `onNodesMoved` | `(moves: HolodeckNodeMove[], source: 'drag' \| 'keyboard') => void` | - | Fired once per completed drag (every node of a multi-selection drag in one call) or arrow-key nudge; never per frame |
+| `snapGrid` | `number \| [number, number] \| false` | `false` | Snap drags (and nudges) to a grid in flow units |
+
+### Persisting node positions
+
+`onNodesMoved` reports where the user left nodes. Positions are flow coordinates of
+the node's top-left corner, the same space as `SceneNode.transform.position.{x,y}`.
+
+```tsx
+<HolodeckEditor2D
+  scene={scene}
+  layout="manual"
+  snapGrid={20}
+  onNodesMoved={(moves) => setScene((s) => movePositions(s, moves))}
+/>
+```
+
+Write the positions back into `scene` and the editor keeps them: no snap-back and no
+refit (the view refits only when nodes or edges are added or removed, or `layout`
+changes). Without write-back, moved nodes stay where the user left them until the host
+gives a node a different position than it had before the move (undo, reset, re-layout).
+With `layout="dagre"` the layout recomputes positions from the graph, so persist with
+`layout="manual"`.
 
 ## License
 
