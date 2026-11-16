@@ -87,6 +87,15 @@ describe('back-wall verticals seen through the window', () => {
     }
   });
 
+  it('stay on the wall that is left when the cutout is wide, and vanish with it', () => {
+    for (const deg of [91, 150, 210, 270, 330, 359, 360]) {
+      const w = tankWindow(deg, TANK_WINDOW_YAW);
+      const ths = backWallThetas(segs, w.keepStart, w.keepLen);
+      if (deg === 360) expect(ths).toEqual([]);
+      for (const th of ths) expect(angleOnArc(th, w.keepStart, w.keepLen), `${deg} deg cutout`).toBe(true);
+    }
+  });
+
   it('sit inside the liner prism at every supported segment count (the faces are nearer than the corners)', () => {
     const liner = 0.99;
     for (const n of [3, 5, 7, 12, 15, 24]) {

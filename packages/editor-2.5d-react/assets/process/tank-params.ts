@@ -995,9 +995,11 @@ function pushCylinderMeridian(pts: number[], radius: number, y0: number, y1: num
 export function backWallThetas(segs: number, keepStart: number, keepLen: number): number[] {
   const n = Math.max(3, Math.round(segs));
   const step = (Math.PI * 2) / n;
+  if (keepLen <= 1e-6) return [];
   const mid = keepStart + keepLen / 2;
-  const halfWindow = (Math.PI * 2 - keepLen) / 2;
-  const reach = Math.floor((halfWindow + 1e-6) / step);
+  // Never wider than the wall that is left: a wide cutout leaves a narrow back wall.
+  const half = Math.min((Math.PI * 2 - keepLen) / 2, keepLen / 2);
+  const reach = Math.floor((half + 1e-6) / step);
   return Array.from({ length: 2 * reach + 1 }, (_, i) => mid + (i - reach) * step);
 }
 
