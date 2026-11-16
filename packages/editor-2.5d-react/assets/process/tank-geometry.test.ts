@@ -17,6 +17,7 @@ import {
   tankLayout,
   tankWindow,
   backWallThetas,
+  backWallRadius,
   cylinderMeridianSegmentsAt,
   TANK_LIQUID_OPACITY,
   vesselFootprint,
@@ -83,6 +84,22 @@ describe('back-wall verticals seen through the window', () => {
       expect(angleOnArc(th, win.keepStart, win.keepLen)).toBe(true);
       const opposite = (TANK_WINDOW_YAW * Math.PI) / 180 + Math.PI;
       expect(Math.abs(wrap(th - opposite + Math.PI) - Math.PI)).toBeLessThanOrEqual(win.windowRad / 2 + 1e-6);
+    }
+  });
+
+  it('sit inside the liner prism at every supported segment count (the faces are nearer than the corners)', () => {
+    const liner = 0.99;
+    for (const n of [3, 5, 7, 12, 15, 24]) {
+      const r = backWallRadius(liner, n);
+      // Distance from the axis to the liner's flat face along any direction is >= its apothem.
+      expect(r).toBeLessThan(liner * Math.cos(Math.PI / n));
+      expect(r).toBeGreaterThan(liner * Math.cos(Math.PI / n) * 0.95);
+      for (const th of backWallThetas(n, win.keepStart, win.keepLen)) {
+        // Polygon radius in direction th (vertices at multiples of 2π/n).
+        const local = ((th % ((Math.PI * 2) / n)) + (Math.PI * 2) / n) % ((Math.PI * 2) / n) - Math.PI / n;
+        const faceR = (liner * Math.cos(Math.PI / n)) / Math.cos(local);
+        expect(r).toBeLessThan(faceR);
+      }
     }
   });
 

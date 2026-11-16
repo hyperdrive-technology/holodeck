@@ -12,6 +12,7 @@ import {
   cylinderMeridianSegments,
   cylinderMeridianSegmentsAt,
   backWallThetas,
+  backWallRadius,
   cylinderArcSegments,
   cylinderThetasEven,
   cylinderThetasKept,
@@ -76,8 +77,6 @@ function LineBag({ positions, color }: { positions: Float32Array; color: string 
   );
 }
 
-/** Back-wall verticals sit at this fraction of the liner radius: closer than 0.99 z-fights with the liner. */
-const BACK_LINE_RATIO = 0.96;
 /** Their floor arc stands this far above the floor disc (0.002) so the disc does not hide it. */
 const BACK_FLOOR_LIFT = 0.03;
 
@@ -130,7 +129,6 @@ export function Tank({
   const liquidTones = liquidShades(color);
   const inner = tankR * p.innerRatio;
   const liner = tankR * p.linerRatio;
-  const backR = liner * BACK_LINE_RATIO;
   const layout = tankLayout(tankH, tankR, p);
   const bodyH = tankH;
   const y0 = layout.y0;
@@ -141,6 +139,7 @@ export function Tank({
   const { keepStart, keepLen } = tankWindow(p.windowDeg, p.windowYawDeg);
   const domePhiStart = spherePhiFromCylinderTheta(keepStart);
   const segs = Math.max(3, Math.round(p.radialSegments));
+  const backR = backWallRadius(liner, segs);
   const fillSegs = windowFillSegments(segs);
   const bodySegs = Math.max(1, Math.round(p.bodyHeightSegments));
   const domeSegs = Math.max(1, Math.round(p.domeHeightSegments));

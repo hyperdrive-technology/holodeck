@@ -1001,6 +1001,17 @@ export function backWallThetas(segs: number, keepStart: number, keepLen: number)
   return Array.from({ length: 2 * reach + 1 }, (_, i) => mid + (i - reach) * step);
 }
 
+/**
+ * Radius for the back-wall verticals. The liner is a `segs`-sided prism, so
+ * its flat faces sit at `cos(π / segs)` of its radius; a line placed by the
+ * corner radius is behind the liner wherever a face is nearer (at 5 or 7
+ * segments the centre line was hidden). Inset from the face distance instead.
+ * `ratio` keeps it clear of the liner so it does not z-fight (0.995 lost lines).
+ */
+export function backWallRadius(linerRadius: number, segs: number, ratio = 0.98): number {
+  return linerRadius * Math.cos(Math.PI / Math.max(3, Math.round(segs))) * ratio;
+}
+
 /** Vertical segments at the given cylinder angles (same convention as `cylinderMeridianSegments`). */
 export function cylinderMeridianSegmentsAt(radius: number, y0: number, y1: number, thetas: readonly number[]): Float32Array {
   const pts: number[] = [];
