@@ -183,6 +183,10 @@ function HolodeckEditor2DInner(props: HolodeckEditor2DProps) {
   nodesRef.current = nodes;
   const onNodesMovedRef = useRef(onNodesMoved);
   onNodesMovedRef.current = onNodesMoved;
+  // Non-null while a drag is in progress: the node under the pointer and the
+  // positions of every dragged node at drag start. React Flow calls
+  // onNodeDragStart/Stop for single-node and selection drags alike.
+  const dragRef = useRef<{ grabbedId: string; start: Map<string, XY> } | null>(null);
 
   // Layout effect, not effect: a scene update must not paint one frame with
   // stale node positions.
@@ -192,9 +196,25 @@ function HolodeckEditor2DInner(props: HolodeckEditor2DProps) {
     seededNodesRef.current = nodes;
     const merged = applyPositionOverrides(nodes, overridesRef.current);
     overridesRef.current = merged.overrides;
+
+    // A drag in progress survives unrelated scene updates (live values arrive
+    // every scan). If the host removed the node under the pointer, React Flow
+    // unmounts its drag handler and never calls onNodeDragStop, so end the drag
+    // here; otherwise keyboard nudges would be mistaken for drag frames forever.
+    const drag = dragRef.current;
+    if (drag) {
+      const incoming = new Set(nodes.map((node) => node.id));
+      if (!incoming.has(drag.grabbedId)) {
+        dragRef.current = null;
+      } else {
+        for (const id of drag.start.keys()) if (!incoming.has(id)) drag.start.delete(id);
+      }
+    }
+    const dragging = dragRef.current?.start;
+
     setFlowNodes((prev) => {
-      // Carry React Flow's per-node UI state (selection, measured size) over to
-      // the fresh node objects so a scene update does not clear the selection.
+      // Carry React Flow's per-node UI state (selection, measured size, and the
+      // live position of nodes being dragged) over to the fresh node objects.
       const prevById = new Map(prev.map((node) => [node.id, node]));
       return merged.nodes.map((node) => {
         const before = prevById.get(node.id);
@@ -202,6 +222,10 @@ function HolodeckEditor2DInner(props: HolodeckEditor2DProps) {
         const next = { ...node };
         if (before.selected !== undefined) next.selected = before.selected;
         if (before.measured !== undefined) next.measured = before.measured;
+        if (dragging?.has(node.id)) {
+          next.position = before.position;
+          if (before.dragging !== undefined) next.dragging = before.dragging;
+        }
         return next;
       });
     });
@@ -225,18 +249,17 @@ function HolodeckEditor2DInner(props: HolodeckEditor2DProps) {
     [],
   );
 
-  // Positions at drag start, keyed by node id; non-null while a drag is in
-  // progress. React Flow calls onNodeDragStart/Stop for single-node and
-  // selection drags alike.
-  const dragStartRef = useRef<Map<string, XY> | null>(null);
-  const onNodeDragStart = useCallback<OnNodeDrag<FlowNode>>((_event, _node, dragged) => {
-    dragStartRef.current = new Map(dragged.map((node) => [node.id, { ...node.position }]));
+  const onNodeDragStart = useCallback<OnNodeDrag<FlowNode>>((_event, grabbed, dragged) => {
+    dragRef.current = {
+      grabbedId: grabbed.id,
+      start: new Map(dragged.map((node) => [node.id, { ...node.position }])),
+    };
   }, []);
   const onNodeDragStop = useCallback<OnNodeDrag<FlowNode>>(
     (_event, _node, dragged) => {
-      const start = dragStartRef.current;
-      dragStartRef.current = null;
-      if (start) report(dragged, start, 'drag');
+      const drag = dragRef.current;
+      dragRef.current = null;
+      if (drag) report(dragged, drag.start, 'drag');
     },
     [report],
   );
@@ -245,8 +268,8 @@ function HolodeckEditor2DInner(props: HolodeckEditor2DProps) {
     (changes: NodeChange<FlowNode>[]) => {
       // Arrow-key nudges arrive as `position` changes with `dragging: false`
       // outside a drag (a drag's final change also has `dragging: false`, but
-      // dragStartRef is still set then and onNodeDragStop reports it).
-      if (!dragStartRef.current) {
+      // dragRef is still set then and onNodeDragStop reports it).
+      if (!dragRef.current) {
         const nudged: Array<{ id: string; position: XY; data?: unknown }> = [];
         const previous = new Map<string, XY>();
         const current = new Map(flowNodesRef.current.map((node) => [node.id, node]));
@@ -259,7 +282,11 @@ function HolodeckEditor2DInner(props: HolodeckEditor2DProps) {
         }
         if (nudged.length > 0) report(nudged, previous, 'keyboard');
       }
-      setFlowNodes((prev) => applyNodeChanges(changes, prev));
+      // Nodes come from `scene`; only the host may remove them. React Flow's
+      // delete key is off (deleteKeyCode={null}) and any other `remove` change
+      // is dropped too, until there is a delete contract that tells the host.
+      const kept = changes.filter((change) => change.type !== 'remove');
+      if (kept.length > 0) setFlowNodes((prev) => applyNodeChanges(kept, prev));
     },
     [report],
   );
@@ -307,6 +334,7 @@ function HolodeckEditor2DInner(props: HolodeckEditor2DProps) {
         nodes={flowNodes}
         edges={edges}
         onNodesChange={onNodesChange}
+        deleteKeyCode={null}
         onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
         snapToGrid={snapGrid !== undefined}

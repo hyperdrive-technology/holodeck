@@ -234,6 +234,75 @@ describe('onNodesMoved: positions after the move', () => {
   });
 });
 
+describe('review fixes (holodeck#327)', () => {
+  it.each([
+    ['Backspace', true],
+    ['Delete', true],
+    ['Backspace', false],
+    ['Delete', false],
+  ])('%s on a selected node does not delete it (interactive=%s)', async (key, interactive) => {
+    const { container } = render(<HolodeckEditor2D scene={base} layout="manual" interactive={interactive} />);
+    fireEvent.click(nodeEl(container, 'a'));
+    fireEvent.keyDown(document, { key, code: key });
+    fireEvent.keyUp(document, { key, code: key });
+    fireEvent.keyDown(nodeEl(container, 'a'), { key, code: key });
+    // React Flow deletes after an async onBeforeDelete; let it settle.
+    await flushFrames();
+    expect(container.querySelectorAll('.react-flow__node')).toHaveLength(3);
+    expect(nodeEl(container, 'a')).toBeInTheDocument();
+  });
+
+  it('a scene update mid-drag keeps the node under the pointer and the drop is still reported', () => {
+    const onNodesMoved = vi.fn();
+    const { container, rerender } = render(
+      <HolodeckEditor2D scene={base} layout="manual" onNodesMoved={onNodesMoved} />,
+    );
+    mouse(nodeEl(container, 'a'), 'mousedown', 400, 400);
+    mouse(window, 'mousemove', 410, 410);
+    mouse(window, 'mousemove', 440, 460);
+    expect(translateOf(nodeEl(container, 'a'))).toEqual({ x: 30, y: 50 });
+
+    rerender(<HolodeckEditor2D scene={makeScene(base.scene.nodes, ' [+]')} layout="manual" onNodesMoved={onNodesMoved} />);
+    expect(translateOf(nodeEl(container, 'a'))).toEqual({ x: 30, y: 50 });
+
+    mouse(window, 'mousemove', 450, 470);
+    mouse(window, 'mouseup', 450, 470);
+    expect(onNodesMoved).toHaveBeenCalledTimes(1);
+    expect(onNodesMoved.mock.calls[0]![0]).toEqual([
+      expect.objectContaining({ nodeId: 'a', position: { x: 40, y: 60 }, previousPosition: { x: 0, y: 0 } }),
+    ]);
+    expect(translateOf(nodeEl(container, 'a'))).toEqual({ x: 40, y: 60 });
+  });
+
+  it('host removes the dragged node mid-drag: later keyboard nudges are still reported', async () => {
+    const onNodesMoved = vi.fn();
+    const { container, rerender } = render(
+      <HolodeckEditor2D scene={base} layout="manual" onNodesMoved={onNodesMoved} />,
+    );
+    mouse(nodeEl(container, 'a'), 'mousedown', 400, 400);
+    mouse(window, 'mousemove', 410, 410);
+    mouse(window, 'mousemove', 440, 460);
+    const withoutA = makeScene(base.scene.nodes.filter((n) => n.id !== 'a'));
+    rerender(<HolodeckEditor2D scene={withoutA} layout="manual" onNodesMoved={onNodesMoved} />);
+    // The next pointer move makes React Flow abort the drag (its node is gone),
+    // and an aborted drag ends without onNodeDragStop.
+    mouse(window, 'mousemove', 450, 470);
+    mouse(window, 'mouseup', 450, 470);
+    expect(container.querySelector('.react-flow__node[data-id="a"]')).toBeNull();
+    // d3-drag swallows the next click for one macrotask after a moved gesture.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    onNodesMoved.mockClear();
+
+    fireEvent.click(nodeEl(container, 'b'));
+    fireEvent.keyDown(nodeEl(container, 'b'), { key: 'ArrowRight' });
+    expect(onNodesMoved).toHaveBeenCalledTimes(1);
+    expect(onNodesMoved.mock.calls[0]![1]).toBe('keyboard');
+    expect(onNodesMoved.mock.calls[0]![0][0]).toMatchObject({ nodeId: 'b', position: { x: 205, y: 0 } });
+  });
+});
+
 describe('onNodesMoved: keyboard', () => {
   it('an arrow-key nudge of the selected node reports source "keyboard"', () => {
     const onNodesMoved = vi.fn();
