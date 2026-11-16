@@ -49,6 +49,29 @@ export interface HolodeckEditor2DProps {
   /** Callback when the view changes */
   onViewChange?: (viewport: ViewportState) => void;
   /**
+   * Fired once per completed move, never per frame:
+   * - `'drag'`: on drag stop. A multi-selection drag reports every moved node in
+   *   one call.
+   * - `'keyboard'`: once per arrow-key nudge of the selected nodes (5 px, or one
+   *   grid cell when `snapGrid` is set).
+   *
+   * Nodes that ended where they started are omitted; the callback is not called
+   * with an empty array. Positions are flow coordinates of the node's top-left
+   * corner, i.e. the same space as `SceneNode.transform.position.{x,y}`.
+   *
+   * Persisting is optional. Write `position` back into `scene` (typically with
+   * `layout="manual"`) and the editor keeps it without snapping back or refitting
+   * the view. Without write-back, the moved position sticks locally until the
+   * host gives that node a different position than it had before the move.
+   */
+  onNodesMoved?: (moves: HolodeckNodeMove[], source: HolodeckNodeMoveSource) => void;
+  /**
+   * Snap dragged nodes to a grid: a cell size in flow units (`20`), an `[x, y]`
+   * pair, or `false`/omitted for free movement (default). The background dots
+   * follow the grid when set.
+   */
+  snapGrid?: SnapGridProp;
+  /**
    * `dagre` recomputes positions (default). Use `manual` when the scene already
    * carries compiler/authored coordinates (e.g. Hyperdrive LD/FBD/SFC projections).
    */
@@ -60,6 +83,24 @@ export interface HolodeckEditor2DProps {
   /** Custom styles */
   style?: CSSProperties;
 }
+
+/** How a node move reported through `onNodesMoved` happened. */
+export type HolodeckNodeMoveSource = 'drag' | 'keyboard';
+
+/** One node moved by the user, as reported by `onNodesMoved`. */
+export interface HolodeckNodeMove {
+  /** `SceneNode.id` of the moved node. */
+  nodeId: string;
+  /** New top-left position in flow coordinates. */
+  position: { x: number; y: number };
+  /** Position before this move (drag start, or before the nudge). */
+  previousPosition: { x: number; y: number };
+  /** The scene node as the editor last received it (position not yet updated). */
+  sceneNode: SceneNode;
+}
+
+/** `snapGrid` prop: one cell size, an `[x, y]` pair, or `false` for off. */
+export type SnapGridProp = number | readonly [number, number] | false;
 
 export interface HolodeckProviderProps {
   /** Scene file to provide */
