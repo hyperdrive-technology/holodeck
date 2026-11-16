@@ -10,6 +10,9 @@ import {
   waterlineRing,
   spherePhiFromCylinderTheta,
   cylinderMeridianSegments,
+  cylinderMeridianSegmentsAt,
+  backWallThetas,
+  backWallRadius,
   cylinderArcSegments,
   cylinderThetasEven,
   cylinderThetasKept,
@@ -74,6 +77,9 @@ function LineBag({ positions, color }: { positions: Float32Array; color: string 
   );
 }
 
+/** Their floor arc stands this far above the floor disc (0.002) so the disc does not hide it. */
+const BACK_FLOOR_LIFT = 0.03;
+
 function LiquidFill({ color, opacity }: { color: string; opacity: number }) {
   // Opaque with depth writes so nothing behind the flask (back-wall lines,
   // the liner, pipes) prints through the cutout. A sub-1 opacity (the mixer
@@ -133,6 +139,7 @@ export function Tank({
   const { keepStart, keepLen } = tankWindow(p.windowDeg, p.windowYawDeg);
   const domePhiStart = spherePhiFromCylinderTheta(keepStart);
   const segs = Math.max(3, Math.round(p.radialSegments));
+  const backR = backWallRadius(liner, segs);
   const fillSegs = windowFillSegments(segs);
   const bodySegs = Math.max(1, Math.round(p.bodyHeightSegments));
   const domeSegs = Math.max(1, Math.round(p.domeHeightSegments));
@@ -167,6 +174,14 @@ export function Tank({
     [inner, flask.bowlH, flask.originY, liquidTop, flaskStacks],
   );
   const waterline = useMemo(() => waterlineRing(inner, liquidTop, 48), [inner, liquidTop]);
+  // The bottom twin of the waterline (Des, 2026-11-16): the front half of the ring where the liquid's
+  // bowl meets its straight side, so the water reads as outlined top and bottom. Front half only: the
+  // back half lay on the back-wall floor arc and read as a double line. None while the fill is in the bowl.
+  const yaw = (p.windowYawDeg * Math.PI) / 180;
+  const liquidBase = useMemo(
+    () => (liquidTop > flask.originY + 1e-4 ? cylinderArcSegments(inner, flask.originY, yaw - Math.PI / 2, Math.PI, 24) : null),
+    [inner, flask.originY, liquidTop, yaw],
+  );
   const shoulderLathes = useMemo(() => {
     if (shoulder.shoulderH < 1e-4) {
       return { wall: [] as Vector2[], liner: [] as Vector2[] };
@@ -360,6 +375,23 @@ export function Tank({
                 <meshBasicMaterial color={p.linerColor} side={BackSide} toneMapped={false} />
               </mesh>
             ) : null}
+            {/* Back-wall verticals: the outer cage above sits behind the opaque liner, so seen from the
+                window nothing marked the back wall. Drawn well inside the liner (a hair in front of it
+                z-fought: only some of the lines survived) so the translucent liquid
+                (TANK_LIQUID_OPACITY) shows them through the water. They stand on a floor arc, so each
+                ends on a ring like every other vertical in the vessel style. */}
+            {p.showCage && p.showLiner ? (
+              <>
+                <LineBag
+                  color={p.edgeColor}
+                  positions={cylinderMeridianSegmentsAt(backR, -bodyH / 2 + BACK_FLOOR_LIFT, bodyH / 2, backWallThetas(segs, keepStart, keepLen))}
+                />
+                <LineBag
+                  color={p.edgeColor}
+                  positions={cylinderArcSegments(backR, -bodyH / 2 + BACK_FLOOR_LIFT, keepStart, keepLen, segs)}
+                />
+              </>
+            ) : null}
             {/* Floor disc closes the open cylinder so the ground grid / a dish bottom never shows through the window. */}
             {p.showLiner ? (
               <mesh position={[0, -bodyH / 2 + 0.002, 0]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -503,6 +535,7 @@ export function Tank({
               <LiquidFill color={liquidTones.surface} opacity={p.liquidOpacity} />
             </mesh>
             <LineBag color={p.edgeColor} positions={waterline} />
+            {liquidBase ? <LineBag color={p.edgeColor} positions={liquidBase} /> : null}
           </>
         ) : null}
         {p.showBowl && flaskMeridians ? <LineBag color={p.edgeColor} positions={flaskMeridians} /> : null}

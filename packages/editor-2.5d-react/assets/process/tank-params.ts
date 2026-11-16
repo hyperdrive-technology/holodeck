@@ -47,7 +47,7 @@ export const MIXER_SHADE_MIN = HOLODECK_STYLE.finishes.flask.shadeMin;
 export const MIXER_LIQUID_OPACITY = 0.84;
 
 /** Tanks inherited liquidOpacity 0.69 so meridians printed through the fill vs r-holdbody solid U. Mixer stays 0.84. */
-export const TANK_LIQUID_OPACITY = 1; // was 0.88 with depthWrite off: back-wall lines and the liner printed through the cutout. Solid now.
+export const TANK_LIQUID_OPACITY = 0.65; // was 0.88 with depthWrite off: back-wall lines and the liner printed through the cutout. Solid now.
 
 /** Aliases of `HOLODECK_STYLE.edges.thresholds.tankWall` / `.mixerWall`. */
 export const TANK_WALL_THRESHOLD = HOLODECK_STYLE.edges.thresholds.tankWall;
@@ -983,6 +983,42 @@ function pushCylinderMeridian(pts: number[], radius: number, y0: number, y1: num
   const x = radius * Math.sin(theta);
   const z = radius * Math.cos(theta);
   pts.push(x, y0, z, x, y1, z);
+}
+
+/**
+ * Angles of the verticals on the back wall as seen through the front window:
+ * one per facet (`2π / segs`), centred on the middle of the kept arc (which is
+ * directly opposite the window) and spanning the window's own width. The
+ * every-Nth meridians of `cylinderThetasKept` are tuned for the outer cage and
+ * can all miss this arc (at step 2 none fell inside the window).
+ */
+export function backWallThetas(segs: number, keepStart: number, keepLen: number): number[] {
+  const n = Math.max(3, Math.round(segs));
+  const step = (Math.PI * 2) / n;
+  if (keepLen <= 1e-6) return [];
+  const mid = keepStart + keepLen / 2;
+  // Never wider than the wall that is left: a wide cutout leaves a narrow back wall.
+  const half = Math.min((Math.PI * 2 - keepLen) / 2, keepLen / 2);
+  const reach = Math.floor((half + 1e-6) / step);
+  return Array.from({ length: 2 * reach + 1 }, (_, i) => mid + (i - reach) * step);
+}
+
+/**
+ * Radius for the back-wall verticals. The liner is a `segs`-sided prism, so
+ * its flat faces sit at `cos(π / segs)` of its radius; a line placed by the
+ * corner radius is behind the liner wherever a face is nearer (at 5 or 7
+ * segments the centre line was hidden). Inset from the face distance instead.
+ * `ratio` keeps it clear of the liner so it does not z-fight (0.995 lost lines).
+ */
+export function backWallRadius(linerRadius: number, segs: number, ratio = 0.98): number {
+  return linerRadius * Math.cos(Math.PI / Math.max(3, Math.round(segs))) * ratio;
+}
+
+/** Vertical segments at the given cylinder angles (same convention as `cylinderMeridianSegments`). */
+export function cylinderMeridianSegmentsAt(radius: number, y0: number, y1: number, thetas: readonly number[]): Float32Array {
+  const pts: number[] = [];
+  for (const th of thetas) pushCylinderMeridian(pts, radius, y0, y1, th);
+  return new Float32Array(pts);
 }
 
 export function frustumMeridianSegments(

@@ -16,6 +16,10 @@ import {
   spherePhiFromCylinderTheta,
   tankLayout,
   tankWindow,
+  backWallThetas,
+  backWallRadius,
+  cylinderMeridianSegmentsAt,
+  TANK_LIQUID_OPACITY,
   vesselFootprint,
   vesselPorts,
   FLASK_MERIDIAN_STEP,
@@ -58,7 +62,65 @@ describe('cutout: outline geometry never enters the window arc', () => {
   it('inner mesh lines are off by default (they printed through the cutout)', () => {
     expect(DEFAULT_TANK_PARAMS.showBowl).toBe(false);
     expect(DEFAULT_TANK_PARAMS.showInnerCage).toBe(false);
-    expect(DEFAULT_TANK_PARAMS.liquidOpacity).toBe(1);
+    expect(DEFAULT_TANK_PARAMS.liquidOpacity).toBe(TANK_LIQUID_OPACITY);
+  });
+});
+
+describe('back-wall verticals seen through the window', () => {
+  const segs = DEFAULT_TANK_PARAMS.radialSegments;
+  const thetas = backWallThetas(segs, win.keepStart, win.keepLen);
+  const wrap = (t: number) => ((t % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+
+  it('are centred directly opposite the window and one facet apart', () => {
+    const opposite = wrap((TANK_WINDOW_YAW * Math.PI) / 180 + Math.PI);
+    expect(thetas.length % 2).toBe(1);
+    expect(wrap(thetas[(thetas.length - 1) / 2]!)).toBeCloseTo(opposite);
+    for (let i = 1; i < thetas.length; i++) expect(thetas[i]! - thetas[i - 1]!).toBeCloseTo((Math.PI * 2) / segs);
+  });
+
+  it('stay inside the kept wall and within the window width, so each is visible through the opening', () => {
+    expect(thetas.length).toBeGreaterThanOrEqual(3);
+    for (const th of thetas) {
+      expect(angleOnArc(th, win.keepStart, win.keepLen)).toBe(true);
+      const opposite = (TANK_WINDOW_YAW * Math.PI) / 180 + Math.PI;
+      expect(Math.abs(wrap(th - opposite + Math.PI) - Math.PI)).toBeLessThanOrEqual(win.windowRad / 2 + 1e-6);
+    }
+  });
+
+  it('stay on the wall that is left when the cutout is wide, and vanish with it', () => {
+    for (const deg of [91, 150, 210, 270, 330, 359, 360]) {
+      const w = tankWindow(deg, TANK_WINDOW_YAW);
+      const ths = backWallThetas(segs, w.keepStart, w.keepLen);
+      if (deg === 360) expect(ths).toEqual([]);
+      for (const th of ths) expect(angleOnArc(th, w.keepStart, w.keepLen), `${deg} deg cutout`).toBe(true);
+    }
+  });
+
+  it('sit inside the liner prism at every supported segment count (the faces are nearer than the corners)', () => {
+    const liner = 0.99;
+    for (const n of [3, 5, 7, 12, 15, 24]) {
+      const r = backWallRadius(liner, n);
+      // Distance from the axis to the liner's flat face along any direction is >= its apothem.
+      expect(r).toBeLessThan(liner * Math.cos(Math.PI / n));
+      expect(r).toBeGreaterThan(liner * Math.cos(Math.PI / n) * 0.95);
+      for (const th of backWallThetas(n, win.keepStart, win.keepLen)) {
+        // Polygon radius in direction th (vertices at multiples of 2π/n).
+        const local = ((th % ((Math.PI * 2) / n)) + (Math.PI * 2) / n) % ((Math.PI * 2) / n) - Math.PI / n;
+        const faceR = (liner * Math.cos(Math.PI / n)) / Math.cos(local);
+        expect(r).toBeLessThan(faceR);
+      }
+    }
+  });
+
+  it('build one vertical per angle at the given radius and height', () => {
+    const pts = cylinderMeridianSegmentsAt(0.7, 0.1, 1.2, thetas);
+    expect(pts.length).toBe(thetas.length * 6);
+    for (let i = 0; i < thetas.length; i++) {
+      const [x0, y0, z0, x1, y1, z1] = Array.from(pts.slice(i * 6, i * 6 + 6));
+      expect(Math.hypot(x0!, z0!)).toBeCloseTo(0.7);
+      expect([x1, z1]).toEqual([x0, z0]);
+      expect([y0, y1]).toEqual([expect.closeTo(0.1), expect.closeTo(1.2)]);
+    }
   });
 });
 
