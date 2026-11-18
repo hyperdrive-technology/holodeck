@@ -17,6 +17,9 @@ import {
   tankLayout,
   tankWindow,
   backWallThetas,
+  visibleBackThetas,
+  bowlProfile,
+  flaskLathePoints,
   backWallRadius,
   cylinderMeridianSegmentsAt,
   TANK_LIQUID_OPACITY,
@@ -202,5 +205,30 @@ describe('presets', () => {
     expect(TANK_PRESETS.kettle.radius).toBeCloseTo(0.65, 1);
     expect(TANK_PRESETS.hlt.height).toBe(3);
     expect(TANK_PRESETS.whirlpool.radius * 2).toBeGreaterThan(TANK_PRESETS.whirlpool.height);
+  });
+});
+
+describe('one set of lines: dome meridians, back-wall verticals and liquid-bowl meridians', () => {
+  const segs = DEFAULT_TANK_PARAMS.radialSegments;
+  const dome = cylinderThetasKept(segs, win.keepStart, win.keepLen, 2);
+
+  it('back-wall verticals are the dome angles seen through the window, nearest-first around the back', () => {
+    const back = visibleBackThetas(dome, win.keepStart, win.keepLen);
+    expect(back.length).toBeGreaterThanOrEqual(2);
+    for (const th of back) {
+      expect(dome).toContain(th);
+      expect(angleOnArc(th, win.keepStart, win.keepLen)).toBe(true);
+    }
+    expect(visibleBackThetas(dome, 0, 0)).toEqual([]);
+  });
+
+  it('the bowl profile runs from the pole up to the ring and converges on the axis', () => {
+    const profile = flaskLathePoints(0.7, 0.24, 0.24, 1.5, 8);
+    const bowl = bowlProfile(profile, 0.24);
+    expect(bowl[0]![0]).toBeCloseTo(0);
+    expect(bowl[0]![1]).toBeCloseTo(0);
+    expect(bowl[bowl.length - 1]![1]).toBeCloseTo(0.24);
+    expect(bowl[bowl.length - 1]![0]).toBeCloseTo(0.7);
+    for (const [, y] of bowl) expect(y).toBeLessThanOrEqual(0.24 + 1e-6);
   });
 });
