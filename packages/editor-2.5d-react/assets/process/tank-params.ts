@@ -1004,6 +1004,26 @@ export function backWallThetas(segs: number, keepStart: number, keepLen: number)
 }
 
 /**
+ * The subset of `thetas` (the dome's meridian angles) that is visible on the
+ * back wall through the window: within the window's half-width of the point
+ * opposite it, and never past the wall that is left. Sharing the dome's angles
+ * makes the dome meridians, the back-wall verticals and the liquid-bowl
+ * meridians one set of lines (Des, 2026-11-18).
+ */
+export function visibleBackThetas(thetas: readonly number[], keepStart: number, keepLen: number): number[] {
+  if (keepLen <= 1e-6) return [];
+  const mid = keepStart + keepLen / 2;
+  const half = Math.min((Math.PI * 2 - keepLen) / 2, keepLen / 2);
+  const off = (t: number) => Math.abs(wrapTau(t - mid + Math.PI) - Math.PI);
+  return thetas.filter((t) => off(t) <= half + 1e-6).sort((a, b) => wrapTau(a - mid + Math.PI) - wrapTau(b - mid + Math.PI));
+}
+
+/** The bowl part of a flask profile (pole up to `topY`), for meridians that converge on the pole. */
+export function bowlProfile(profile: Array<[number, number]>, topY: number): Array<[number, number]> {
+  return profile.filter(([, y]) => y <= topY + 1e-6);
+}
+
+/**
  * Radius for the back-wall verticals. The liner is a `segs`-sided prism, so
  * its flat faces sit at `cos(π / segs)` of its radius; a line placed by the
  * corner radius is behind the liner wherever a face is nearer (at 5 or 7

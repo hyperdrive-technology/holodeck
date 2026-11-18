@@ -11,7 +11,8 @@ import {
   spherePhiFromCylinderTheta,
   cylinderMeridianSegments,
   cylinderMeridianSegmentsAt,
-  backWallThetas,
+  visibleBackThetas,
+  bowlProfile,
   backWallRadius,
   cylinderArcSegments,
   cylinderThetasEven,
@@ -174,14 +175,21 @@ export function Tank({
     [inner, flask.bowlH, flask.originY, liquidTop, flaskStacks],
   );
   const waterline = useMemo(() => waterlineRing(inner, liquidTop, 48), [inner, liquidTop]);
-  // The bottom twin of the waterline (Des, 2026-11-16): the front half of the ring where the liquid's
-  // bowl meets its straight side, so the water reads as outlined top and bottom. Front half only: the
-  // back half lay on the back-wall floor arc and read as a double line. None while the fill is in the bowl.
-  const yaw = (p.windowYawDeg * Math.PI) / 180;
+  // The bottom of the water mirrors the dome (Des, 2026-11-18): the ring where the liquid's bowl meets
+  // its side, and meridians on the bowl at the dome's own angles converging on the pole, so the top,
+  // the back-wall verticals and the bottom are one set of lines. None while the fill is inside the bowl
+  // (the waterline is then the bowl's top ring).
   const liquidBase = useMemo(
-    () => (liquidTop > flask.originY + 1e-4 ? cylinderArcSegments(inner, flask.originY, yaw - Math.PI / 2, Math.PI, 24) : null),
-    [inner, flask.originY, liquidTop, yaw],
+    () => (liquidTop > flask.originY + 1e-4 ? waterlineRing(inner, flask.originY, 48) : null),
+    [inner, flask.originY, liquidTop],
   );
+  // Keyed on scalars: flaskProfile and domeThetas are fresh arrays every render, and LineBag rebuilds
+  // its geometry whenever `positions` changes identity.
+  const bowlMeridians = useMemo(() => {
+    const profile = flaskLathePoints(inner, flask.bowlH, flask.originY, liquidTop, flaskStacks);
+    const bowl = bowlProfile(profile, Math.min(flask.originY, liquidTop));
+    return bowl.length > 1 ? flaskMeridianSegments(bowl, cylinderThetasKept(segs, keepStart, keepLen, 2)) : null;
+  }, [inner, flask.bowlH, flask.originY, liquidTop, flaskStacks, segs, keepStart, keepLen]);
   const shoulderLathes = useMemo(() => {
     if (shoulder.shoulderH < 1e-4) {
       return { wall: [] as Vector2[], liner: [] as Vector2[] };
@@ -384,7 +392,7 @@ export function Tank({
               <>
                 <LineBag
                   color={p.edgeColor}
-                  positions={cylinderMeridianSegmentsAt(backR, -bodyH / 2 + BACK_FLOOR_LIFT, bodyH / 2, backWallThetas(segs, keepStart, keepLen))}
+                  positions={cylinderMeridianSegmentsAt(backR, -bodyH / 2 + BACK_FLOOR_LIFT, bodyH / 2, visibleBackThetas(domeThetas, keepStart, keepLen))}
                 />
                 <LineBag
                   color={p.edgeColor}
@@ -536,6 +544,7 @@ export function Tank({
             </mesh>
             <LineBag color={p.edgeColor} positions={waterline} />
             {liquidBase ? <LineBag color={p.edgeColor} positions={liquidBase} /> : null}
+            {bowlMeridians ? <LineBag color={p.edgeColor} positions={bowlMeridians} /> : null}
           </>
         ) : null}
         {p.showBowl && flaskMeridians ? <LineBag color={p.edgeColor} positions={flaskMeridians} /> : null}
